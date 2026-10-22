@@ -9,6 +9,7 @@ import { turnstileEnabled } from "./lib/turnstile.js";
 import { createMailer, graphConfigured, sendgridConfigured } from "./lib/email.js";
 import { runMigrations } from "./migrate.js";
 import { startWorkers } from "./workers.js";
+import { demoConfigured } from "./demo/config.js";
 
 async function main() {
   const pool = getPool();
@@ -24,6 +25,7 @@ async function main() {
     console.warn("[startup] TURNSTILE_SECRET not set: website sign-ups answer 503 (set SIGNUP_TURNSTILE_OPTIONAL=true to allow).");
   }
   if (!graphConfigured() && !sendgridConfigured()) console.warn("[startup] no email provider configured: emails are logged only.");
+  if (!demoConfigured()) console.warn("[startup] KS_DEMO_SERVER_URL / KS_DEMO_OPS_KEY (16+ chars) / KS_DEMO_PORTAL_URL not all set: the self-serve demo answers 503.");
 
   const port = Number(process.env.PORT ?? 8080);
   createApp(deps).listen(port, () => console.log(`[startup] KS-Ops listening on ${port}`));
