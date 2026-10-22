@@ -146,7 +146,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
   it("PATCH plan pushes to the licensee and records the change; failures retry", async () => {
     const ok = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "growth", extra_storage_blocks: 1 });
     expect(ok.body.plan_push).toEqual({ ok: true });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial" });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false } });
 
     remote.up = false;
     const fail = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "pro" });
@@ -159,7 +159,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     now = new Date(now.getTime() + 6 * 60_000);
     // Northwind (from the sign-up tests) is also waiting: its status changes are queued but it has no ops key yet.
     expect(await retryPendingPlanPushes(deps)).toEqual({ tried: 2, pushed: 1 });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial" });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false } });
     const changes = (await pool.query("SELECT status FROM plan_changes WHERE licensee_id = $1", [id])).rows;
     expect(changes.map((c) => c.status)).toEqual(["pushed", "pushed"]);
   });
@@ -484,5 +484,45 @@ describe("expiring unpaid website sign-ups", () => {
     expect(resume.status).toBe(409);
     expect((await request(app()).post("/api/public/signup").send({ ...validSignup(), company_code: "slow-payer" })).status).toBe(201);
     expect(await expirePendingSignups(deps)).toBe(0);
+  });
+});
+
+// KS_OPS_BANK_CONNECT_ADDON - bank connect is a hidden add-on Keystone staff switch on for one licensee.
+describe("bank_connect add-on", () => {
+  let id = "";
+
+  it("is off by default, never public, and staff switch it on and off with a push", async () => {
+    const res = await request(app()).post("/api/ops/licensees").set(staff()).send({
+      company_name: "Addon Test", legal_name: "Addon Test Inc.", company_code: "addon-test", contact_name: "Al",
+      contact_email: "al@addon.example", contact_phone: "403-555-0177", plan: "starter", seats: 1,
+      server_url: "https://ks-addon.azurewebsites.net", status: "active",
+    });
+    expect(res.status).toBe(201);
+    id = res.body.licensee.id;
+    expect(res.body.licensee.addons).toEqual({});
+
+    const plans = await request(app()).get("/api/public/plans");
+    expect(JSON.stringify(plans.body)).not.toMatch(/bank_connect|fraud_3|Flinks|Bank connect/i);
+
+    const on = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { bank_connect: true } });
+    expect(on.status).toBe(200);
+    expect(on.body.plan_push).toEqual({ ok: true });
+    expect(on.body.licensee.addons).toEqual({ bank_connect: true });
+    expect(remote.puts.at(-1)).toMatchObject({ url: "https://ks-addon.azurewebsites.net/api/plan", body: { plan: "starter", addons: { bank_connect: true } } });
+    const audit = (await pool.query("SELECT details FROM staff_audit WHERE licensee_id = $1 AND action = 'licensee.addons'", [id])).rows;
+    expect(audit.map((r) => r.details)).toEqual([{ bank_connect: { from: false, to: true } }]);
+
+    const same = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { bank_connect: true } });
+    expect(same.body.plan_push).toBeNull();
+
+    const bad = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { bank_connect: "yes" } });
+    expect(bad.status).toBe(400);
+    const unknown = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { sso: true } });
+    expect(unknown.status).toBe(400);
+
+    const off = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { bank_connect: false } });
+    expect(off.body.plan_push).toEqual({ ok: true });
+    expect(remote.puts.at(-1)!.body.addons).toEqual({ bank_connect: false });
+    expect((await pool.query("SELECT addons FROM licensees WHERE id = $1", [id])).rows[0].addons).toEqual({ bank_connect: false });
   });
 });

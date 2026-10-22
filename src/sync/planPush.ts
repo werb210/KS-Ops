@@ -5,7 +5,7 @@
 //
 // status is only sent once the licensee is live (trial, active, past_due, suspended, cancelled). KS-server: suspended =
 // the staff portal shows a notice and blocks new applications and calls but data stays readable; cancelled = read-only
-// export only. Servers that do not know the field ignore it.
+// export only. Servers that do not know the field ignore it. addons (KS_OPS_BANK_CONNECT_ADDON) is always sent in full.
 import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { getLicensee, opsKeyOf, type LicenseeRow } from "../licensees/repo.js";
@@ -16,12 +16,24 @@ export const RETRY_MINUTES = 5;
 export const SERVICE_STATUSES = ["trial", "active", "past_due", "suspended", "cancelled"] as const;
 export const isServiceStatus = (s: unknown): boolean => (SERVICE_STATUSES as readonly unknown[]).includes(s);
 
+/** KS_OPS_BANK_CONNECT_ADDON - the add-ons Keystone staff can switch on for one licensee. Not plan features: they are
+ *  never listed in /api/public/plans and the licensee cannot change them. */
+export const ADDONS = ["bank_connect"] as const;
+export type AddonKey = (typeof ADDONS)[number];
+
+/** Every known add-on as an explicit boolean (missing = off), so a push also switches one off. */
+export function addonsOf(l: Pick<LicenseeRow, "addons">): Record<AddonKey, boolean> {
+  const raw = l.addons && typeof l.addons === "object" ? l.addons : {};
+  return Object.fromEntries(ADDONS.map((k) => [k, raw[k] === true])) as Record<AddonKey, boolean>;
+}
+
 /** The body of PUT {server_url}/api/plan. */
-export function planPushBody(l: Pick<LicenseeRow, "plan" | "extra_storage_blocks" | "status">) {
+export function planPushBody(l: Pick<LicenseeRow, "plan" | "extra_storage_blocks" | "status"> & Partial<Pick<LicenseeRow, "addons">>) {
   return {
     plan: l.plan,
     extra_storage_blocks: l.extra_storage_blocks,
     ...(isServiceStatus(l.status) ? { status: l.status } : {}),
+    addons: addonsOf(l), // KS_OPS_BANK_CONNECT_ADDON - servers that do not know the field ignore it
   };
 }
 

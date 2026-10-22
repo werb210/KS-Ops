@@ -11,7 +11,7 @@ import {
 } from "../licensees/repo.js";
 import { crossFieldErrors, staffCreateSchema, staffPatchSchema, STATUSES } from "../licensees/validation.js";
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
-import { isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
+import { addonsOf, isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 
 export const OPS_KEY_MESSAGE =
@@ -181,8 +181,12 @@ export function opsLicenseesRouter(deps: Deps): Router {
       if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
       const v = parsed.data as Record<string, unknown>;
       const changed = PATCH_COLUMNS.filter((c) => v[c] !== undefined && v[c] !== (l as Record<string, unknown>)[c]);
-      if (!changed.length) return res.json({ licensee: staffView(l), plan_push: null, billing_sync: null });
-      const next = { ...l, ...Object.fromEntries(changed.map((c) => [c, v[c]])) } as LicenseeRow;
+      // KS_OPS_BANK_CONNECT_ADDON - add-ons are merged into the stored set; only real changes count.
+      const addonsBefore = addonsOf(l);
+      const addonsAfter = { ...addonsBefore, ...((v.addons as Record<string, boolean> | undefined) ?? {}) };
+      const addonsChanged = (Object.keys(addonsAfter) as Array<keyof typeof addonsAfter>).filter((k) => addonsAfter[k] !== addonsBefore[k]);
+      if (!changed.length && !addonsChanged.length) return res.json({ licensee: staffView(l), plan_push: null, billing_sync: null });
+      const next = { ...l, ...Object.fromEntries(changed.map((c) => [c, v[c]])), addons: addonsAfter } as LicenseeRow;
       if (next.seats < MIN_SEATS[next.plan]) {
         return res.status(400).json({ errors: { seats: `The ${PLAN_NAMES[next.plan]} plan needs at least ${MIN_SEATS[next.plan]} seats.` } });
       }
@@ -193,22 +197,32 @@ export function opsLicenseesRouter(deps: Deps): Router {
         return res.status(409).json({ errors: { company_code: "taken" } });
       }
       try {
-        await deps.db.query(
-          `UPDATE licensees SET ${changed.map((c, i) => `${c} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
-          [l.id, ...changed.map((c) => v[c])],
-        );
+        if (changed.length) {
+          await deps.db.query(
+            `UPDATE licensees SET ${changed.map((c, i) => `${c} = $${i + 2}`).join(", ")}, updated_at = now() WHERE id = $1`,
+            [l.id, ...changed.map((c) => v[c])],
+          );
+        }
+        if (addonsChanged.length) {
+          await deps.db.query("UPDATE licensees SET addons = $2::jsonb, updated_at = now() WHERE id = $1", [l.id, JSON.stringify(addonsAfter)]);
+        }
       } catch (err) {
         if (isUniqueViolation(err)) return res.status(409).json({ errors: { company_code: "taken" } });
         throw err;
       }
       const actor = actorOf(req);
-      await audit(deps.db, actor, "licensee.update", l.id, Object.fromEntries(changed.map((c) => [c, { from: (l as any)[c], to: v[c] }])));
+      if (changed.length) {
+        await audit(deps.db, actor, "licensee.update", l.id, Object.fromEntries(changed.map((c) => [c, { from: (l as any)[c], to: v[c] }])));
+      }
+      if (addonsChanged.length) {
+        await audit(deps.db, actor, "licensee.addons", l.id, Object.fromEntries(addonsChanged.map((k) => [k, { from: addonsBefore[k], to: addonsAfter[k] }])));
+      }
 
       let planPush: { ok: boolean; error?: string } | null = null;
       // Live status changes (suspended, cancelled, or back to trial/active/past_due) go to the licensee's server with
       // the plan, recorded and retried the same way.
       const statusPush = changed.includes("status") && isServiceStatus(next.status);
-      if (changed.includes("plan") || changed.includes("extra_storage_blocks") || statusPush) {
+      if (changed.includes("plan") || changed.includes("extra_storage_blocks") || statusPush || addonsChanged.length) {
         await recordPlanChange(
           deps,
           l,
