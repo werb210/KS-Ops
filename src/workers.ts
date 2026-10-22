@@ -8,6 +8,7 @@ import { periodOf, previousPeriod } from "./lib/http.js";
 import { audit } from "./licensees/repo.js";
 import { retryPendingPlanPushes } from "./sync/planPush.js";
 import { isFinal, pullUsageReport } from "./sync/usage.js";
+import { runDemoJobs } from "./demo/jobs.js";
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -149,7 +150,22 @@ export function startWorkers(deps: Deps): () => void {
       daily = false;
     }
   };
+  let demoBusy = false;
+  const demo = async () => {
+    if (demoBusy) return;
+    demoBusy = true;
+    try {
+      const r = await runDemoJobs(deps);
+      if (r.mails || r.unfinished || r.wiped || r.deleted) console.log("[workers] demo jobs", JSON.stringify(r));
+    } catch (err) {
+      console.error("[workers] demo jobs failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      demoBusy = false;
+    }
+  };
   const timers = [
+    setInterval(demo, 10 * 60_000),
+    setTimeout(demo, 60_000),
     setInterval(push, 5 * 60_000),
     setInterval(runDaily, 60 * 60_000),
     setTimeout(runDaily, 2 * 60_000),

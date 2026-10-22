@@ -12,13 +12,14 @@ import { opsLicenseesRouter } from "./routes/opsLicensees.js";
 import { opsSupportRouter } from "./routes/opsSupport.js";
 import { publicRouter } from "./routes/public.js";
 import { stripeWebhookRouter } from "./routes/stripeWebhook.js";
+import { demoOpsRouter, demoPublicRouter } from "./routes/demo.js";
 
-/** CORS for a list of allowed origins read from an env var at request time. */
-function corsFor(envName: string) {
+/** CORS for a list of allowed origins read from env vars at request time. */
+function corsFor(...envNames: string[]) {
   return cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      cb(null, originList(envName).includes(origin.replace(/\/+$/, "")));
+      cb(null, envNames.flatMap((n) => originList(n)).includes(origin.replace(/\/+$/, "")));
     },
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -45,8 +46,13 @@ export function createApp(deps: Deps) {
   // Raw body for the Stripe signature: before the JSON parser.
   app.use("/api/ops/stripe/webhook", stripeWebhookRouter(deps));
 
+  // The demo server's completion carries the sample lender package (a small PDF, base64).
+  app.use("/api/demo/sessions", express.json({ limit: "16mb" }));
   app.use(express.json({ limit: "1mb" }));
 
+  // The self-serve demo: sign-up from the website, the magic link from the demo portal, progress from the demo server.
+  app.use("/api/public/demo", corsFor("PUBLIC_SITE_URL", "KS_DEMO_PORTAL_URL"), demoPublicRouter(deps));
+  app.use("/api/demo", demoOpsRouter(deps));
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps));
   app.use("/api/directory", cors({ origin: "*", methods: ["GET"] }), directoryRouter(deps));
   app.use("/api/licensees", licenseeApiRouter(deps));

@@ -1,7 +1,9 @@
 // Email through Microsoft Graph when configured, else SendGrid, else the message is logged (KS-server's approach).
 import { env } from "../config.js";
 
-export type Mail = { to: string[]; subject: string; text: string; html?: string };
+/** An attached file (base64). Used for the demo's lender package. */
+export type MailAttachment = { filename: string; contentType: string; base64: string };
+export type Mail = { to: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[] };
 export type Mailer = (mail: Mail) => Promise<{ ok: boolean; error?: string }>;
 
 const esc = (s: unknown) =>
@@ -61,6 +63,16 @@ export function createMailer(fetchImpl: typeof fetch = fetch): Mailer {
               subject: mail.subject,
               body: { contentType: "HTML", content: html },
               toRecipients: to.map((address) => ({ emailAddress: { address } })),
+              ...(mail.attachments?.length
+                ? {
+                    attachments: mail.attachments.map((a) => ({
+                      "@odata.type": "#microsoft.graph.fileAttachment",
+                      name: a.filename,
+                      contentType: a.contentType,
+                      contentBytes: a.base64,
+                    })),
+                  }
+                : {}),
             },
             saveToSentItems: true,
           }),
@@ -81,6 +93,9 @@ export function createMailer(fetchImpl: typeof fetch = fetch): Mailer {
               { type: "text/html", value: html },
             ],
             tracking_settings: { click_tracking: { enable: false, enable_text: false }, open_tracking: { enable: false } },
+            ...(mail.attachments?.length
+              ? { attachments: mail.attachments.map((a) => ({ content: a.base64, filename: a.filename, type: a.contentType, disposition: "attachment" })) }
+              : {}),
           }),
           signal: AbortSignal.timeout(30_000),
         });
