@@ -23,7 +23,7 @@ async function makeLicensee(code: string): Promise<{ id: string; key: string }> 
   return { id: res.body.licensee.id, key: res.body.ops_key };
 }
 
-const call = (l: { id: string; key: string }, path: string, body: unknown) =>
+const call = (l: { id: string; key: string }, path: string, body: object) =>
   request(app()).post(`/api/licensees/${l.id}/watchlist/${path}`).set("X-KS-Ops-Key", l.key).send(body);
 
 beforeAll(async () => {
