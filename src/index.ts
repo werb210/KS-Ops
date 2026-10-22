@@ -1,10 +1,11 @@
 import { createApp } from "./app.js";
-import { workersEnabled } from "./config.js";
+import { isProduction, opsAdminEmails, signupTurnstileOptional, workersEnabled } from "./config.js";
 import { getPool } from "./db.js";
 import type { Deps } from "./deps.js";
 import { realStripe } from "./billing/stripeClient.js";
 import { jwtSecret } from "./auth/staff.js";
 import { encryptionKey } from "./lib/crypto.js";
+import { turnstileEnabled } from "./lib/turnstile.js";
 import { createMailer, graphConfigured, sendgridConfigured } from "./lib/email.js";
 import { runMigrations } from "./migrate.js";
 import { startWorkers } from "./workers.js";
@@ -18,6 +19,10 @@ async function main() {
   if (!jwtSecret()) console.warn("[startup] OPS_JWT_SECRET missing or shorter than 32 characters: staff sign-in is off.");
   if (!encryptionKey()) console.warn("[startup] OPS_ENCRYPTION_KEY missing or not 32 bytes: ops keys cannot be made or used.");
   if (!realStripe()) console.warn("[startup] STRIPE_SECRET_KEY not set: billing endpoints answer 503.");
+  if (!opsAdminEmails().length) console.warn("[startup] OPS_ADMIN_EMAILS not set: every BF-Server Admin can open Keystone operations.");
+  if (isProduction() && !turnstileEnabled() && !signupTurnstileOptional()) {
+    console.warn("[startup] TURNSTILE_SECRET not set: website sign-ups answer 503 (set SIGNUP_TURNSTILE_OPTIONAL=true to allow).");
+  }
   if (!graphConfigured() && !sendgridConfigured()) console.warn("[startup] no email provider configured: emails are logged only.");
 
   const port = Number(process.env.PORT ?? 8080);

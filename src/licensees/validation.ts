@@ -1,5 +1,6 @@
 // Input rules for licensees: the public sign-up form, staff create and staff edit. Messages are shown to people.
 import { z } from "zod";
+import { allowedServerHostSuffixes } from "../config.js";
 import { BILLING_INTERVALS, MIN_SEATS, PLANS, PLAN_NAMES, SUPPORT_LEVELS } from "../pricing.js";
 
 export const STATUSES = ["pending_payment", "provisioning", "trial", "active", "past_due", "suspended", "cancelled"] as const;
@@ -87,6 +88,61 @@ export const urlSchema = (label: string) =>
           return false;
         }
       }, `${label} must be a web address, for example https://example.com.`)
+      .transform((s) => s.replace(/\/+$/, ""))
+      .optional(),
+  );
+
+/** True when the host matches one of the suffixes (".azurewebsites.net" or "azurewebsites.net"), or the list is ["*"]. */
+export function hostAllowed(host: string, suffixes: string[]): boolean {
+  if (suffixes.includes("*")) return true;
+  const h = host.toLowerCase().replace(/\.$/, "");
+  return suffixes.some((s) => {
+    const bare = s.replace(/^\./, "");
+    return bare !== "" && (h === bare ? !s.startsWith(".") : h.endsWith(`.${bare}`));
+  });
+}
+
+/**
+ * A licensee app address (server_url, client_url, portal_url): like urlSchema, but https only. With serverHosts the
+ * host must also match OPS_ALLOWED_SERVER_HOST_SUFFIXES (default ".azurewebsites.net,.azurestaticapps.net"; "*" allows
+ * any host), read when the request is checked.
+ */
+export const appUrlSchema = (label: string, opts: { serverHosts?: boolean } = {}) =>
+  z.preprocess(
+    (v) => {
+      if (v === null || v === undefined || String(v).trim() === "") return undefined;
+      const s = String(v).trim();
+      return /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : `https://${s}`;
+    },
+    z
+      .string()
+      .max(500, `${label} must be 500 characters or fewer.`)
+      .superRefine((s, ctx) => {
+        let u: URL;
+        try {
+          u = new URL(s);
+        } catch {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must be a web address, for example https://example.com.` });
+          return;
+        }
+        if (u.protocol !== "https:") {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must start with https://.` });
+          return;
+        }
+        if (!u.hostname.includes(".") || u.username || u.password) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must be a web address, for example https://example.com.` });
+          return;
+        }
+        if (opts.serverHosts) {
+          const suffixes = allowedServerHostSuffixes();
+          if (!hostAllowed(u.hostname, suffixes)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `${label} must be on ${suffixes.join(" or ")} (OPS_ALLOWED_SERVER_HOST_SUFFIXES).`,
+            });
+          }
+        }
+      })
       .transform((s) => s.replace(/\/+$/, ""))
       .optional(),
   );
@@ -214,9 +270,9 @@ export const staffCreateSchema = z
     province_state: z.preprocess((v) => (v ? String(v).trim().toUpperCase() : undefined), z.string().optional()),
     mailing_address: optionalText("Mailing address", 500),
     website: urlSchema("Website"),
-    server_url: urlSchema("Server address"),
-    client_url: urlSchema("Client app address"),
-    portal_url: urlSchema("Staff portal address"),
+    server_url: appUrlSchema("Server address", { serverHosts: true }),
+    client_url: appUrlSchema("Client app address"),
+    portal_url: appUrlSchema("Staff portal address"),
     logo_url: urlSchema("Logo address"),
     primary_color: colorSchema,
     assistant_name: optionalText("Assistant name", 40),
@@ -235,6 +291,8 @@ export type StaffCreateInput = z.infer<typeof staffCreateSchema>;
 
 const nullableUrl = (label: string) =>
   z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), urlSchema(label)]));
+const nullableAppUrl = (label: string, opts: { serverHosts?: boolean } = {}) =>
+  z.preprocess((v) => (v === "" ? null : v), appUrlSchema(label, opts).nullable());
 
 /** PATCH /api/ops/licensees/:id - every field optional; null clears the optional ones. */
 export const staffPatchSchema = z
@@ -260,9 +318,9 @@ export const staffPatchSchema = z
       .int("Extra storage must be a whole number of 50 GB blocks.")
       .min(0, "Extra storage cannot be negative.")
       .max(1000, "Extra storage is limited to 1,000 blocks."),
-    server_url: nullableUrl("Server address"),
-    client_url: nullableUrl("Client app address"),
-    portal_url: nullableUrl("Staff portal address"),
+    server_url: nullableAppUrl("Server address", { serverHosts: true }),
+    client_url: nullableAppUrl("Client app address"),
+    portal_url: nullableAppUrl("Staff portal address"),
     logo_url: nullableUrl("Logo address"),
     primary_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
     assistant_name: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(40).nullable()),

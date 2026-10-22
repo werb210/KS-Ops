@@ -6,7 +6,8 @@ import type { Deps } from "../deps.js";
 import { requireLicenseeKey } from "../auth/licenseeKey.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody } from "../lib/http.js";
-import { storeUsageReport, usageReportSchema } from "../sync/usage.js";
+import { dataPurgeOn, markPurged } from "../licensees/repo.js";
+import { futureGeneratedAt, storeUsageReport, usageReportSchema } from "../sync/usage.js";
 
 const requestSchema = z
   .object({
@@ -44,8 +45,27 @@ export function licenseeApiRouter(deps: Deps): Router {
       if (parsed.data.licensee_id && parsed.data.licensee_id !== req.licensee!.id) {
         return res.status(400).json({ error: "licensee_mismatch" });
       }
+      if (futureGeneratedAt(parsed.data, deps.now())) {
+        return res.status(400).json({
+          error: "invalid_report",
+          errors: { generated_at: "generated_at is in the future. Check the server's clock." },
+        });
+      }
       const r = await storeUsageReport(deps.db, req.licensee!.id, parsed.data, "push");
       return res.status(200).json({ ok: true, stored: r.stored, period: r.period, ...(r.stored ? {} : { reason: "newer_report_already_stored" }) });
+    }),
+  );
+
+  // KS-server reports that a cancelled licensee's data was deleted and purged (after the 180-day hold).
+  router.post(
+    "/:id/purged",
+    auth,
+    h(async (req, res) => {
+      const l = req.licensee!;
+      const r = await markPurged(deps.db, l.id, deps.now(), `ks-server:${l.company_code}`);
+      if (r === "not_cancelled") return res.status(409).json({ error: r });
+      if (r === "not_due") return res.status(409).json({ error: r, data_purge_on: dataPurgeOn(l) });
+      return res.json({ ok: true, result: r });
     }),
   );
 

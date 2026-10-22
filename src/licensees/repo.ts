@@ -31,6 +31,14 @@ export type LicenseeRow = {
   ops_key_encrypted: string | null;
   ops_key_rotated_at: Date | null;
   signup_token_hash: string | null;
+  /** The signup token, encrypted with OPS_ENCRYPTION_KEY, so emails can link back to the sign-up. */
+  signup_token_encrypted?: string | null;
+  /** The company code a cancelled, never-paid sign-up gave up (its company_code was replaced). */
+  released_company_code?: string | null;
+  /** When the licensee became cancelled (set by a database trigger); its data is purged DATA_RETENTION_DAYS later. */
+  cancelled_at?: Date | null;
+  /** When the licensee's server reported (or staff marked) the data purge done. */
+  purged_at?: Date | null;
   source: string;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
@@ -65,17 +73,47 @@ export function mrrOf(l: Pick<LicenseeRow, "plan" | "billing_interval" | "seats"
   return monthlyCharge(l).recurring_cents / 100;
 }
 
+/** A cancelled licensee can download its data for this long; then KS-server deletes and purges it. */
+export const DATA_RETENTION_DAYS = 180;
+
+/** The day a cancelled licensee's data is purged (cancelled_at + 180 days), as YYYY-MM-DD; null when not cancelled. */
+export function dataPurgeOn(l: Pick<LicenseeRow, "status" | "cancelled_at">): string | null {
+  if (l.status !== "cancelled" || !l.cancelled_at) return null;
+  return new Date(new Date(l.cancelled_at).getTime() + DATA_RETENTION_DAYS * 86_400_000).toISOString().slice(0, 10);
+}
+
+export type PurgeResult = "purged" | "already_purged" | "not_cancelled" | "not_due";
+
+/**
+ * Marks a cancelled licensee's data as purged (its status stays cancelled). Only on or after the purge date; the
+ * licensee's server reports it, or staff mark it by hand.
+ */
+export async function markPurged(db: Q, id: string, now: Date, by: string): Promise<PurgeResult> {
+  const l = await getLicensee(db, id);
+  if (!l || l.status !== "cancelled") return "not_cancelled";
+  if (l.purged_at) return "already_purged";
+  const on = dataPurgeOn(l);
+  if (!on || now.toISOString().slice(0, 10) < on) return "not_due";
+  const r = await db.query(
+    "UPDATE licensees SET purged_at = $2, updated_at = now() WHERE id = $1 AND status = 'cancelled' AND purged_at IS NULL RETURNING id",
+    [id, now],
+  );
+  if (!(r.rowCount ?? r.rows.length)) return "already_purged";
+  await audit(db, by, "licensee.data_purged", id, { data_purge_on: on });
+  return "purged";
+}
+
 /** The licensee as staff see it: no hashes or encrypted secrets. */
 export function staffView(l: LicenseeRow) {
-  const { ops_key_hash, ops_key_encrypted, signup_token_hash, ...rest } = l;
-  return { ...rest, has_ops_key: Boolean(ops_key_hash && ops_key_encrypted), mrr: mrrOf(l) };
+  const { ops_key_hash, ops_key_encrypted, signup_token_hash, signup_token_encrypted, ...rest } = l;
+  return { ...rest, has_ops_key: Boolean(ops_key_hash && ops_key_encrypted), mrr: mrrOf(l), data_purge_on: dataPurgeOn(l) };
 }
 
 export const INSERTABLE = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
-  "signup_token_hash", "source", "accepted_terms_at", "accepted_privacy_at",
+  "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at",
 ] as const;
 
 export async function insertLicensee(db: Q, fields: Partial<Record<(typeof INSERTABLE)[number], unknown>>): Promise<LicenseeRow> {
@@ -122,8 +160,31 @@ export function opsKeyOf(l: Pick<LicenseeRow, "ops_key_encrypted" | "id">): stri
 /** A new signup token: stored as a hash, the plain value goes in the success/cancel links and status checks. */
 export async function newSignupToken(db: Q, id: string): Promise<string> {
   const token = newSecret(24);
-  await db.query("UPDATE licensees SET signup_token_hash = $2, updated_at = now() WHERE id = $1", [id, sha256Hex(token)]);
+  const c = signupTokenColumns(token);
+  await db.query(
+    "UPDATE licensees SET signup_token_hash = $2, signup_token_encrypted = $3, updated_at = now() WHERE id = $1",
+    [id, c.signup_token_hash, c.signup_token_encrypted],
+  );
   return token;
+}
+
+/** Columns for a signup token: always its hash, and an encrypted copy when OPS_ENCRYPTION_KEY is set. */
+export function signupTokenColumns(token: string): { signup_token_hash: string; signup_token_encrypted: string | null } {
+  const key = encryptionKey();
+  return { signup_token_hash: sha256Hex(token), signup_token_encrypted: key ? encryptSecret(token, key) : null };
+}
+
+/** The plain signup token when an encrypted copy is stored; null otherwise. */
+export function signupTokenOf(l: Pick<LicenseeRow, "id" | "signup_token_encrypted">): string | null {
+  if (!l.signup_token_encrypted) return null;
+  const key = encryptionKey();
+  if (!key) return null;
+  try {
+    return decryptSecret(l.signup_token_encrypted, key);
+  } catch (err) {
+    console.error(`[signup] cannot decrypt the signup token for licensee ${l.id}: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
 }
 
 export async function audit(db: Q, actor: string, action: string, licenseeId: string | null, details: unknown): Promise<void> {

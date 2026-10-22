@@ -6,7 +6,7 @@ import type { Deps } from "../../src/deps.js";
 import { billOverage } from "../../src/billing/billing.js";
 import { runMigrations } from "../../src/migrate.js";
 import { retryPendingPlanPushes } from "../../src/sync/planPush.js";
-import { claimDailyJob, pullUsageForAll, sendPastDueReminders } from "../../src/workers.js";
+import { claimDailyJob, expiredCode, expirePendingSignups, pullUsageForAll, sendPastDueReminders } from "../../src/workers.js";
 import { fakeMailer, fakeStripe, jsonResponse, staffToken, validSignup } from "../helpers.js";
 import { freshPool, seedPrices } from "./db.js";
 
@@ -75,13 +75,18 @@ describe("public sign-up to directory", () => {
 
   it("does not resolve in the directory until live with a server", async () => {
     expect((await request(app()).get("/api/directory/northwind")).status).toBe(404);
-    const patch = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ status: "active", server_url: "https://ks-northwind.example" });
+    const patch = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ status: "active", server_url: "https://ks-northwind.azurewebsites.net" });
     expect(patch.status).toBe(200);
     const res = await request(app()).get("/api/directory/northwind");
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ company_code: "northwind", server_url: "https://ks-northwind.example" });
+    expect(res.body).toMatchObject({ company_code: "northwind", server_url: "https://ks-northwind.azurewebsites.net" });
     await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ status: "suspended" });
     expect((await request(app()).get("/api/directory/northwind")).status).toBe(404);
+    // Both live status changes were recorded for the push to the licensee's server.
+    const changes = (await pool.query("SELECT from_status, to_status FROM plan_changes WHERE licensee_id = $1 ORDER BY created_at", [id])).rows;
+    expect(changes).toEqual([{ from_status: "pending_payment", to_status: "active" }, { from_status: "active", to_status: "suspended" }]);
+    const row = (await pool.query("SELECT plan_sync_status, plan_sync_error FROM licensees WHERE id = $1", [id])).rows[0];
+    expect(row).toEqual({ plan_sync_status: "pending_sync", plan_sync_error: "no_ops_key" });
   });
 });
 
@@ -94,9 +99,10 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
       company_name: "Keystone Demo", legal_name: "Keystone Demo Inc.", company_code: "keystone-demo",
       contact_name: "Dee Demo", contact_email: "dee@demo.example", contact_phone: "403-555-0123",
       plan: "starter", billing: "monthly", support_level: "email", seats: 2, country: "CA",
-      server_url: "https://ks-demo.example", status: "trial",
+      server_url: "https://ks-demo.azurewebsites.net", status: "trial",
     });
     expect(res.status).toBe(201);
+    expect(res.headers["cache-control"]).toBe("no-store");
     id = res.body.licensee.id;
     opsKey = res.body.ops_key;
     expect(opsKey).toMatch(/^ksops_/);
@@ -117,7 +123,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
   it("the retry worker pushes the first plan once the server answers", async () => {
     const r = await retryPendingPlanPushes(deps);
     expect(r.pushed).toBeGreaterThanOrEqual(1);
-    expect(remote.puts.at(-1)).toMatchObject({ url: "https://ks-demo.example/api/plan", key: opsKey, body: { plan: "starter", extra_storage_blocks: 0 } });
+    expect(remote.puts.at(-1)).toMatchObject({ url: "https://ks-demo.azurewebsites.net/api/plan", key: opsKey, body: { plan: "starter", extra_storage_blocks: 0, status: "trial" } });
   });
 
   it("stores usage reports idempotently, latest wins", async () => {
@@ -140,7 +146,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
   it("PATCH plan pushes to the licensee and records the change; failures retry", async () => {
     const ok = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "growth", extra_storage_blocks: 1 });
     expect(ok.body.plan_push).toEqual({ ok: true });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1 });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial" });
 
     remote.up = false;
     const fail = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "pro" });
@@ -151,8 +157,9 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     expect((await retryPendingPlanPushes(deps)).tried).toBe(0);
     remote.up = true;
     now = new Date(now.getTime() + 6 * 60_000);
-    expect(await retryPendingPlanPushes(deps)).toEqual({ tried: 1, pushed: 1 });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1 });
+    // Northwind (from the sign-up tests) is also waiting: its status changes are queued but it has no ops key yet.
+    expect(await retryPendingPlanPushes(deps)).toEqual({ tried: 2, pushed: 1 });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial" });
     const changes = (await pool.query("SELECT status FROM plan_changes WHERE licensee_id = $1", [id])).rows;
     expect(changes.map((c) => c.status)).toEqual(["pushed", "pushed"]);
   });
@@ -201,9 +208,12 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
 
     const preview = await request(app()).post(`/api/ops/licensees/${id}/invoices/preview?period=2026-09`).set(staff());
     expect(preview.status).toBe(200);
-    // pro, monthly, 2 seats, 1 storage block, 80 extra minutes.
-    expect(preview.body).toMatchObject({ recurring: 2 * 229 + 10, overage: 3.2, total: 2 * 229 + 10 + 3.2, currency: "CAD" });
-    expect(preview.body.usage_report.final).toBe(true);
+    // pro, monthly, 2 seats, 1 storage block. The server reported 80 extra minutes, but KS-Ops works overage out from
+    // its own plan and seats: 180 minutes is well inside Pro's 3,000 pooled minutes.
+    expect(preview.body).toMatchObject({ recurring: 2 * 229 + 10, overage: 0, total: 2 * 229 + 10, currency: "CAD" });
+    expect(preview.body.usage_report).toMatchObject({
+      final: true, allowance: { minutes: 3000, texts: 3000 }, overage: { minutes: 0, texts: 0 }, reported_overage: { minutes: 80, texts: 0 },
+    });
   });
 
   it("lists, shows detail, adds notes and totals the dashboard", async () => {
@@ -293,7 +303,12 @@ describe("Stripe billing", () => {
     ]);
   });
 
-  it("staff can open a Checkout link", async () => {
+  it("staff can open a Checkout link only once the old subscription has ended", async () => {
+    (stripe!.subscriptions.retrieve as any).mockResolvedValueOnce({ id: "sub_acme", status: "active" });
+    const live = await request(app()).post(`/api/ops/licensees/${id}/billing/checkout`).set(staff());
+    expect(live.status).toBe(409);
+    expect(live.body.error).toBe("subscription_exists");
+    (stripe!.subscriptions.retrieve as any).mockResolvedValueOnce({ id: "sub_acme", status: "canceled" });
     const res = await request(app()).post(`/api/ops/licensees/${id}/billing/checkout`).set(staff());
     expect(res.status).toBe(200);
     expect(res.body.url).toMatch(/^https:\/\/checkout\.stripe\.test/);
@@ -303,28 +318,171 @@ describe("Stripe billing", () => {
     expect(params.line_items.some((i: any) => i.price === "price_onboarding:pro")).toBe(false);
   });
 
-  it("bills overage for finished months once", async () => {
+  it("bills overage for finished months once, from KS-Ops's own plan and seats", async () => {
+    // acme: pro, 12 seats -> 18,000 pooled minutes and texts. The reported overage (1 and 1) is ignored.
     await pool.query(
       `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, overage_minutes, overage_texts, report)
-       VALUES ($1, '2026-09', '2026-10-01T00:05:00Z', 3100, 3050, 100, 50, '{}'),
+       VALUES ($1, '2026-09', '2026-10-01T00:05:00Z', 18100, 18050, 1, 1, '{}'),
               ($1, '2026-10', $2, 10, 10, 5, 0, '{}')`,
       [id, now],
     );
     const first = await billOverage(deps);
     expect(first.billed).toBe(1);
     const items = (stripe!.invoiceItems.create as any).mock.calls.filter((c: any) => c[0].customer === "cus_acme");
-    expect(items.map((c: any) => [c[0].amount, c[1].idempotencyKey])).toEqual([
-      [400, `ks-overage-${id}-2026-09-minutes`],
-      [150, `ks-overage-${id}-2026-09-texts`],
+    expect(items.map((c: any) => [c[0].amount, c[0].metadata.overage, c[1].idempotencyKey])).toEqual([
+      [400, "minutes", `ks-overage-${id}-2026-09-minutes`],
+      [150, "texts", `ks-overage-${id}-2026-09-texts`],
     ]);
     const again = await billOverage(deps);
     expect(again.billed).toBe(0);
     const row = (await pool.query("SELECT overage_billed_at, overage_invoice_id FROM usage_reports WHERE licensee_id = $1 AND period = '2026-09'", [id])).rows[0];
     expect(row.overage_invoice_id).toMatch(/^in_/);
+    const progress = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-09'", [id])).rows[0];
+    expect(progress).toMatchObject({ status: "invoiced", minutes: 100, texts: 50, minutes_amount: 400, texts_amount: 150, invoice_id: row.overage_invoice_id });
+    expect(progress.minutes_invoice_item_id).toMatch(/^ii_/);
+    expect(progress.details).toMatchObject({ plan: "pro", seats: 12, allowance: { minutes: 18000, texts: 18000 } });
+  });
+
+  it("a rerun days later (past Stripe's 24-hour key window) finds what was made instead of charging again", async () => {
+    // A crash after the minutes item was created in Stripe, before anything was saved.
+    await pool.query(
+      `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, report)
+       VALUES ($1, '2026-08', '2026-09-01T00:05:00Z', 18200, 18000, '{}')`,
+      [id],
+    );
+    (stripe!.invoiceItems.list as any).mockResolvedValueOnce({
+      data: [{ id: "ii_made_earlier", invoice: null, metadata: { licensee_id: id, period: "2026-08", overage: "minutes" } }],
+    });
+    const before = (stripe!.invoiceItems.create as any).mock.calls.length;
+    expect((await billOverage(deps)).billed).toBe(1);
+    expect((stripe!.invoiceItems.create as any).mock.calls.length).toBe(before);
+    const progress = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-08'", [id])).rows[0];
+    expect(progress).toMatchObject({ status: "invoiced", minutes: 200, texts: 0, minutes_invoice_item_id: "ii_made_earlier" });
+
+    // Items saved but the invoice step failed; the invoice turns out to exist already in Stripe.
+    await pool.query(
+      `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, report)
+       VALUES ($1, '2026-07', '2026-08-01T00:05:00Z', 18010, 18000, '{}')`,
+      [id],
+    );
+    (stripe!.invoices.create as any).mockRejectedValueOnce(new Error("network"));
+    expect((await billOverage(deps)).billed).toBe(0);
+    let p7 = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-07'", [id])).rows[0];
+    expect(p7).toMatchObject({ status: "items_created", attempts: 1, last_error: "network" });
+    const itemCalls = (stripe!.invoiceItems.create as any).mock.calls.length;
+    (stripe!.invoices.list as any).mockResolvedValueOnce({ data: [{ id: "in_found", metadata: { licensee_id: id, period: "2026-07", ks_overage: "1" } }] });
+    const invoiceCalls = (stripe!.invoices.create as any).mock.calls.length;
+    expect((await billOverage(deps)).billed).toBe(1);
+    expect((stripe!.invoiceItems.create as any).mock.calls.length).toBe(itemCalls);
+    expect((stripe!.invoices.create as any).mock.calls.length).toBe(invoiceCalls);
+    p7 = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-07'", [id])).rows[0];
+    expect(p7).toMatchObject({ status: "invoiced", invoice_id: "in_found" });
   });
 
   it("daily jobs run once a day", async () => {
     expect(await claimDailyJob(deps, "test_job")).toBe(true);
     expect(await claimDailyJob(deps, "test_job")).toBe(false);
+  });
+});
+
+describe("status pushes, cancellation and data purge", () => {
+  let id = "";
+  let opsKey = "";
+
+  it("suspending and cancelling are pushed to the licensee's server", async () => {
+    const res = await request(app()).post("/api/ops/licensees").set(staff()).send({
+      company_name: "Purge Test", legal_name: "Purge Test Inc.", company_code: "purge-test", contact_name: "Pat",
+      contact_email: "pat@purge.example", contact_phone: "403-555-0100", plan: "growth", seats: 1,
+      server_url: "https://ks-purge.azurewebsites.net", status: "active",
+    });
+    id = res.body.licensee.id;
+    opsKey = res.body.ops_key;
+    const suspended = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ status: "suspended" });
+    expect(suspended.body.plan_push).toEqual({ ok: true });
+    expect(remote.puts.at(-1)).toMatchObject({ url: "https://ks-purge.azurewebsites.net/api/plan", body: { plan: "growth", extra_storage_blocks: 0, status: "suspended" } });
+    const cancelled = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ status: "cancelled" });
+    expect(remote.puts.at(-1)!.body.status).toBe("cancelled");
+    // Purge date: cancelled_at (set by the database) + 180 days.
+    const l = cancelled.body.licensee;
+    expect(l.cancelled_at).toBeTruthy();
+    const expected = new Date(new Date(l.cancelled_at).getTime() + 180 * 86_400_000).toISOString().slice(0, 10);
+    expect(l.data_purge_on).toBe(expected);
+    const list = await request(app()).get("/api/ops/licensees").set(staff());
+    expect(list.body.licensees.find((x: any) => x.id === id)).toMatchObject({ status: "cancelled", data_purge_on: expected, purged_at: null });
+    const dash = await request(app()).get("/api/ops/dashboard").set(staff());
+    expect(dash.body.data_purges.find((p: any) => p.id === id)).toMatchObject({ company_code: "purge-test", data_purge_on: expected, due: false });
+  });
+
+  it("cannot be marked purged before the purge date", async () => {
+    const early = await request(app()).post(`/api/ops/licensees/${id}/purged`).set(staff());
+    expect(early.status).toBe(409);
+    expect(early.body.error).toBe("not_due");
+    const fromServer = await request(app()).post(`/api/licensees/${id}/purged`).set("X-KS-Ops-Key", opsKey);
+    expect(fromServer.status).toBe(409);
+  });
+
+  it("the server reports the purge after the date; status stays cancelled and it cannot be reopened", async () => {
+    await pool.query("UPDATE licensees SET cancelled_at = $2 WHERE id = $1", [id, new Date(now.getTime() - 181 * 86_400_000)]);
+    const dash = await request(app()).get("/api/ops/dashboard").set(staff());
+    expect(dash.body.data_purges_due).toBeGreaterThanOrEqual(1);
+    const res = await request(app()).post(`/api/licensees/${id}/purged`).set("X-KS-Ops-Key", opsKey);
+    expect(res.status).toBe(200);
+    expect(res.body.result).toBe("purged");
+    const row = (await pool.query("SELECT status, purged_at FROM licensees WHERE id = $1", [id])).rows[0];
+    expect(row.status).toBe("cancelled");
+    expect(row.purged_at).not.toBeNull();
+    expect((await request(app()).post(`/api/ops/licensees/${id}/purged`).set(staff())).body.result).toBe("already_purged");
+    const reopen = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ status: "active" });
+    expect(reopen.status).toBe(409);
+    const after = await request(app()).get("/api/ops/dashboard").set(staff());
+    expect(after.body.data_purges.some((p: any) => p.id === id)).toBe(false);
+  });
+
+  it("staff can mark the purge by hand after the date", async () => {
+    const res = await request(app()).post("/api/ops/licensees").set(staff()).send({
+      company_name: "Manual Purge", legal_name: "Manual Purge Inc.", company_code: "manual-purge", contact_name: "Max",
+      contact_email: "max@purge.example", contact_phone: "403-555-0101", plan: "starter", seats: 1, status: "cancelled",
+    });
+    const mid = res.body.licensee.id;
+    expect(res.body.licensee.cancelled_at).toBeTruthy();
+    await pool.query("UPDATE licensees SET cancelled_at = now() - interval '200 days' WHERE id = $1", [mid]);
+    const done = await request(app()).post(`/api/ops/licensees/${mid}/purged`).set(staff());
+    expect(done.status).toBe(200);
+    expect(done.body.licensee.purged_at).toBeTruthy();
+    const active = (await request(app()).get("/api/ops/licensees").set(staff())).body.licensees.find((x: any) => x.company_code === "keystone-demo");
+    expect((await request(app()).post(`/api/ops/licensees/${active.id}/purged`).set(staff())).body.error).toBe("not_cancelled");
+  });
+
+  it("restoring a cancelled licensee clears cancelled_at", async () => {
+    await pool.query("UPDATE licensees SET status = 'cancelled' WHERE company_code = 'keystone-demo'");
+    expect((await pool.query("SELECT cancelled_at FROM licensees WHERE company_code = 'keystone-demo'")).rows[0].cancelled_at).not.toBeNull();
+    await pool.query("UPDATE licensees SET status = 'active' WHERE company_code = 'keystone-demo'");
+    expect((await pool.query("SELECT cancelled_at FROM licensees WHERE company_code = 'keystone-demo'")).rows[0].cancelled_at).toBeNull();
+  });
+});
+
+describe("expiring unpaid website sign-ups", () => {
+  it("cancels them after PENDING_SIGNUP_DAYS and frees the company code; staff-created ones stay", async () => {
+    const res = await request(app()).post("/api/public/signup").send({ ...validSignup(), company_code: "slow-payer" });
+    const id = res.body.licensee_id;
+    const staffMade = await request(app()).post("/api/ops/licensees").set(staff()).send({
+      company_name: "Staff Pending", legal_name: "Staff Pending Inc.", company_code: "staff-pending", contact_name: "Sam",
+      contact_email: "sam@pending.example", contact_phone: "403-555-0102", plan: "starter", seats: 1,
+    });
+    expect(staffMade.body.licensee.status).toBe("pending_payment");
+    expect(await expirePendingSignups(deps)).toBe(0);
+    await pool.query("UPDATE licensees SET created_at = $2 WHERE id = ANY($1::uuid[])", [[id, staffMade.body.licensee.id], new Date(now.getTime() - 8 * 86_400_000)]);
+    expect(await expirePendingSignups(deps)).toBe(1);
+    const row = (await pool.query("SELECT status, company_code, released_company_code, cancelled_at FROM licensees WHERE id = $1", [id])).rows[0];
+    expect(row).toMatchObject({ status: "cancelled", company_code: expiredCode(id), released_company_code: "slow-payer" });
+    expect(row.company_code).toHaveLength(32);
+    expect(row.cancelled_at).not.toBeNull();
+    expect((await pool.query("SELECT status FROM licensees WHERE id = $1", [staffMade.body.licensee.id])).rows[0].status).toBe("pending_payment");
+    // The code can be taken again, and the old sign-up can no longer resume payment.
+    expect((await request(app()).get("/api/public/company-code-available?code=slow-payer")).body.available).toBe(true);
+    const resume = await request(app()).post(`/api/public/signup/${id}/checkout?token=${res.body.signup_token}`);
+    expect(resume.status).toBe(409);
+    expect((await request(app()).post("/api/public/signup").send({ ...validSignup(), company_code: "slow-payer" })).status).toBe(201);
+    expect(await expirePendingSignups(deps)).toBe(0);
   });
 });

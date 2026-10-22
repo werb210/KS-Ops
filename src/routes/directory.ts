@@ -1,21 +1,13 @@
 // GET /api/directory/:code - the company-code lookup the Keystone apps use to find a licensee's server.
 import { Router } from "express";
-import { rateLimit } from "express-rate-limit";
 import type { Deps } from "../deps.js";
+import { limiter } from "../lib/clientIp.js";
 import { h } from "../lib/http.js";
 import { CODE_RE, DIRECTORY_STATUSES, normalizeCode } from "../licensees/validation.js";
 
 export function directoryRouter(deps: Deps): Router {
   const router = Router();
-  router.use(
-    rateLimit({
-      windowMs: 60_000,
-      limit: 30,
-      standardHeaders: "draft-7",
-      legacyHeaders: false,
-      message: { error: "rate_limited", message: "Too many lookups. Please wait a minute and try again." },
-    }),
-  );
+  router.use(limiter(30, 60_000, { error: "rate_limited", message: "Too many lookups. Please wait a minute and try again." }));
   router.get(
     "/:code",
     h(async (req, res) => {

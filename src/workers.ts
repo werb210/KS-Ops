@@ -1,9 +1,11 @@
 // Background jobs. The plan-push retry runs every 5 minutes; the daily jobs (usage pull, overage billing, past-due
 // reminders) are checked hourly and claimed in job_runs, so they run once a day across instances and restarts.
 import type { Deps } from "./deps.js";
+import { pendingSignupDays } from "./config.js";
 import { billOverage } from "./billing/billing.js";
 import { bodies, sendQuietly } from "./lib/email.js";
 import { periodOf, previousPeriod } from "./lib/http.js";
+import { audit } from "./licensees/repo.js";
 import { retryPendingPlanPushes } from "./sync/planPush.js";
 import { isFinal, pullUsageReport } from "./sync/usage.js";
 
@@ -47,6 +49,38 @@ export async function pullUsageForAll(deps: Pick<Deps, "db" | "fetch" | "now">):
   return { pulled, failed };
 }
 
+/**
+ * The company code an expired sign-up is given in place of its own: "exp--" and 27 characters of its id. It fits the
+ * 32-character code rule, is unique, and can never be chosen by anyone (codes may not contain "--").
+ */
+export function expiredCode(id: string): string {
+  return `exp--${id.replace(/-/g, "").slice(0, 27)}`;
+}
+
+/**
+ * Website sign-ups still in pending_payment after PENDING_SIGNUP_DAYS (default 7) are cancelled and their company
+ * code is released for someone else (the old code is kept in released_company_code). Staff-created licensees are left
+ * alone.
+ */
+export async function expirePendingSignups(deps: Pick<Deps, "db" | "now">): Promise<number> {
+  const days = pendingSignupDays();
+  const cutoff = new Date(deps.now().getTime() - days * 86_400_000);
+  const r = await deps.db.query(
+    `UPDATE licensees
+        SET status = 'cancelled',
+            released_company_code = company_code,
+            company_code = 'exp--' || substr(replace(id::text, '-', ''), 1, 27),
+            updated_at = now()
+      WHERE status = 'pending_payment' AND source = 'website' AND created_at < $1
+      RETURNING id, released_company_code`,
+    [cutoff],
+  );
+  for (const row of r.rows) {
+    await audit(deps.db, "ks-ops", "signup.expired", row.id, { released_company_code: row.released_company_code, days });
+  }
+  return r.rows.length;
+}
+
 /** Reminds past-due licensees every 3 days until they pay. */
 export async function sendPastDueReminders(deps: Pick<Deps, "db" | "mailer">): Promise<number> {
   const r = await deps.db.query(
@@ -78,6 +112,7 @@ export async function runDailyJobs(deps: Deps): Promise<void> {
     ["usage_pull", () => pullUsageForAll(deps)],
     ["overage_billing", () => billOverage(deps)],
     ["past_due_reminders", () => sendPastDueReminders(deps)],
+    ["expire_pending_signups", () => expirePendingSignups(deps)],
   ];
   for (const [name, fn] of jobs) {
     try {

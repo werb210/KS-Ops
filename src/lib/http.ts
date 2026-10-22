@@ -1,4 +1,5 @@
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { clientIpFromRequest } from "./clientIp.js";
 import { ZodError, type ZodTypeAny, type z } from "zod";
 
 /** Wraps an async handler so a thrown error reaches the error middleware instead of hanging the request. */
@@ -50,6 +51,8 @@ export function periodEnd(period: string): Date {
   return new Date(Date.UTC(y, m, 1));
 }
 
+/** The caller's address without Azure's ":port" (see lib/clientIp.ts). */
 export function clientIp(req: Request): string {
-  return String(req.ip ?? req.socket?.remoteAddress ?? "");
+  const ip = clientIpFromRequest(req);
+  return ip === "unknown" ? "" : ip;
 }

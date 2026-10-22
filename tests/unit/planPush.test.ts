@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { encryptSecret, encryptionKey } from "../../src/lib/crypto.js";
-import { pushPlan, retryPendingPlanPushes } from "../../src/sync/planPush.js";
+import { planPushBody, pushPlan, queueStatusPush, retryPendingPlanPushes } from "../../src/sync/planPush.js";
 import { fakeDb, jsonResponse, licenseeRow } from "../helpers.js";
 
 const NOW = new Date("2026-10-22T12:00:00Z");
@@ -24,7 +24,7 @@ describe("plan push", () => {
     expect(url).toBe("https://ks-northwind.example/api/plan");
     expect(init.method).toBe("PUT");
     expect((init.headers as Record<string, string>)["X-KS-Ops-Key"]).toBe("ksops_abc");
-    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2 });
+    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active" });
     expect(d.calls.some((c) => /plan_sync_status = 'synced'/.test(c.sql))).toBe(true);
     expect(d.calls.some((c) => /UPDATE plan_changes SET status = 'pushed'/.test(c.sql))).toBe(true);
   });
@@ -54,5 +54,38 @@ describe("plan push", () => {
     expect(r).toEqual({ tried: 1, pushed: 1 });
     const pick = d.calls.find((c) => /pending_sync/.test(c.sql) && /SELECT id/.test(c.sql))!;
     expect(pick.params[0]).toEqual(NOW);
+  });
+
+  it("sends status only once the licensee is live", () => {
+    for (const status of ["trial", "active", "past_due", "suspended", "cancelled"]) {
+      expect(planPushBody({ plan: "growth", extra_storage_blocks: 0, status })).toEqual({ plan: "growth", extra_storage_blocks: 0, status });
+    }
+    for (const status of ["pending_payment", "provisioning"]) {
+      expect(planPushBody({ plan: "growth", extra_storage_blocks: 0, status })).toEqual({ plan: "growth", extra_storage_blocks: 0 });
+    }
+  });
+
+  it("a suspended licensee's server is told so", async () => {
+    const d = db(keyed({ status: "suspended" }));
+    const f = vi.fn(async () => jsonResponse({}));
+    await pushPlan({ db: d, fetch: f as unknown as typeof fetch, now: () => NOW }, keyed().id);
+    const [, init] = (f.mock.calls[0] as unknown) as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ status: "suspended" });
+  });
+
+  it("queues a status push: records the change and marks pending_sync, only for live statuses with a server", async () => {
+    const d = fakeDb([[/INSERT INTO plan_changes/, () => [{ id: "pc1" }]]]);
+    expect(await queueStatusPush(d, "lid", "active", "cancelled", "stripe-webhook")).toBe(true);
+    const ins = d.calls.find((c) => /INSERT INTO plan_changes/.test(c.sql))!;
+    expect(ins.sql).toMatch(/server_url IS NOT NULL/);
+    expect(ins.params).toEqual(["lid", "active", "cancelled", "stripe-webhook"]);
+    expect(d.calls.some((c) => /plan_sync_status = 'pending_sync', plan_sync_next_at = NULL/.test(c.sql))).toBe(true);
+    const d2 = fakeDb();
+    expect(await queueStatusPush(d2, "lid", "pending_payment", "provisioning", "x")).toBe(false);
+    expect(await queueStatusPush(d2, "lid", "active", "active", "x")).toBe(false);
+    expect(d2.calls).toHaveLength(0);
+    // No server yet: nothing recorded, nothing marked.
+    expect(await queueStatusPush(d2, "lid", "trial", "cancelled", "x")).toBe(false);
+    expect(d2.calls.some((c) => /pending_sync/.test(c.sql))).toBe(false);
   });
 });

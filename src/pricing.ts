@@ -329,3 +329,53 @@ export function subscriptionItems(i: Omit<ChargeInput, "overage_minutes" | "over
   if (blocks > 0) items.push({ price_key: priceKey("storage_block", i.billing_interval), quantity: blocks });
   return items;
 }
+
+export type TrialInfo = { status?: unknown; started_at?: unknown; ends_at?: unknown } | null | undefined;
+
+const toTime = (v: unknown): number | null => {
+  if (typeof v !== "string" && !(v instanceof Date)) return null;
+  const t = new Date(v as string).getTime();
+  return Number.isNaN(t) ? null : t;
+};
+
+/** True when the trial window (as reported by the licensee's server) overlaps the month "YYYY-MM" (UTC). */
+export function trialOverlapsPeriod(trial: TrialInfo, period: string): boolean {
+  if (!trial || typeof trial !== "object") return false;
+  const started = toTime(trial.started_at);
+  if (started === null) return false;
+  const [y, m] = period.split("-").map(Number);
+  const start = Date.UTC(y, m - 1, 1);
+  const end = Date.UTC(y, m, 1);
+  const ends = toTime(trial.ends_at);
+  return started < end && (ends === null || ends > start);
+}
+
+/**
+ * Pooled minute and text allowances KS-Ops bills against: the plan's per-seat allowance times the billable seats.
+ * During a trial the licensee gets at least the trial allowance (TRIAL.for's minutes/texts plus the per-seat bonus).
+ */
+export function billingAllowance(plan: Plan, seats: number, trial: boolean): { minutes: number; texts: number } {
+  const n = billableSeats(plan, seats);
+  const base = ALLOWANCES[plan];
+  let minutes = base.minutes_per_seat * n;
+  let texts = base.texts_per_seat * n;
+  if (trial) {
+    const t = ALLOWANCES[TRIAL.for];
+    minutes = Math.max(minutes, (t.minutes_per_seat + TRIAL.bonus_minutes_per_seat) * n);
+    texts = Math.max(texts, (t.texts_per_seat + TRIAL.bonus_texts_per_seat) * n);
+  }
+  return { minutes, texts };
+}
+
+/** Overage worked out by KS-Ops from its own plan and seats; the overage a licensee's server reports is not used. */
+export function computeOverage(
+  i: { plan: Plan; seats: number; trial: boolean },
+  used: { minutes: number; texts: number },
+): { minutes: number; texts: number; allowance: { minutes: number; texts: number } } {
+  const allowance = billingAllowance(i.plan, i.seats, i.trial);
+  return {
+    minutes: Math.max(0, whole(used.minutes) - allowance.minutes),
+    texts: Math.max(0, whole(used.texts) - allowance.texts),
+    allowance,
+  };
+}

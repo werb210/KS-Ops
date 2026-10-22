@@ -1,9 +1,13 @@
 // Boreal staff sign-in for the staff API. The BF staff portal sends the user's BF-Server token to
 // POST /api/ops/auth/exchange; KS-Ops asks BF-Server who that is (GET {BF_SERVER_URL}/api/auth/me) and, for Admin
 // users only, returns its own short-lived token. OPS_ADMIN_TOKEN is a break-glass bearer for emergencies.
+//
+// OPS_ADMIN_EMAILS (optional, comma-separated, case-insensitive) narrows this further: when set, only those emails get
+// in, and the list is checked again on every request so removing someone takes effect at once. When unset, any BF
+// Admin is allowed (the server logs a warning at startup). Service principals (no email) are always refused.
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import { env } from "../config.js";
+import { env, opsAdminEmails } from "../config.js";
 import { safeEqual } from "../lib/crypto.js";
 
 export type StaffUser = { id: string; email: string | null; name: string | null; role: "Admin"; via: "bf" | "break_glass" };
@@ -33,6 +37,7 @@ export function verifyStaffToken(token: string): StaffUser | null {
   try {
     const p = jwt.verify(token, secret, { algorithms: ["HS256"], issuer: "ks-ops" }) as jwt.JwtPayload;
     if (p.typ !== TOKEN_TYPE || p.role !== "Admin" || !p.sub) return null;
+    if (allowlistProblem(p.email ?? null)) return null;
     return { id: p.sub, email: p.email ?? null, name: p.name ?? null, role: "Admin", via: "bf" };
   } catch {
     return null;
@@ -51,6 +56,15 @@ export function bfIdentity(body: any): { id: string; role: string; email: string
 }
 
 export const isAdminRole = (role: string) => role.trim().toLowerCase() === "admin";
+
+/** Why this email may not use Keystone operations, or null when it may. */
+export function allowlistProblem(email: string | null): "no_email" | "not_allowed" | null {
+  const e = String(email ?? "").trim().toLowerCase();
+  if (!e || !e.includes("@")) return "no_email";
+  const allowed = opsAdminEmails();
+  if (!allowed.length) return null;
+  return allowed.includes(e) ? null : "not_allowed";
+}
 
 export type ExchangeResult =
   | { ok: true; token: string; expires_in: number; user: Omit<StaffUser, "via"> }
@@ -85,7 +99,14 @@ export async function exchangeBfToken(bfToken: unknown, fetchImpl: typeof fetch)
   if (!isAdminRole(who.role)) {
     return { ok: false, status: 403, error: "admin_only", message: "Only Admin users can open Keystone operations." };
   }
-  const user = { id: who.id, email: who.email, name: who.name, role: "Admin" as const };
+  const problem = allowlistProblem(who.email);
+  if (problem === "no_email") {
+    return { ok: false, status: 403, error: "email_required", message: "Only Boreal staff accounts with an email address can open Keystone operations." };
+  }
+  if (problem === "not_allowed") {
+    return { ok: false, status: 403, error: "not_allowed", message: "Your account is not on the Keystone operations list. Ask an owner to add you." };
+  }
+  const user = { id: who.id, email: who.email!.trim().toLowerCase(), name: who.name, role: "Admin" as const };
   return { ok: true, token: signStaffToken(user), expires_in: STAFF_TOKEN_TTL_SECONDS, user };
 }
 

@@ -1,26 +1,29 @@
 // The public website (KS-Website): plans, company-code check, sign-up and sign-up status.
-import { Router } from "express";
-import { rateLimit } from "express-rate-limit";
-import { salesEmail } from "../config.js";
+import { Router, type Request } from "express";
+import { isProduction, salesEmail, signupTurnstileOptional } from "../config.js";
 import type { Deps } from "../deps.js";
 import { BillingNotConfigured } from "../billing/stripeClient.js";
 import { createCheckout } from "../billing/billing.js";
-import { matchesHash, newSecret, sha256Hex } from "../lib/crypto.js";
+import { matchesHash, newSecret } from "../lib/crypto.js";
 import { bodies, sendQuietly } from "../lib/email.js";
+import { limiter } from "../lib/clientIp.js";
 import { clientIp, h, parseBody, UUID_RE } from "../lib/http.js";
 import { turnstileEnabled, verifyTurnstile } from "../lib/turnstile.js";
-import { audit, codeTaken, getLicensee, insertLicensee, isUniqueViolation, type LicenseeRow } from "../licensees/repo.js";
+import {
+  audit, codeTaken, getLicensee, insertLicensee, isUniqueViolation, signupTokenColumns, type LicenseeRow,
+} from "../licensees/repo.js";
 import { CODE_MESSAGES, codeProblem, crossFieldErrors, normalizeCode, signupSchema } from "../licensees/validation.js";
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 
-const limited = (limit: number, windowMs: number) =>
-  rateLimit({
-    windowMs,
-    limit,
-    standardHeaders: "draft-7",
-    legacyHeaders: false,
-    message: { error: "rate_limited", message: "Too many requests. Please wait a few minutes and try again." },
-  });
+const limited = (limit: number, windowMs: number) => limiter(limit, windowMs);
+
+export const SIGNUP_NOT_CONFIGURED_MESSAGE =
+  "Online sign-up is not available right now. Please contact us and we will set you up.";
+
+/** Production sign-ups need the Turnstile check unless SIGNUP_TURNSTILE_OPTIONAL=true. */
+export function signupConfigured(): boolean {
+  return turnstileEnabled() || !isProduction() || signupTurnstileOptional();
+}
 
 export const NO_STRIPE_MESSAGE =
   "Thanks - we have your details. Online payment is not available right now, so our team will email you a secure payment link within one business day.";
@@ -68,6 +71,10 @@ export function publicRouter(deps: Deps): Router {
     "/signup",
     limited(10, 60 * 60_000),
     h(async (req, res) => {
+      if (!signupConfigured()) {
+        console.error("[signup] TURNSTILE_SECRET is not set in production; sign-ups are refused (set SIGNUP_TURNSTILE_OPTIONAL=true to allow)");
+        return res.status(503).json({ error: "signup_not_configured", message: SIGNUP_NOT_CONFIGURED_MESSAGE });
+      }
       const body = req.body ?? {};
       // Honeypot: a hidden field people never fill in.
       if (body.website_url !== undefined && body.website_url !== null && String(body.website_url).trim() !== "") {
@@ -77,11 +84,12 @@ export function publicRouter(deps: Deps): Router {
       const parsed = parseBody(signupSchema, body, crossFieldErrors);
       if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
       const input = parsed.data;
-      if (turnstileEnabled() && !(await verifyTurnstile(input.turnstile_token, clientIp(req), deps.fetch))) {
-        return res.status(400).json({ errors: { turnstile_token: "Please confirm you are not a robot and try again." } });
-      }
       if (await codeTaken(deps.db, input.company_code)) {
         return res.status(409).json({ errors: { company_code: "taken" } });
+      }
+      // Checked last, so a form error or a taken code does not use up the person's one-time token.
+      if (turnstileEnabled() && !(await verifyTurnstile(input.turnstile_token, clientIp(req), deps.fetch))) {
+        return res.status(400).json({ errors: { turnstile_token: "Please confirm you are not a robot and try again." } });
       }
       const token = newSecret(24);
       const now = deps.now();
@@ -106,7 +114,7 @@ export function publicRouter(deps: Deps): Router {
           primary_color: input.primary_color,
           logo_url: input.logo_url,
           assistant_name: input.assistant_name,
-          signup_token_hash: sha256Hex(token),
+          ...signupTokenColumns(token),
           source: "website",
           accepted_terms_at: now,
           accepted_privacy_at: now,
@@ -138,17 +146,56 @@ export function publicRouter(deps: Deps): Router {
     }),
   );
 
+  /** The sign-up named by :id, when ?token= is its signup token; otherwise null. */
+  const signupFor = async (req: Request): Promise<LicenseeRow | null> => {
+    const id = String(req.params.id);
+    const l = UUID_RE.test(id) ? await getLicensee(deps.db, id) : null;
+    return l && matchesHash(req.query.token, l.signup_token_hash) ? l : null;
+  };
+  const signupNotFound = { error: "not_found", message: "We could not find that sign-up." };
+
   router.get(
     "/signup/:id/status",
     limited(120, 60_000),
     h(async (req, res) => {
-      const id = String(req.params.id);
-      const l = UUID_RE.test(id) ? await getLicensee(deps.db, id) : null;
-      if (!l || !matchesHash(req.query.token, l.signup_token_hash)) {
-        return res.status(404).json({ error: "not_found", message: "We could not find that sign-up." });
-      }
+      const l = await signupFor(req);
+      if (!l) return res.status(404).json(signupNotFound);
       res.setHeader("Cache-Control", "no-store");
       return res.json({ status: l.status, company_name: l.company_name });
+    }),
+  );
+
+  // A new Stripe Checkout link for a sign-up that has not paid yet (the website's "Resume payment").
+  router.post(
+    "/signup/:id/checkout",
+    limited(10, 15 * 60_000),
+    h(async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      const l = await signupFor(req);
+      if (!l) return res.status(404).json(signupNotFound);
+      if (l.status !== "pending_payment") {
+        return res.status(409).json({
+          error: "not_pending_payment",
+          status: l.status,
+          message: "This sign-up does not need a payment right now.",
+        });
+      }
+      if (!deps.stripe()) {
+        return res.status(503).json({ error: "billing_not_configured", checkout_url: null, message: NO_STRIPE_MESSAGE });
+      }
+      let checkoutUrl: string;
+      try {
+        // The token the person already holds stays valid, so their success and cancel pages keep working.
+        checkoutUrl = (await createCheckout(deps, l, String(req.query.token))).url;
+      } catch (err) {
+        if (err instanceof BillingNotConfigured) {
+          return res.status(503).json({ error: "billing_not_configured", checkout_url: null, message: NO_STRIPE_MESSAGE });
+        }
+        console.error("[signup] resume checkout failed", err instanceof Error ? err.message : String(err));
+        return res.status(502).json({ error: "checkout_failed", checkout_url: null, message: CHECKOUT_FAILED_MESSAGE });
+      }
+      await audit(deps.db, "website", "signup.checkout_resumed", l.id, { ip: clientIp(req) });
+      return res.json({ checkout_url: checkoutUrl });
     }),
   );
 

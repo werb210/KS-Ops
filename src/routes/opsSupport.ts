@@ -6,7 +6,7 @@ import { actorOf } from "../auth/staff.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { audit } from "../licensees/repo.js";
-import { mrrOf, type LicenseeRow } from "../licensees/repo.js";
+import { dataPurgeOn, mrrOf, type LicenseeRow } from "../licensees/repo.js";
 
 const TICKET_STATUSES = ["open", "waiting", "resolved", "closed"] as const;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -190,7 +190,11 @@ export function opsSupportRouter(deps: Deps): Router {
     "/dashboard",
     h(async (_req, res) => {
       const [ls, overdue, tickets, requests] = await Promise.all([
-        deps.db.query("SELECT plan, billing_interval, seats, support_level, extra_storage_blocks, status FROM licensees"),
+        deps.db.query(
+          `SELECT id, company_name, company_code, plan, billing_interval, seats, support_level, extra_storage_blocks, status,
+                  cancelled_at, purged_at
+             FROM licensees`,
+        ),
         deps.db.query(
           `SELECT count(*)::int AS n, COALESCE(sum(amount_due - amount_paid), 0)::bigint AS cents FROM invoices
             WHERE status = 'open' AND due_date IS NOT NULL AND due_date < now()`,
@@ -203,7 +207,13 @@ export function opsSupportRouter(deps: Deps): Router {
       let seats = 0;
       let mrr = 0;
       let trials = 0;
+      const today = deps.now().toISOString().slice(0, 10);
+      const purges: Array<{ id: string; company_name: string; company_code: string; cancelled_at: Date; data_purge_on: string; due: boolean }> = [];
       for (const l of ls.rows as LicenseeRow[]) {
+        const on = dataPurgeOn(l);
+        if (on && !l.purged_at) {
+          purges.push({ id: l.id, company_name: l.company_name, company_code: l.company_code, cancelled_at: l.cancelled_at!, data_purge_on: on, due: on <= today });
+        }
         byStatus[l.status] = (byStatus[l.status] ?? 0) + 1;
         if (live.has(l.status)) seats += l.seats;
         if (l.status === "active" || l.status === "past_due") mrr += mrrOf(l);
@@ -220,6 +230,9 @@ export function opsSupportRouter(deps: Deps): Router {
         overdue_amount: Number(overdue.rows[0].cents) / 100,
         open_tickets: tickets.rows[0].n,
         open_requests: requests.rows[0].n,
+        // Cancelled licensees whose data is still held, soonest purge first ("due" = the purge date has passed).
+        data_purges: purges.sort((a, b) => a.data_purge_on.localeCompare(b.data_purge_on)),
+        data_purges_due: purges.filter((p) => p.due).length,
         currency: "CAD",
       });
     }),
