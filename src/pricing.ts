@@ -100,11 +100,11 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "visitor_tracking", label: "Website visitor tracking", plan: "growth" },
   { key: "toll_free_number", label: "Toll-free number", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines", plan: "pro" },
-  { key: "bank_connect", label: "Bank connect", plan: "pro" },
   { key: "ad_attribution", label: "Ad attribution", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
   { key: "sso", label: "Single sign-on", plan: "pro" },
-  // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 16.
+  // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
+  // No bank connect / Flinks in Keystone: bank_connect and fraud_3 are gone; the other keys keep their numbers.
   { key: "fraud_1", label: "Document tamper scan", plan: "starter" },
   { key: "fraud_2", label: "Bank statement math check", plan: "starter" },
   { key: "fraud_4", label: "Duplicate document check", plan: "starter" },
@@ -112,7 +112,6 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "fraud_6", label: "Business reality check", plan: "growth" },
   { key: "fraud_7", label: "Phone and email risk", plan: "growth" },
   { key: "fraud_8", label: "ID checks", plan: "growth" },
-  { key: "fraud_3", label: "Statement vs live bank data", plan: "pro" },
   { key: "fraud_9", label: "Device and location check", plan: "pro" },
   { key: "fraud_10", label: "Application behaviour signals", plan: "pro" },
   { key: "fraud_11", label: "Loan stacking detector", plan: "pro" },
