@@ -47,8 +47,14 @@ export function fakeStripe(overrides: Partial<Record<string, any>> = {}) {
       retrieve: vi.fn(async (id: string) => ({ id, items: { data: [] } })),
       update: vi.fn(async (id: string) => ({ id })),
     },
-    invoiceItems: { create: vi.fn(async () => ({ id: `ii_${++n}` })) },
-    invoices: { create: vi.fn(async () => ({ id: `in_${++n}` })) },
+    invoiceItems: {
+      create: vi.fn(async () => ({ id: `ii_${++n}` })),
+      list: vi.fn(async (_p: Record<string, unknown>) => ({ data: [] as Record<string, any>[] })),
+    },
+    invoices: {
+      create: vi.fn(async () => ({ id: `in_${++n}` })),
+      list: vi.fn(async (_p: Record<string, unknown>) => ({ data: [] as Record<string, any>[] })),
+    },
     products: { create: vi.fn(async () => ({ id: `prod_${++n}` })) },
     prices: { create: vi.fn(async () => ({ id: `price_${++n}` })), list: vi.fn(async () => ({ data: [] })) },
     webhooks: {

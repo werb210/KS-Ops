@@ -11,8 +11,14 @@ export type StripeLike = {
     retrieve: (id: string) => Promise<Obj>;
     update: (id: string, params: Obj, opts?: Opts) => Promise<Obj>;
   };
-  invoiceItems: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
-  invoices: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
+  invoiceItems: {
+    create: (params: Obj, opts?: Opts) => Promise<{ id: string }>;
+    list: (params: Obj) => Promise<{ data: Obj[] }>;
+  };
+  invoices: {
+    create: (params: Obj, opts?: Opts) => Promise<{ id: string }>;
+    list: (params: Obj) => Promise<{ data: Obj[] }>;
+  };
   products: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
   prices: {
     create: (params: Obj, opts?: Opts) => Promise<Obj>;

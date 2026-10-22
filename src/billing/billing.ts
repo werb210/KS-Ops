@@ -6,11 +6,13 @@ import type { Deps } from "../deps.js";
 import { periodOf } from "../lib/http.js";
 import { newSignupToken, type LicenseeRow } from "../licensees/repo.js";
 import {
-  CURRENCY, OVERAGE_CENTS, PLAN_NAMES, SUPPORT, dollars, monthlyCharge, onboardingFeeCents, priceKey,
-  subscriptionItems,
+  CURRENCY, OVERAGE_CENTS, PLAN_NAMES, SUPPORT, computeOverage, dollars, monthlyCharge, onboardingFeeCents, priceKey,
+  subscriptionItems, trialOverlapsPeriod, type Plan, type TrialInfo,
 } from "../pricing.js";
 import { isFinal } from "../sync/usage.js";
 import { BillingNotConfigured, type StripeLike } from "./stripeClient.js";
+
+type Obj = Record<string, any>;
 
 export function requireStripe(deps: Pick<Deps, "stripe">): StripeLike {
   const s = deps.stripe();
@@ -28,6 +30,31 @@ export async function priceIds(db: Q, keys: string[]): Promise<Record<string, st
     throw new BillingNotConfigured("stripe_prices_missing");
   }
   return map;
+}
+
+/** Subscription statuses after which a subscription will never bill again. */
+export const ENDED_SUBSCRIPTION_STATUSES = new Set(["canceled", "incomplete_expired"]);
+
+/**
+ * The status of a Stripe subscription that is still live (could still bill or be revived), or null when it has ended
+ * or no longer exists. Other Stripe errors are thrown.
+ */
+export async function liveSubscriptionStatus(stripe: StripeLike, subscriptionId: string): Promise<string | null> {
+  try {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    const status = String(sub?.status ?? "");
+    if (ENDED_SUBSCRIPTION_STATUSES.has(status)) return null;
+    return status || "unknown";
+  } catch (err) {
+    const e = err as { code?: string; statusCode?: number } | null;
+    if (e?.code === "resource_missing" || e?.statusCode === 404) return null;
+    throw err;
+  }
+}
+
+/** Whether KS-Ops bills a period with the trial allowance: the licensee is in trial now, or its reported trial overlaps. */
+export function trialApplies(status: string, trial: TrialInfo, period: string): boolean {
+  return status === "trial" || trialOverlapsPeriod(trial, period);
 }
 
 export function checkoutUrls(licenseeId: string, token: string): { success_url: string; cancel_url: string } {
@@ -103,17 +130,28 @@ export async function syncSubscription(deps: Pick<Deps, "db" | "stripe">, l: Lic
 
 export type PreviewLine = { description: string; quantity: number; unit_amount: number; amount: number };
 
-/** What a month would cost, from the pricing module and the stored usage report for that month (if any). */
+/** What a month would cost, from the pricing module and the stored usage report for that month (if any). Overage is
+ *  worked out from KS-Ops's own plan and seats, as billing does; the overage the licensee's server reported is shown
+ *  alongside for comparison. */
 export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   const r = await db.query(
-    "SELECT overage_minutes, overage_texts, generated_at FROM usage_reports WHERE licensee_id = $1 AND period = $2",
+    `SELECT minutes, texts, trial, overage_minutes, overage_texts, generated_at
+       FROM usage_reports WHERE licensee_id = $1 AND period = $2`,
     [l.id, period],
   );
-  const usage = r.rows[0] as { overage_minutes: number; overage_texts: number; generated_at: Date } | undefined;
+  const usage = r.rows[0] as
+    | { minutes: number; texts: number; trial: TrialInfo; overage_minutes: number; overage_texts: number; generated_at: Date }
+    | undefined;
+  const overage = usage
+    ? computeOverage(
+        { plan: l.plan, seats: l.seats, trial: trialApplies(l.status, usage.trial, period) },
+        { minutes: Number(usage.minutes), texts: Number(usage.texts) },
+      )
+    : null;
   const c = monthlyCharge({
     ...l,
-    overage_minutes: usage?.overage_minutes ?? 0,
-    overage_texts: usage?.overage_texts ?? 0,
+    overage_minutes: overage?.minutes ?? 0,
+    overage_texts: overage?.texts ?? 0,
   });
   const lines: PreviewLine[] = [];
   const add = (description: string, quantity: number, unitCents: number) => {
@@ -126,8 +164,8 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   add(`${support.name} support`, 1, support.price_cents);
   add(`${support.name} support - seats over ${support.covered_seats ?? 0}`, c.support_extra_seats, support.extra_seat_cents);
   add("Extra storage (50 GB blocks)", l.extra_storage_blocks, 1000);
-  add("Extra call minutes", usage?.overage_minutes ?? 0, OVERAGE_CENTS.minute);
-  add("Extra texts", usage?.overage_texts ?? 0, OVERAGE_CENTS.text);
+  add("Extra call minutes", overage?.minutes ?? 0, OVERAGE_CENTS.minute);
+  add("Extra texts", overage?.texts ?? 0, OVERAGE_CENTS.text);
   return {
     period,
     currency: CURRENCY,
@@ -136,7 +174,15 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
     recurring: dollars(c.recurring_cents),
     overage: dollars(c.overage_cents),
     total: dollars(c.total_cents),
-    usage_report: usage ? { generated_at: usage.generated_at, final: isFinal(period, usage.generated_at) } : null,
+    usage_report: usage
+      ? {
+          generated_at: usage.generated_at,
+          final: isFinal(period, usage.generated_at),
+          allowance: overage!.allowance,
+          overage: { minutes: overage!.minutes, texts: overage!.texts },
+          reported_overage: { minutes: Number(usage.overage_minutes) || 0, texts: Number(usage.overage_texts) || 0 },
+        }
+      : null,
     note:
       l.billing_interval === "annual"
         ? "Annual plans are billed once a year at 12 times the monthly amount shown. Overage is billed after each month ends."
@@ -144,71 +190,145 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   };
 }
 
-/**
- * Bills overage for every finished month whose final usage report has not been billed yet. Each invoice item and the
- * invoice carry an idempotency key per licensee and month, and the report is marked billed afterwards, so a rerun
- * never charges twice.
- */
-export async function billOverage(deps: Pick<Deps, "db" | "stripe" | "now">): Promise<{ billed: number; skipped: number }> {
-  const stripe = deps.stripe();
-  if (!stripe) return { billed: 0, skipped: 0 };
-  const current = periodOf(deps.now());
-  const r = await deps.db.query(
-    `SELECT ur.id, ur.licensee_id, ur.period, ur.generated_at, ur.overage_minutes, ur.overage_texts,
-            l.stripe_customer_id, l.company_name
-       FROM usage_reports ur JOIN licensees l ON l.id = ur.licensee_id
-      WHERE ur.overage_billed_at IS NULL AND ur.period < $1
-      ORDER BY ur.period LIMIT 200`,
-    [current],
+type OverageRow = {
+  id: string;
+  licensee_id: string;
+  period: string;
+  generated_at: Date;
+  minutes: number;
+  texts: number;
+  trial: TrialInfo;
+  plan: Plan;
+  seats: number;
+  status: string;
+  stripe_customer_id: string | null;
+  company_name: string;
+};
+
+type Progress = {
+  status: string;
+  stripe_customer_id: string;
+  minutes: number;
+  texts: number;
+  minutes_amount: number;
+  texts_amount: number;
+  minutes_invoice_item_id: string | null;
+  texts_invoice_item_id: string | null;
+  invoice_id: string | null;
+};
+
+const OVERAGE_KINDS = ["minutes", "texts"] as const;
+
+async function markReportBilled(db: Q, reportId: string, invoiceId: string | null): Promise<void> {
+  await db.query(
+    "UPDATE usage_reports SET overage_billed_at = now(), overage_invoice_id = $2 WHERE id = $1 AND overage_billed_at IS NULL",
+    [reportId, invoiceId],
   );
-  let billed = 0;
-  let skipped = 0;
-  for (const row of r.rows) {
-    if (!isFinal(row.period, row.generated_at)) {
-      skipped += 1;
-      continue;
-    }
-    const minutes = Number(row.overage_minutes) || 0;
-    const texts = Number(row.overage_texts) || 0;
-    if (minutes === 0 && texts === 0) {
-      await deps.db.query("UPDATE usage_reports SET overage_billed_at = now() WHERE id = $1 AND overage_billed_at IS NULL", [row.id]);
-      continue;
+}
+
+/**
+ * Bills one licensee's overage for one finished month. Progress lives in overage_billing (one row per licensee and
+ * month): the amounts are fixed when the row is made, each Stripe object's id is saved as soon as it exists, and
+ * before creating anything Stripe is searched for an item or invoice already made for this licensee and month (by
+ * metadata). So a rerun - even days later, past Stripe's 24-hour idempotency window - never charges twice.
+ */
+async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: OverageRow): Promise<"invoiced" | "nothing" | "skipped"> {
+  const key = [row.licensee_id, row.period];
+  let p = (await deps.db.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = $2", key)).rows[0] as Progress | undefined;
+  if (!p) {
+    const trial = trialApplies(row.status, row.trial, row.period);
+    const o = computeOverage({ plan: row.plan, seats: row.seats, trial }, { minutes: Number(row.minutes), texts: Number(row.texts) });
+    const details = { plan: row.plan, seats: row.seats, trial, allowance: o.allowance, used: { minutes: row.minutes, texts: row.texts } };
+    if (o.minutes === 0 && o.texts === 0) {
+      await deps.db.query(
+        `INSERT INTO overage_billing (licensee_id, period, status, details) VALUES ($1, $2, 'nothing_to_bill', $3)
+         ON CONFLICT (licensee_id, period) DO NOTHING`,
+        [...key, JSON.stringify(details)],
+      );
+      await markReportBilled(deps.db, row.id, null);
+      return "nothing";
     }
     if (!row.stripe_customer_id) {
       console.warn(`[overage] ${row.company_name} has overage for ${row.period} but no Stripe customer yet`);
-      skipped += 1;
-      continue;
+      return "skipped";
     }
-    const base = `ks-overage-${row.licensee_id}-${row.period}`;
-    const metadata = { licensee_id: row.licensee_id, period: row.period };
-    try {
-      if (minutes > 0) {
+    await deps.db.query(
+      `INSERT INTO overage_billing (licensee_id, period, status, stripe_customer_id, minutes, texts, minutes_amount,
+                                    texts_amount, details)
+       VALUES ($1, $2, 'started', $3, $4, $5, $6, $7, $8) ON CONFLICT (licensee_id, period) DO NOTHING`,
+      [
+        ...key, row.stripe_customer_id, o.minutes, o.texts, o.minutes * OVERAGE_CENTS.minute, o.texts * OVERAGE_CENTS.text,
+        JSON.stringify(details),
+      ],
+    );
+    p = (await deps.db.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = $2", key)).rows[0] as Progress;
+  }
+  if (p.status === "nothing_to_bill") {
+    await markReportBilled(deps.db, row.id, null);
+    return "nothing";
+  }
+  if (p.status === "invoiced") {
+    await markReportBilled(deps.db, row.id, p.invoice_id);
+    return "nothing";
+  }
+
+  const customer = p.stripe_customer_id;
+  const metadata = { licensee_id: row.licensee_id, period: row.period, ks_overage: "1" };
+  const ours = (o: Obj) => o?.metadata?.licensee_id === row.licensee_id && o?.metadata?.period === row.period;
+  const idOf = (v: unknown): string | null => (typeof v === "string" ? v : (v as Obj | null)?.id ?? null);
+  let stripeItems: Obj[] | null = null;
+  let invoiceFromItems: string | null = null;
+  const base = `ks-overage-${row.licensee_id}-${row.period}`;
+
+  for (const kind of OVERAGE_KINDS) {
+    const amount = Number(p[`${kind}_amount`]) || 0;
+    if (amount <= 0) continue;
+    const saved = p[`${kind}_invoice_item_id`];
+    if (saved) continue;
+    stripeItems ??= (await stripe.invoiceItems.list({ customer, limit: 100 })).data ?? [];
+    const found = stripeItems.find((it) => ours(it) && it.metadata?.overage === kind);
+    let itemId: string;
+    if (found) {
+      itemId = found.id;
+      invoiceFromItems ??= idOf(found.invoice);
+    } else {
+      const qty = Number(p[kind]) || 0;
+      const unit = kind === "minutes" ? OVERAGE_CENTS.minute : OVERAGE_CENTS.text;
+      const label = kind === "minutes" ? "Extra call minutes" : "Extra texts";
+      itemId = (
         await stripe.invoiceItems.create(
           {
-            customer: row.stripe_customer_id,
+            customer,
             currency: CURRENCY.toLowerCase(),
-            amount: minutes * OVERAGE_CENTS.minute,
-            description: `Extra call minutes for ${row.period}: ${minutes} at $${dollars(OVERAGE_CENTS.minute).toFixed(2)}`,
-            metadata,
+            amount,
+            description: `${label} for ${row.period}: ${qty} at $${dollars(unit).toFixed(2)}`,
+            metadata: { ...metadata, overage: kind },
           },
-          { idempotencyKey: `${base}-minutes` },
-        );
-      }
-      if (texts > 0) {
-        await stripe.invoiceItems.create(
-          {
-            customer: row.stripe_customer_id,
-            currency: CURRENCY.toLowerCase(),
-            amount: texts * OVERAGE_CENTS.text,
-            description: `Extra texts for ${row.period}: ${texts} at $${dollars(OVERAGE_CENTS.text).toFixed(2)}`,
-            metadata,
-          },
-          { idempotencyKey: `${base}-texts` },
-        );
-      }
-      const invoice = await stripe.invoices.create(
+          { idempotencyKey: `${base}-${kind}` },
+        )
+      ).id;
+    }
+    await deps.db.query(
+      `UPDATE overage_billing SET ${kind}_invoice_item_id = $3, updated_at = now() WHERE licensee_id = $1 AND period = $2`,
+      [...key, itemId],
+    );
+    p[`${kind}_invoice_item_id`] = itemId;
+  }
+  await deps.db.query(
+    "UPDATE overage_billing SET status = 'items_created', updated_at = now() WHERE licensee_id = $1 AND period = $2 AND status = 'started'",
+    key,
+  );
+
+  let invoiceId = p.invoice_id ?? invoiceFromItems;
+  if (!invoiceId) {
+    const existing = (await stripe.invoices.list({ customer, limit: 100 })).data ?? [];
+    invoiceId = existing.find((inv) => ours(inv) && inv.metadata?.ks_overage === "1")?.id ?? null;
+  }
+  if (!invoiceId) {
+    invoiceId = (
+      await stripe.invoices.create(
         {
-          customer: row.stripe_customer_id,
+          customer,
           pending_invoice_items_behavior: "include",
           auto_advance: true,
           collection_method: "charge_automatically",
@@ -216,14 +336,55 @@ export async function billOverage(deps: Pick<Deps, "db" | "stripe" | "now">): Pr
           metadata,
         },
         { idempotencyKey: `${base}-invoice` },
-      );
-      await deps.db.query(
-        "UPDATE usage_reports SET overage_billed_at = now(), overage_invoice_id = $2 WHERE id = $1 AND overage_billed_at IS NULL",
-        [row.id, invoice.id],
-      );
-      billed += 1;
+      )
+    ).id;
+  }
+  await deps.db.query(
+    `UPDATE overage_billing SET invoice_id = $3, status = 'invoiced', last_error = NULL, updated_at = now()
+      WHERE licensee_id = $1 AND period = $2`,
+    [...key, invoiceId],
+  );
+  await markReportBilled(deps.db, row.id, invoiceId);
+  return "invoiced";
+}
+
+/**
+ * Bills overage for every finished month whose final usage report has not been billed yet (see billOverageFor).
+ * Overage is worked out from KS-Ops's own plan and seats, never taken from the report.
+ */
+export async function billOverage(deps: Pick<Deps, "db" | "stripe" | "now">): Promise<{ billed: number; skipped: number }> {
+  const stripe = deps.stripe();
+  if (!stripe) return { billed: 0, skipped: 0 };
+  const current = periodOf(deps.now());
+  const r = await deps.db.query(
+    `SELECT ur.id, ur.licensee_id, ur.period, ur.generated_at, ur.minutes, ur.texts, ur.trial,
+            l.plan, l.seats, l.status, l.stripe_customer_id, l.company_name
+       FROM usage_reports ur JOIN licensees l ON l.id = ur.licensee_id
+      WHERE ur.overage_billed_at IS NULL AND ur.period < $1
+      ORDER BY ur.period LIMIT 200`,
+    [current],
+  );
+  let billed = 0;
+  let skipped = 0;
+  for (const row of r.rows as OverageRow[]) {
+    if (!isFinal(row.period, row.generated_at)) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const res = await billOverageFor(deps, stripe, row);
+      if (res === "invoiced") billed += 1;
+      else if (res === "skipped") skipped += 1;
     } catch (err) {
-      console.error(`[overage] billing ${row.company_name} for ${row.period} failed: ${err instanceof Error ? err.message : err}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[overage] billing ${row.company_name} for ${row.period} failed: ${msg}`);
+      await deps.db
+        .query(
+          `UPDATE overage_billing SET last_error = $3, attempts = attempts + 1, updated_at = now()
+            WHERE licensee_id = $1 AND period = $2`,
+          [row.licensee_id, row.period, msg.slice(0, 500)],
+        )
+        .catch((e) => console.error(`[overage] could not record the failure: ${e instanceof Error ? e.message : e}`));
       skipped += 1;
     }
   }

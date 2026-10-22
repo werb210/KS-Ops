@@ -8,7 +8,7 @@ export async function freshPool(): Promise<pg.Pool> {
   await runMigrations(pool);
   await pool.query(
     `TRUNCATE licensees, usage_reports, plan_changes, invoices, tickets, ticket_messages, requests, notes, staff_audit,
-              stripe_prices, stripe_events, job_runs CASCADE`,
+              stripe_prices, stripe_events, job_runs, overage_billing CASCADE`,
   );
   return pool;
 }

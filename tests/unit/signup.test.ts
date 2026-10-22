@@ -2,7 +2,8 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/app.js";
 import { codeProblem, signupSchema } from "../../src/licensees/validation.js";
-import { NO_STRIPE_MESSAGE } from "../../src/routes/public.js";
+import { NO_STRIPE_MESSAGE, SIGNUP_NOT_CONFIGURED_MESSAGE } from "../../src/routes/public.js";
+import { sha256Hex } from "../../src/lib/crypto.js";
 import { fakeDb, fakeMailer, fakeStripe, jsonResponse, licenseeRow, makeDeps, validSignup } from "../helpers.js";
 
 function signupDb(taken: string[] = []) {
@@ -22,6 +23,8 @@ function signupDb(taken: string[] = []) {
 
 afterEach(() => {
   delete process.env.TURNSTILE_SECRET;
+  delete process.env.SIGNUP_TURNSTILE_OPTIONAL;
+  process.env.NODE_ENV = "test";
 });
 
 describe("signup validation", () => {
@@ -139,5 +142,98 @@ describe("POST /api/public/signup", () => {
     const res = await request(createApp(makeDeps())).get("/api/public/plans").set("Origin", "https://keystone.example.test");
     expect(res.headers["access-control-allow-origin"]).toBe("https://keystone.example.test");
     expect(res.body.currency).toBe("CAD");
+  });
+
+  it("checks Turnstile only after the form and the code pass, so a 400 or 409 does not use up the token", async () => {
+    process.env.TURNSTILE_SECRET = "ts-secret";
+    const f = vi.fn(async () => jsonResponse({ success: true }));
+    const { db } = signupDb(["northwind"]);
+    const app = createApp(makeDeps({ db, fetch: f as unknown as typeof fetch }));
+    expect((await request(app).post("/api/public/signup").send({ ...validSignup(), seats: 0, turnstile_token: "t" })).status).toBe(400);
+    expect((await request(app).post("/api/public/signup").send({ ...validSignup(), turnstile_token: "t" })).status).toBe(409);
+    expect(f).not.toHaveBeenCalled();
+    expect((await request(app).post("/api/public/signup").send({ ...validSignup(), company_code: "fresh-co", turnstile_token: "t" })).status).toBe(201);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it("in production refuses sign-ups without TURNSTILE_SECRET unless SIGNUP_TURNSTILE_OPTIONAL=true", async () => {
+    process.env.NODE_ENV = "production";
+    const { db, inserted } = signupDb();
+    const app = createApp(makeDeps({ db }));
+    const res = await request(app).post("/api/public/signup").send(validSignup());
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: "signup_not_configured", message: SIGNUP_NOT_CONFIGURED_MESSAGE });
+    expect(inserted).toHaveLength(0);
+    process.env.SIGNUP_TURNSTILE_OPTIONAL = "true";
+    expect((await request(app).post("/api/public/signup").send(validSignup())).status).toBe(201);
+    delete process.env.SIGNUP_TURNSTILE_OPTIONAL;
+    process.env.TURNSTILE_SECRET = "ts-secret";
+    const ok = createApp(makeDeps({ db: signupDb().db, fetch: (async () => jsonResponse({ success: true })) as unknown as typeof fetch }));
+    expect((await request(ok).post("/api/public/signup").send({ ...validSignup(), turnstile_token: "t" })).status).toBe(201);
+  });
+
+  it("keeps an encrypted copy of the signup token", async () => {
+    const { db, inserted } = signupDb();
+    const res = await request(createApp(makeDeps({ db }))).post("/api/public/signup").send(validSignup());
+    expect(inserted[0].signup_token_hash).toBe(sha256Hex(res.body.signup_token));
+    expect(String(inserted[0].signup_token_encrypted)).not.toContain(res.body.signup_token);
+    expect(inserted[0].signup_token_encrypted).toBeTruthy();
+  });
+});
+
+describe("POST /api/public/signup/:id/checkout (resume payment)", () => {
+  const token = "tok-resume-1234567890";
+  const row = (over: Record<string, unknown> = {}) =>
+    licenseeRow({ status: "pending_payment", source: "website", signup_token_hash: sha256Hex(token), ...over });
+  const db = (r: ReturnType<typeof row>) =>
+    fakeDb([
+      [/SELECT \* FROM licensees WHERE id/, () => [r]],
+      [/FROM stripe_prices/, (p) => (p[0] as string[]).map((key) => ({ key, stripe_price_id: `price_${key}` }))],
+    ]);
+  const url = (id = row().id, t = token) => `/api/public/signup/${id}/checkout?token=${t}`;
+
+  it("gives a new Checkout link that keeps the person's token", async () => {
+    const stripe = fakeStripe();
+    const d = db(row());
+    const res = await request(createApp(makeDeps({ db: d, stripe: () => stripe }))).post(url());
+    expect(res.status).toBe(200);
+    expect(res.body.checkout_url).toMatch(/^https:\/\/checkout\.stripe\.test\//);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    const params = (stripe.checkout.sessions.create as any).mock.calls[0][0];
+    expect(params.success_url).toContain(`t=${token}`);
+    // The token was not replaced.
+    expect(d.calls.some((c) => /signup_token_hash = \$2/.test(c.sql))).toBe(false);
+  });
+
+  it("answers 404 for a wrong token or id, 409 unless pending_payment, 503 without Stripe", async () => {
+    const stripe = fakeStripe();
+    const app = createApp(makeDeps({ db: db(row()), stripe: () => stripe }));
+    expect((await request(app).post(url(row().id, "wrong"))).status).toBe(404);
+    expect((await request(app).post(url("not-a-uuid"))).status).toBe(404);
+    expect((await request(app).post(`/api/public/signup/${row().id}/checkout`)).status).toBe(404);
+    const paid = await request(createApp(makeDeps({ db: db(row({ status: "provisioning" })), stripe: () => stripe }))).post(url());
+    expect(paid.status).toBe(409);
+    expect(paid.body).toMatchObject({ error: "not_pending_payment", status: "provisioning" });
+    const none = await request(createApp(makeDeps({ db: db(row()) }))).post(url());
+    expect(none.status).toBe(503);
+    expect(none.body).toMatchObject({ error: "billing_not_configured", checkout_url: null });
+    expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 when Stripe prices are missing and 502 when Stripe fails", async () => {
+    const stripe = fakeStripe();
+    const noPrices = await request(createApp(makeDeps({ db: fakeDb([[/SELECT \* FROM licensees WHERE id/, () => [row()]]]), stripe: () => stripe }))).post(url());
+    expect(noPrices.status).toBe(503);
+    const failing = fakeStripe({ checkout: { sessions: { create: vi.fn(async () => { throw new Error("card_declined"); }) } } });
+    const res = await request(createApp(makeDeps({ db: db(row()), stripe: () => failing }))).post(url());
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe("checkout_failed");
+  });
+
+  it("is rate limited", async () => {
+    const app = createApp(makeDeps({ db: db(row()) }));
+    let last = 0;
+    for (let i = 0; i < 11; i++) last = (await request(app).post(url(row().id, "wrong"))).status;
+    expect(last).toBe(429);
   });
 });

@@ -9,7 +9,9 @@ it. The script is safe to run again: what exists is kept, and the secrets alread
 1. The licensee exists in KS-Ops (signed up on the website, or added by staff) and its status is `provisioning`.
 2. You are signed in to Azure (`az login`) with the Keystone subscription selected (`az account set -s <id>`).
 3. You have `openssl` and `curl`.
-4. Optional but recommended: a KS-Ops staff token in `OPS_TOKEN` (from the staff portal, or the break-glass
+4. `KS_OPS_URL` is set to the KS-Ops base address (https). It is required: the script has no default, so a licensee
+   is never pointed at the wrong KS-Ops.
+5. Optional but recommended: a KS-Ops staff token in `OPS_TOKEN` (from the staff portal, or the break-glass
    `OPS_ADMIN_TOKEN`). With it the script makes the licensee's ops key and saves the new addresses in KS-Ops.
 
 ## Run it
@@ -29,7 +31,7 @@ What it creates (names use the company code):
 | Resource | Name | Notes |
 | --- | --- | --- |
 | Resource group | `ks-northwind` | in the region you give |
-| Postgres flexible server | `ks-northwind-pg`, database `ks` | Burstable `Standard_B1ms`, Postgres 17, Azure services allowed |
+| Postgres flexible server | `ks-northwind-pg`, database `ks` | Burstable `Standard_B1ms`, Postgres 17; firewall allows only the two web apps' outbound addresses |
 | App Service plan | `ks-northwind-plan` | Linux `B1` |
 | Web app (KS-server) | `ks-northwind-server` | Node 22, startup `node dist/index.js`, HTTPS only, always on |
 | Web app (KS-Agent) | `ks-northwind-agent` | same plan and settings |
@@ -50,13 +52,20 @@ the Company page in their staff portal (KS-server `PUT /api/licensee`).
 
 The script prints the addresses, then the GitHub settings each repo's deploy workflow needs:
 
-- **KS-server:** secrets `AZURE_CREDENTIALS`, `DATABASE_URL`; variable `AZURE_WEBAPP_NAME`.
+- **KS-server:** secrets `AZURE_CREDENTIALS`, `DATABASE_URL`; variable `AZURE_WEBAPP_NAME`. The script prints the
+  database host, name and user but never the password: copy `DATABASE_URL` from `ks-<code>-server`'s app settings
+  (`az webapp config appsettings list -g ks-<code> -n ks-<code>-server --query "[?name=='DATABASE_URL'].value" -o tsv`).
 - **KS-Agent:** secret `AZURE_CREDENTIALS`; variable `AZURE_WEBAPP_NAME`.
 - **KS-Portal:** secrets `AZURE_STATIC_WEB_APPS_API_TOKEN`, `VITE_API_BASE_URL`, `VITE_APP_URL`,
   `VITE_CLIENT_APP_URL`, `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_REDIRECT_URI`, `VITE_MSAL_SCOPES`.
 - **KS-Client:** secret `AZURE_STATIC_WEB_APPS_API_TOKEN`. Its server address comes from `client-app/.env.production`.
 
 Secrets are printed only inside the block marked **COPY THIS NOW**. Run the script again to see them again.
+
+Postgres has no "allow all Azure services" rule. Each run adds a rule per outbound address of the KS-server and
+KS-Agent web apps (`possibleOutboundIpAddresses`) and removes any other rule, so run the script again after changing
+the App Service plan's size or region (the outbound addresses can change). If KS-Ops cannot make the ops key, or its
+answer cannot be read, the script stops with an error rather than continuing without one.
 
 Then:
 

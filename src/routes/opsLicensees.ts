@@ -3,15 +3,15 @@ import { Router } from "express";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
 import { actorOf } from "../auth/staff.js";
-import { createCheckout, invoicePreview, requireStripe, syncSubscription } from "../billing/billing.js";
+import { createCheckout, invoicePreview, liveSubscriptionStatus, requireStripe, syncSubscription } from "../billing/billing.js";
 import { h, parseBody, PERIOD_RE, periodOf, UUID_RE } from "../lib/http.js";
 import {
-  audit, codeTaken, EncryptionNotConfigured, getLicensee, insertLicensee, isUniqueViolation, rotateOpsKey,
+  audit, codeTaken, EncryptionNotConfigured, getLicensee, insertLicensee, isUniqueViolation, markPurged, rotateOpsKey,
   staffView, type LicenseeRow,
 } from "../licensees/repo.js";
 import { crossFieldErrors, staffCreateSchema, staffPatchSchema, STATUSES } from "../licensees/validation.js";
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
-import { pushPlan, recordPlanChange } from "../sync/planPush.js";
+import { isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 
 export const OPS_KEY_MESSAGE =
@@ -80,6 +80,9 @@ export function opsLicenseesRouter(deps: Deps): Router {
             trial: row.last_report_trial ?? null,
             plan_sync_status: v.plan_sync_status,
             server_url: v.server_url,
+            cancelled_at: v.cancelled_at ?? null,
+            data_purge_on: v.data_purge_on,
+            purged_at: v.purged_at ?? null,
             created_at: v.created_at,
             last_report: row.last_report_period
               ? {
@@ -121,6 +124,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
       }
       await audit(deps.db, actorOf(req), "licensee.create", l.id, { company_code: l.company_code, plan: l.plan, seats: l.seats });
       const fresh = (await getLicensee(deps.db, l.id))!;
+      // The body carries the ops key: never cached by a browser or proxy.
+      res.setHeader("Cache-Control", "no-store");
       return res.status(201).json({
         licensee: staffView(fresh),
         ops_key: opsKey,
@@ -181,6 +186,9 @@ export function opsLicenseesRouter(deps: Deps): Router {
       if (next.seats < MIN_SEATS[next.plan]) {
         return res.status(400).json({ errors: { seats: `The ${PLAN_NAMES[next.plan]} plan needs at least ${MIN_SEATS[next.plan]} seats.` } });
       }
+      if (changed.includes("status") && l.purged_at) {
+        return res.status(409).json({ errors: { status: "This licensee's data has been purged; it cannot be reopened." } });
+      }
       if (changed.includes("company_code") && (await codeTaken(deps.db, next.company_code, l.id))) {
         return res.status(409).json({ errors: { company_code: "taken" } });
       }
@@ -197,8 +205,16 @@ export function opsLicenseesRouter(deps: Deps): Router {
       await audit(deps.db, actor, "licensee.update", l.id, Object.fromEntries(changed.map((c) => [c, { from: (l as any)[c], to: v[c] }])));
 
       let planPush: { ok: boolean; error?: string } | null = null;
-      if (changed.includes("plan") || changed.includes("extra_storage_blocks")) {
-        await recordPlanChange(deps, l, { plan: next.plan, extra_storage_blocks: next.extra_storage_blocks }, actor);
+      // Live status changes (suspended, cancelled, or back to trial/active/past_due) go to the licensee's server with
+      // the plan, recorded and retried the same way.
+      const statusPush = changed.includes("status") && isServiceStatus(next.status);
+      if (changed.includes("plan") || changed.includes("extra_storage_blocks") || statusPush) {
+        await recordPlanChange(
+          deps,
+          l,
+          { plan: next.plan, extra_storage_blocks: next.extra_storage_blocks, ...(statusPush ? { status: next.status } : {}) },
+          actor,
+        );
         planPush = await pushPlan(deps, l.id, actor);
       }
       let billingSync: string | null = null;
@@ -212,6 +228,22 @@ export function opsLicenseesRouter(deps: Deps): Router {
       }
       const fresh = (await getLicensee(deps.db, l.id))!;
       return res.json({ licensee: staffView(fresh), plan_push: planPush, billing_sync: billingSync });
+    }),
+  );
+
+  // Staff confirm a cancelled licensee's data was purged (on or after its purge date). Status stays cancelled.
+  router.post(
+    "/licensees/:id/purged",
+    h(async (req, res) => {
+      const l = await load(req.params.id);
+      if (!l) return res.status(404).json(notFound);
+      const r = await markPurged(deps.db, l.id, deps.now(), actorOf(req));
+      if (r === "not_cancelled") return res.status(409).json({ error: r, message: "Only a cancelled licensee can be marked purged." });
+      if (r === "not_due") {
+        return res.status(409).json({ error: r, message: `The data is held until ${staffView(l).data_purge_on}; it cannot be marked purged before then.` });
+      }
+      const fresh = (await getLicensee(deps.db, l.id))!;
+      return res.json({ result: r, licensee: staffView(fresh) });
     }),
   );
 
@@ -290,9 +322,21 @@ export function opsLicenseesRouter(deps: Deps): Router {
   router.post(
     "/licensees/:id/billing/checkout",
     h(async (req, res) => {
-      requireStripe(deps);
+      const stripe = requireStripe(deps);
       const l = await load(req.params.id);
       if (!l) return res.status(404).json(notFound);
+      if (l.stripe_subscription_id) {
+        // A second Checkout would start a second subscription: only allowed once the old one has ended.
+        const live = await liveSubscriptionStatus(stripe, l.stripe_subscription_id);
+        if (live) {
+          return res.status(409).json({
+            error: "subscription_exists",
+            subscription_id: l.stripe_subscription_id,
+            subscription_status: live,
+            message: `This licensee already has a Stripe subscription (${live}). Change the plan or seats here instead, or cancel that subscription in Stripe first.`,
+          });
+        }
+      }
       const session = await createCheckout(deps, l);
       await audit(deps.db, actorOf(req), "licensee.billing_checkout", l.id, { session_id: session.id });
       return res.json({ url: session.url, session_id: session.id });

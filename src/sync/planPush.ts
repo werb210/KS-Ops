@@ -1,23 +1,70 @@
-// Pushes a licensee's plan and extra storage to its own server (PUT {server_url}/api/plan with X-KS-Ops-Key). When the
-// push fails, or the server address or ops key is not known yet, the licensee is marked pending_sync and the retry
-// worker tries again every 5 minutes. The push always sends the licensee's current values, so the latest change wins.
+// Pushes a licensee's plan, extra storage and service status to its own server (PUT {server_url}/api/plan with
+// X-KS-Ops-Key). When the push fails, or the server address or ops key is not known yet, the licensee is marked
+// pending_sync and the retry worker tries again every 5 minutes. The push always sends the licensee's current values,
+// so the latest change wins.
+//
+// status is only sent once the licensee is live (trial, active, past_due, suspended, cancelled). KS-server: suspended =
+// the staff portal shows a notice and blocks new applications and calls but data stays readable; cancelled = read-only
+// export only. Servers that do not know the field ignore it.
+import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { getLicensee, opsKeyOf, type LicenseeRow } from "../licensees/repo.js";
 
 export const RETRY_MINUTES = 5;
 
+/** Statuses a licensee's server is told about. pending_payment and provisioning are KS-Ops-only. */
+export const SERVICE_STATUSES = ["trial", "active", "past_due", "suspended", "cancelled"] as const;
+export const isServiceStatus = (s: unknown): boolean => (SERVICE_STATUSES as readonly unknown[]).includes(s);
+
+/** The body of PUT {server_url}/api/plan. */
+export function planPushBody(l: Pick<LicenseeRow, "plan" | "extra_storage_blocks" | "status">) {
+  return {
+    plan: l.plan,
+    extra_storage_blocks: l.extra_storage_blocks,
+    ...(isServiceStatus(l.status) ? { status: l.status } : {}),
+  };
+}
+
+/**
+ * Records a status change and marks the licensee for a push, which the retry worker sends within 5 minutes (used where
+ * an immediate call would hold up the caller, like the Stripe webhook). Only service statuses are pushed, and only
+ * when the licensee has a server.
+ */
+export async function queueStatusPush(db: Q, licenseeId: string, from: string, to: string, by: string): Promise<boolean> {
+  if (from === to || !isServiceStatus(to)) return false;
+  const r = await db.query(
+    `INSERT INTO plan_changes (licensee_id, from_plan, to_plan, from_extra_storage_blocks, to_extra_storage_blocks,
+                               from_status, to_status, changed_by)
+     SELECT id, plan, plan, extra_storage_blocks, extra_storage_blocks, $2, $3, $4 FROM licensees
+      WHERE id = $1 AND server_url IS NOT NULL
+     RETURNING id`,
+    [licenseeId, from, to, by],
+  );
+  if (!(r.rowCount ?? r.rows.length)) return false;
+  await db.query(
+    "UPDATE licensees SET plan_sync_status = 'pending_sync', plan_sync_next_at = NULL, updated_at = now() WHERE id = $1",
+    [licenseeId],
+  );
+  return true;
+}
+
 export type PushResult = { ok: true } | { ok: false; error: string };
 
 export async function recordPlanChange(
   deps: Pick<Deps, "db">,
-  before: Pick<LicenseeRow, "id" | "plan" | "extra_storage_blocks">,
-  after: { plan: string; extra_storage_blocks: number },
+  before: Pick<LicenseeRow, "id" | "plan" | "extra_storage_blocks"> & { status?: string },
+  after: { plan: string; extra_storage_blocks: number; status?: string },
   by: string,
 ): Promise<string> {
+  const statusChanged = after.status !== undefined && after.status !== before.status;
   const r = await deps.db.query(
-    `INSERT INTO plan_changes (licensee_id, from_plan, to_plan, from_extra_storage_blocks, to_extra_storage_blocks, changed_by)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-    [before.id, before.plan, after.plan, before.extra_storage_blocks, after.extra_storage_blocks, by],
+    `INSERT INTO plan_changes (licensee_id, from_plan, to_plan, from_extra_storage_blocks, to_extra_storage_blocks,
+                               from_status, to_status, changed_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [
+      before.id, before.plan, after.plan, before.extra_storage_blocks, after.extra_storage_blocks,
+      statusChanged ? (before.status ?? null) : null, statusChanged ? after.status : null, by,
+    ],
   );
   return r.rows[0].id as string;
 }
@@ -50,7 +97,7 @@ export async function pushPlan(deps: Pick<Deps, "db" | "fetch" | "now">, license
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/plan`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120) },
-      body: JSON.stringify({ plan: l.plan, extra_storage_blocks: l.extra_storage_blocks }),
+      body: JSON.stringify(planPushBody(l)),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {

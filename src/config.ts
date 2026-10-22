@@ -30,3 +30,42 @@ export function workersEnabled(e: NodeJS.ProcessEnv = process.env): boolean {
   if (v === "off" || v === "false" || v === "0") return false;
   return e.NODE_ENV !== "test";
 }
+
+export function isProduction(e: NodeJS.ProcessEnv = process.env): boolean {
+  return env("NODE_ENV", e) === "production";
+}
+
+/** Comma-separated list, trimmed and lower-cased, empty entries dropped. */
+export function lowerList(name: string, e: NodeJS.ProcessEnv = process.env): string[] {
+  return env(name, e)
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** OPS_ADMIN_EMAILS: the Boreal staff allowed into Keystone operations (compared case-insensitively). */
+export function opsAdminEmails(e: NodeJS.ProcessEnv = process.env): string[] {
+  return lowerList("OPS_ADMIN_EMAILS", e);
+}
+
+export const DEFAULT_SERVER_HOST_SUFFIXES = ".azurewebsites.net,.azurestaticapps.net";
+
+/** OPS_ALLOWED_SERVER_HOST_SUFFIXES: where a licensee's server_url may point. ["*"] allows any host. */
+export function allowedServerHostSuffixes(e: NodeJS.ProcessEnv = process.env): string[] {
+  const raw = env("OPS_ALLOWED_SERVER_HOST_SUFFIXES", e) || DEFAULT_SERVER_HOST_SUFFIXES;
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** PENDING_SIGNUP_DAYS (default 7): website sign-ups still waiting for payment after this are cancelled. */
+export function pendingSignupDays(e: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env("PENDING_SIGNUP_DAYS", e) || 7);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 7;
+}
+
+/** SIGNUP_TURNSTILE_OPTIONAL=true lets production take sign-ups without TURNSTILE_SECRET. */
+export function signupTurnstileOptional(e: NodeJS.ProcessEnv = process.env): boolean {
+  return env("SIGNUP_TURNSTILE_OPTIONAL", e).toLowerCase() === "true";
+}
