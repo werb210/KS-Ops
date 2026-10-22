@@ -7,6 +7,7 @@ import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { audit } from "../licensees/repo.js";
 import { dataPurgeOn, mrrOf, type LicenseeRow } from "../licensees/repo.js";
+import { watchlistStats } from "../watchlist.js";
 
 const TICKET_STATUSES = ["open", "waiting", "resolved", "closed"] as const;
 const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
@@ -235,6 +236,14 @@ export function opsSupportRouter(deps: Deps): Router {
         data_purges_due: purges.filter((p) => p.due).length,
         currency: "CAD",
       });
+    }),
+  );
+
+  // Shared fraud watchlist totals (no hashes): how many licensees share, how many files and entries are on it.
+  router.get(
+    "/watchlist",
+    h(async (_req, res) => {
+      res.json(await watchlistStats(deps.db));
     }),
   );
 

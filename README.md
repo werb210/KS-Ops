@@ -54,6 +54,7 @@ again after a price changes.
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
 | `OPS_WORKERS` | no | `off` stops the background jobs (they never run under `NODE_ENV=test`) |
 | `TRUST_PROXY_HOPS` | no | proxies in front of the app (default 1, Azure App Service) |
+| `KS_WATCHLIST_OPS_PEPPER` | recommended | keys every shared-watchlist hash once more before it is stored, so a copy of this database alone is useless. Set it once and never change it (stored hashes would stop matching) |
 
 Stripe webhook events to send: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
 `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`,
@@ -92,6 +93,14 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
   generated at the same time or later
 - `POST /api/licensees/:id/requests` — upgrade or storage request
 - `POST /api/licensees/:id/tickets` — support ticket from a licensee admin
+- `POST /api/licensees/:id/watchlist/opt-in` `{ opt_in }` — shared fraud watchlist on/off; off deletes everything the
+  licensee shared
+- `POST /api/licensees/:id/watchlist/report` `{ application_ref, entries: [{ kind, hash }] }` — replace one confirmed-fraud
+  file's entries (403 `watchlist_not_opted_in` until opted in). kind: phone, email, business_number, address,
+  bank_account, person; hash: 64 hex characters (HMAC made on the licensee's server with `KS_WATCHLIST_PEPPER`)
+- `POST /api/licensees/:id/watchlist/withdraw` `{ application_ref }` — the file was restored out of Fraud
+- `POST /api/licensees/:id/watchlist/check` `{ entries }` -> `{ matches: [{ kind, hash, brokerages, reports }] }` — reports
+  by OTHER opted-in licensees only. No personal data is ever sent or stored, only hashes
 - `POST /api/licensees/:id/purged` — the server reports a cancelled licensee's data was deleted (accepted on or after
   the purge date, 409 before)
 - Usage reports with `generated_at` more than 5 minutes in the future are refused (400). Overage is billed from
@@ -108,6 +117,7 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
   data purged by hand after that date (status stays `cancelled`, `purged_at` is set; a purged licensee cannot be
   reopened).
 - `POST /api/ops/licensees/:id/ops-key` — makes a new key and shows it once
+- `GET /api/ops/watchlist` — shared watchlist totals: licensees sharing, files, entries (never the hashes)
 - `POST /api/ops/licensees/:id/sync-usage?period=YYYY-MM` — pull the usage report now
 - `GET /api/ops/licensees/:id/invoices`, `POST /api/ops/licensees/:id/invoices/preview?period=YYYY-MM`
 - `POST /api/ops/licensees/:id/billing/checkout` — Stripe Checkout link for the subscription (and onboarding fee if unpaid)

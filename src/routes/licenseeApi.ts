@@ -1,4 +1,5 @@
-// Calls from a licensee's KS-server (X-KS-Ops-Key): usage reports, upgrade/storage requests and support tickets.
+// Calls from a licensee's KS-server (X-KS-Ops-Key): usage reports, upgrade/storage requests, support tickets and the
+// shared fraud watchlist (opt-in, hashes only - see src/watchlist.ts).
 import { Router } from "express";
 import { z } from "zod";
 import { supportEmail } from "../config.js";
@@ -8,6 +9,7 @@ import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody } from "../lib/http.js";
 import { dataPurgeOn, markPurged } from "../licensees/repo.js";
 import { futureGeneratedAt, storeUsageReport, usageReportSchema } from "../sync/usage.js";
+import { checkEntries, checkSchema, optInSchema, replaceReport, reportSchema, setOptIn, withdraw, withdrawSchema } from "../watchlist.js";
 
 const requestSchema = z
   .object({
@@ -131,6 +133,52 @@ export function licenseeApiRouter(deps: Deps): Router {
         "ticket notice",
       );
       return res.status(201).json({ ok: true, ticket_id: ticketId });
+    }),
+  );
+
+  // ---- shared fraud watchlist (KS-server v9). Report and check need the licensee to have opted in.
+  router.post(
+    "/:id/watchlist/opt-in",
+    auth,
+    h(async (req, res) => {
+      const parsed = parseBody(optInSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_request", errors: parsed.errors });
+      const r = await setOptIn(deps.db, req.licensee!.id, parsed.data.opt_in, deps.now());
+      return res.json({ ok: true, opt_in: parsed.data.opt_in, removed: r.removed });
+    }),
+  );
+
+  router.post(
+    "/:id/watchlist/report",
+    auth,
+    h(async (req, res) => {
+      if (!req.licensee!.watchlist_opt_in) return res.status(403).json({ error: "watchlist_not_opted_in" });
+      const parsed = parseBody(reportSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_request", errors: parsed.errors });
+      const stored = await replaceReport(deps.db, req.licensee!.id, parsed.data.application_ref, parsed.data.entries);
+      return res.status(200).json({ ok: true, stored });
+    }),
+  );
+
+  router.post(
+    "/:id/watchlist/withdraw",
+    auth,
+    h(async (req, res) => {
+      const parsed = parseBody(withdrawSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_request", errors: parsed.errors });
+      return res.json({ ok: true, removed: await withdraw(deps.db, req.licensee!.id, parsed.data.application_ref) });
+    }),
+  );
+
+  router.post(
+    "/:id/watchlist/check",
+    auth,
+    h(async (req, res) => {
+      if (!req.licensee!.watchlist_opt_in) return res.status(403).json({ error: "watchlist_not_opted_in" });
+      const parsed = parseBody(checkSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_request", errors: parsed.errors });
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ ok: true, matches: await checkEntries(deps.db, req.licensee!.id, parsed.data.entries) });
     }),
   );
 
