@@ -21,6 +21,8 @@ export type LicenseeRow = {
   support_level: SupportLevel;
   seats: number;
   extra_storage_blocks: number;
+  /** KS_OPS_BANK_CONNECT_ADDON - add-ons switched on by Keystone staff (not plan features). Missing = none. */
+  addons?: Record<string, boolean> | null;
   server_url: string | null;
   client_url: string | null;
   portal_url: string | null;

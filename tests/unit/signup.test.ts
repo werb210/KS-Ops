@@ -155,6 +155,13 @@ describe("POST /api/public/signup", () => {
     expect(lender.label).toBe("Lender portal (lenders can send you deals they can't place)");
   });
 
+  // KS_OPS_BANK_CONNECT_ADDON - bank connect is a hidden per-licensee add-on: never on a public plan.
+  it("does not list bank connect or fraud check 3 on any plan", async () => {
+    const res = await request(createApp(makeDeps())).get("/api/public/plans");
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toMatch(/bank_connect|fraud_3|flinks|bank connect/i);
+  });
+
   it("checks Turnstile only after the form and the code pass, so a 400 or 409 does not use up the token", async () => {
     process.env.TURNSTILE_SECRET = "ts-secret";
     const f = vi.fn(async () => jsonResponse({ success: true }));

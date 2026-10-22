@@ -69,7 +69,11 @@ How they are handled:
   audited and reported to sales. Staff Checkout answers 409 `subscription_exists` in that case.
 - `invoice.paid` only moves `past_due` back to `active`, and only for invoices of the licensee's own subscription.
 - Status changes (Stripe or staff) to `trial`, `active`, `past_due`, `suspended` or `cancelled` are pushed to the
-  licensee's server with its plan: `PUT {server_url}/api/plan { plan, extra_storage_blocks, status }`.
+  licensee's server with its plan: `PUT {server_url}/api/plan { plan, extra_storage_blocks, status, addons }`.
+- Add-ons (`addons`, e.g. `{ "bank_connect": true }`) are not plan features: Keystone staff switch them on for one
+  licensee with `PATCH /api/ops/licensees/:id { "addons": { "bank_connect": true } }` (or `false`), which is audited
+  and pushed like a plan change. They are never listed in `/api/public/plans` and the licensee cannot change them.
+  `bank_connect` = the applicant Connect Bank (View-Only) step, the staff request item, fraud check 3 and Flinks.
 
 ## API
 
@@ -110,7 +114,7 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
 - `POST /api/ops/auth/exchange { bfToken }` — Admin users only; returns `{ token, expires_in, user }` (1 hour).
   `GET /api/ops/auth/me` returns who the token belongs to.
 - `GET /api/ops/licensees` (`?status=&q=`), `POST /api/ops/licensees`, `GET /api/ops/licensees/:id`,
-  `PATCH /api/ops/licensees/:id` (plan, extra storage and live status changes are pushed to the licensee's server;
+  `PATCH /api/ops/licensees/:id` (plan, extra storage, add-ons and live status changes are pushed to the licensee's server;
   plan, seat, support and storage changes update the Stripe subscription), `POST /api/ops/licensees/:id/notes`
 - Cancelled licensees: `cancelled_at` is set when the status becomes `cancelled`; `data_purge_on` (cancelled_at +
   180 days) shows on the licensee and in the dashboard's `data_purges`. `POST /api/ops/licensees/:id/purged` marks the

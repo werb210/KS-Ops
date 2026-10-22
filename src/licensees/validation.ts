@@ -325,6 +325,11 @@ export const staffPatchSchema = z
     primary_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
     assistant_name: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(40).nullable()),
     onboarding_fee_paid: z.boolean(),
+    // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.
+    addons: z
+      .object({ bank_connect: z.boolean({ invalid_type_error: "bank_connect must be true or false." }) })
+      .partial()
+      .strict(),
   })
   .partial()
   .strict()
