@@ -1,0 +1,13 @@
+process.env.NODE_ENV = "test";
+process.env.OPS_JWT_SECRET = "test-jwt-secret-that-is-long-enough-0123456789";
+process.env.OPS_ENCRYPTION_KEY = "a".repeat(64);
+process.env.OPS_ADMIN_TOKEN = "break-glass-token-that-is-long-enough-0123456789";
+process.env.BF_SERVER_URL = "https://bf.example.test";
+process.env.PUBLIC_SITE_URL = "https://keystone.example.test";
+process.env.OPS_ALLOWED_ORIGINS = "https://staff.example.test";
+process.env.KS_SALES_EMAIL = "sales@example.test";
+delete process.env.STRIPE_SECRET_KEY;
+delete process.env.STRIPE_WEBHOOK_SECRET;
+delete process.env.TURNSTILE_SECRET;
+delete process.env.MS_GRAPH_TENANT_ID;
+delete process.env.SENDGRID_API_KEY;
