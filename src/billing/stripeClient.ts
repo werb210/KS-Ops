@@ -1,0 +1,41 @@
+// The Stripe client. Only the calls KS-Ops makes are typed here, which keeps tests' fakes small.
+import Stripe from "stripe";
+import { env } from "../config.js";
+
+type Opts = { idempotencyKey?: string };
+type Obj = Record<string, any>;
+
+export type StripeLike = {
+  checkout: { sessions: { create: (params: Obj, opts?: Opts) => Promise<{ id: string; url: string | null }> } };
+  subscriptions: {
+    retrieve: (id: string) => Promise<Obj>;
+    update: (id: string, params: Obj, opts?: Opts) => Promise<Obj>;
+  };
+  invoiceItems: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
+  invoices: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
+  products: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
+  prices: {
+    create: (params: Obj, opts?: Opts) => Promise<Obj>;
+    list: (params: Obj) => Promise<{ data: Obj[] }>;
+  };
+  webhooks: { constructEvent: (payload: Buffer | string, header: string, secret: string) => Obj };
+};
+
+let cached: { key: string; client: StripeLike } | null = null;
+
+/** The real client, or null when STRIPE_SECRET_KEY is not set. */
+export function realStripe(): StripeLike | null {
+  const key = env("STRIPE_SECRET_KEY");
+  if (!key) return null;
+  if (!cached || cached.key !== key) {
+    cached = { key, client: new Stripe(key, { appInfo: { name: "KS-Ops" } }) as unknown as StripeLike };
+  }
+  return cached.client;
+}
+
+export class BillingNotConfigured extends Error {
+  constructor(public reason: string) {
+    super(reason);
+    this.name = "BillingNotConfigured";
+  }
+}
