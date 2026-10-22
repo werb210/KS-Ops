@@ -28,6 +28,9 @@ export type LicenseeRow = {
   primary_color: string | null;
   assistant_name: string | null;
   ops_key_hash: string | null;
+  /** v3 shared fraud watchlist (opt-in from the licensee's portal). */
+  watchlist_opt_in?: boolean;
+  watchlist_opt_in_at?: Date | string | null;
   ops_key_encrypted: string | null;
   ops_key_rotated_at: Date | null;
   signup_token_hash: string | null;
