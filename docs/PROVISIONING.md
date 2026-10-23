@@ -50,26 +50,72 @@ the Company page in their staff portal (KS-server `PUT /api/licensee`).
 
 ## After it runs
 
-The script prints the addresses, then the GitHub settings each repo's deploy workflow needs:
+The script prints the addresses, then the GitHub settings the deploy workflows need. Each of the four app
+repositories (KS-server, KS-Agent, KS-Portal, KS-Client) deploys every licensee listed in its `deploy/licensees.json`,
+each from its own GitHub environment named `ks-<code>`. The development copy keeps deploying from the repositories'
+own (repository-level) secrets and variables, exactly as before.
 
-- **KS-server:** secrets `AZURE_CREDENTIALS`, `DATABASE_URL`; variable `AZURE_WEBAPP_NAME`. The script prints the
-  database host, name and user but never the password: copy `DATABASE_URL` from `ks-<code>-server`'s app settings
-  (`az webapp config appsettings list -g ks-<code> -n ks-<code>-server --query "[?name=='DATABASE_URL'].value" -o tsv`).
-- **KS-Agent:** secret `AZURE_CREDENTIALS`; variable `AZURE_WEBAPP_NAME`.
-- **KS-Portal:** secrets `AZURE_STATIC_WEB_APPS_API_TOKEN`, `VITE_API_BASE_URL`, `VITE_APP_URL`,
-  `VITE_CLIENT_APP_URL`, `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_REDIRECT_URI`, `VITE_MSAL_SCOPES`.
-- **KS-Client:** secret `AZURE_STATIC_WEB_APPS_API_TOKEN`. Its server address comes from `client-app/.env.production`.
+### 1. Create the GitHub environment `ks-<code>` in each of the four repositories
+
+Settings > Environments > New environment, name `ks-<code>` (e.g. `ks-northwind`). The script prints this name. Add
+(secrets under "Environment secrets", the rest under "Environment variables"):
+
+| Repository | Secrets | Variables |
+| --- | --- | --- |
+| KS-server | `AZURE_CREDENTIALS` (required) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-server`) |
+| KS-Agent | `AZURE_CREDENTIALS` (required) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-agent`) |
+| KS-Portal | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-portal`'s token) | `VITE_API_BASE_URL`, `VITE_APP_URL`, `VITE_CLIENT_APP_URL` (required, https); `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_REDIRECT_URI`, `VITE_MSAL_SCOPES` (Microsoft sign-in, off without a client id); `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME`, `VITE_ASSISTANT_NAME` (optional) |
+| KS-Client | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-client`'s token) | `VITE_API_BASE_URL` (required, https); `VITE_LICENSEE` (optional: a folder under KS-Client `licensees/` for the branded build); `VITE_CLIENT_APP_URL`, `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME` (optional) |
+
+- `AZURE_CREDENTIALS` is the JSON of the deploy service principal `ks-<code>-deploy` (contributor on `ks-<code>`
+  only), printed when the script runs with `CREATE_DEPLOY_SP=1`.
+- The `VITE_*` values are compiled into the public JavaScript, so they are variables, not secrets.
+- KS-server needs no `DATABASE_URL` in GitHub: it applies its migrations on startup with the `DATABASE_URL` app
+  setting the script wrote. (To read it: `az webapp config appsettings list -g ks-<code> -n ks-<code>-server --query
+  "[?name=='DATABASE_URL'].value" -o tsv`.)
+- If a value is missing from the environment, GitHub would quietly use the repository-level one (the development
+  copy's). The deploy jobs refuse that: the licensee's job fails with "Add ... to the GitHub environment 'ks-<code>'"
+  and nothing is deployed for it.
 
 Secrets are printed only inside the block marked **COPY THIS NOW**. Run the script again to see them again.
+
+### 2. Add the licensee to `deploy/licensees.json` in each of the four repositories
+
+The same line in all four (the script prints it):
+
+```json
+{
+  "licensees": [
+    { "code": "northwind", "environment": "ks-northwind", "enabled": true, "apps": ["server", "agent", "portal", "client"] }
+  ]
+}
+```
+
+`environment` defaults to `ks-<code>` and `apps` to all four; `enabled: false` keeps an entry without deploying it.
+The file holds nothing secret. CI checks it (`node deploy/licensee-matrix.mjs --check`), so merge the change through
+a pull request; once merged, that push deploys the licensee.
+
+### 3. Deploy
+
+Every push to `main` whose CI passes deploys the development copy and then every enabled licensee, one job per
+licensee; one licensee failing does not stop the others. To deploy one licensee by hand (e.g. the first time): Actions
+> the deploy workflow ("Build and deploy Node.js app to Azure Web App" in KS-server, "Build and deploy the assistant
+to Azure Web App" in KS-Agent, "deploy" in KS-Portal, "Azure Static Web Apps CI/CD" in KS-Client) > Run workflow on
+`main`, with `licensee` set to the code. Left empty, a manual run deploys the development copy and every licensee.
+
+The licensee's iPhone/iPad and Android apps are separate: KS-Client's "Build licensee apps" workflow, with its own
+environment named after the `licensees/<key>` folder (see KS-Client `docs/LICENSEE_APPS.md`).
+
+### Postgres firewall
 
 Postgres has no "allow all Azure services" rule. Each run adds a rule per outbound address of the KS-server and
 KS-Agent web apps (`possibleOutboundIpAddresses`) and removes any other rule, so run the script again after changing
 the App Service plan's size or region (the outbound addresses can change). If KS-Ops cannot make the ops key, or its
 answer cannot be read, the script stops with an error rather than continuing without one.
 
-Then:
+### Then
 
-1. Deploy KS-server, KS-Agent, KS-Portal and KS-Client.
+1. Deploy KS-server, KS-Agent, KS-Portal and KS-Client (step 3 above).
 2. If you did not pass `OPS_TOKEN`, open the licensee in KS-Ops, press "Rotate ops key", set the key as `KS_OPS_KEY`
    on `ks-<code>-server`, and save the server, portal and client addresses on the licensee.
 3. KS-Ops pushes the licensee's plan to the new server within 5 minutes of it answering.
@@ -77,10 +123,10 @@ Then:
 
 ## Today's limits
 
-- KS-server's and KS-Portal's deploy workflows deploy to the development copy (`ks-server-dev` and the dev Static Web
-  App) and read their settings from single repository secrets. Deploying many licensees from one repository needs a
-  GitHub environment per licensee (for example `ks-northwind`) holding the values above, and the workflows reading
-  `vars.AZURE_WEBAPP_NAME` and environment secrets.
-- KS-Client's web build takes its server address from the committed `client-app/.env.production`. A per-licensee
-  web build needs that value passed in from the environment instead.
-- KS-Agent has no deploy workflow yet; the settings above are what Boreal's agent uses.
+- Creating the four `ks-<code>` GitHub environments, their secrets and variables, and the `deploy/licensees.json`
+  entries is still done by hand (four repositories, same values). The script prints all of it.
+- `deploy/licensees.json` is kept in each of the four repositories; keep the copies the same.
+- Each licensee's portal and client web app are built once per licensee (their addresses are compiled in), so a push
+  to `main` takes longer as licensees are added. KS-server and KS-Agent are built once and the same package is
+  deployed to every licensee.
+- Manual deploys run from `main` only.
