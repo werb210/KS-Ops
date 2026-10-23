@@ -8,7 +8,10 @@
 //        -> 200 { server_url, staff_token, client_url, expires_at, name, company } | 404 | 410 (expired) | 503
 // From the demo server (X-KS-Ops-Key = KS_DEMO_OPS_KEY):
 //   POST /api/demo/sessions/:id/events   { events: [{ type, step?, at, data? }] } -> 202
-//   POST /api/demo/sessions/:id/complete { summary, package_pdf_base64, package_filename } -> 202 (emails go out)
+//   POST /api/demo/sessions/:id/complete { summary, package_pdf_base64, package_filename, lender_email? } -> 202 (emails go out)
+//        lender_email (KS_OPS_v12): the real lender email for the sample file - { lender_name?, subject, html, text,
+//        attachments: [{ filename, content_type, base64 }] }; the prospect gets exactly that, with a one-line demo banner.
+//        Without it (an older demo server) the prospect gets the short note with package_pdf_base64 attached.
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
@@ -20,7 +23,7 @@ import { turnstileEnabled, verifyTurnstile } from "../lib/turnstile.js";
 import {
   demoConfigured, demoMaxActive, demoOpsKey, demoPerEmail, demoPerIpDay, demoPortalUrl, demoServerUrl, demoSessionDays,
 } from "../demo/config.js";
-import { magicLinkMail, magicLinkSms, magicLinkUrl } from "../demo/emails.js";
+import { magicLinkMail, magicLinkSms, magicLinkUrl, type LenderEmail } from "../demo/emails.js";
 import { normalizeNaPhone, prettyNaPhone, sendSms } from "../lib/sms.js";
 import * as repo from "../demo/repo.js";
 import { openServerSession } from "../demo/server.js";
@@ -174,6 +177,37 @@ function requireDemoKey(req: Request, res: Response, next: NextFunction) {
   return next();
 }
 
+// KS_OPS_v12 - the real lender email the demo server rendered for the sample file.
+const MAX_PACKAGE_BYTES = 12 * 1024 * 1024;
+const lenderEmailSchema = z.object({
+  lender_name: z.string().max(200).optional(),
+  subject: z.string().min(1).max(300),
+  html: z.string().min(1).max(200_000),
+  text: z.string().min(1).max(100_000),
+  attachments: z.array(z.object({
+    filename: z.string().min(1).max(200),
+    content_type: z.enum(["application/zip", "application/pdf"]),
+    base64: z.string().min(1),
+  })).min(1).max(5),
+});
+
+/** The lender email, checked and size-capped; "invalid" when it is there but unusable. */
+export function parseLenderEmail(raw: unknown): LenderEmail | "invalid" {
+  const p = lenderEmailSchema.safeParse(raw);
+  if (!p.success) return "invalid";
+  let total = 0;
+  const attachments: LenderEmail["attachments"] = [];
+  for (const a of p.data.attachments) {
+    const bytes = Buffer.from(a.base64, "base64");
+    total += bytes.length;
+    if (!bytes.length || total > MAX_PACKAGE_BYTES) return "invalid";
+    const magic = a.content_type === "application/zip" ? "PK\x03\x04" : "%PDF-";
+    if (bytes.subarray(0, magic.length).toString("latin1") !== magic) return "invalid";
+    attachments.push({ filename: a.filename.replace(/[^A-Za-z0-9._ ()-]/g, "_").slice(0, 150), contentType: a.content_type, base64: bytes.toString("base64") });
+  }
+  return { lenderName: p.data.lender_name ?? null, subject: p.data.subject.replace(/[\r\n]+/g, " ").trim(), html: p.data.html, text: p.data.text, attachments };
+}
+
 const eventSchema = z.object({
   type: z.string().regex(/^[a-z_]{1,40}$/),
   step: z.string().max(40).nullish(),
@@ -216,12 +250,12 @@ export function demoOpsRouter(deps: Deps): Router {
       const s = await signupFor(req);
       if (!s) return res.status(404).json({ error: "not_found" });
       const b64 = String(req.body?.package_pdf_base64 ?? "");
-      const pdf = Buffer.from(b64, "base64");
-      if (!b64 || pdf.length > 12 * 1024 * 1024 || pdf.subarray(0, 5).toString("latin1") !== "%PDF-") {
-        return res.status(400).json({ error: "package_required" });
-      }
+      const pdf = b64 ? Buffer.from(b64, "base64") : null;
+      const pdfOk = !!pdf && pdf.length <= 12 * 1024 * 1024 && pdf.subarray(0, 5).toString("latin1") === "%PDF-";
+      const mail = req.body?.lender_email === undefined ? null : parseLenderEmail(req.body.lender_email);
+      if (mail === "invalid" || (!pdfOk && !mail)) return res.status(400).json({ error: "package_required" });
       const filename = String(req.body?.package_filename ?? "Lender-Submission-Package-SAMPLE.pdf").replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 100);
-      await repo.storePackage(deps.db, s.id, pdf, filename);
+      await repo.storePackage(deps.db, s.id, pdfOk ? pdf : null, filename, mail);
       // Emails go out now; anything that fails is retried by the demo job.
       await sendCompletionMails(deps, s.id);
       return res.status(202).json({ ok: true });

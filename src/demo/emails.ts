@@ -1,6 +1,6 @@
 // The demo's emails: the magic link, the prospect's lender package, and the two notes to sales (finished / started
 // but did not finish). Plain words; every value a prospect typed is escaped by bodies().
-import { bodies, esc, type Mail } from "../lib/email.js";
+import { bodies, esc, type Mail, type MailAttachment } from "../lib/email.js";
 import { DEMO_STEPS } from "./config.js";
 import { minutes, type Digest } from "./digest.js";
 
@@ -64,11 +64,31 @@ export function magicLinkSms(s: Pick<SignupLike, "name">, url: string): string {
   return `Keystone: Hi ${firstName(s.name)}, here is your private demo (best on a computer or tablet): ${url} Reply STOP to opt out.`;
 }
 
-export function prospectPackageMail(s: SignupLike, pdfBase64: string, filename: string): Mail {
+/** KS_OPS_v12 - the real lender email the demo server rendered for the sample file (see routes/demo.ts). */
+export type LenderEmail = { lenderName: string | null; subject: string; html: string; text: string; attachments: MailAttachment[] };
+
+export const DEMO_BANNER = "Keystone demo - this is exactly what your lender would receive (sample data).";
+
+/**
+ * The prospect's copy of their lender submission: with the real lender email, exactly that email (subject, body,
+ * signature, attachments) under a one-line demo banner; from an older demo server, the short note with the PDF.
+ */
+export function prospectPackageMail(s: SignupLike, pdfBase64: string | null, filename: string, lender: LenderEmail | null = null): Mail {
+  if (lender) {
+    return {
+      to: [s.email],
+      subject: lender.subject,
+      attachments: lender.attachments,
+      html:
+        `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.4;background:#FFF7E6;border:1px solid #F0C36D;color:#5C3B00;padding:8px 12px;margin:0 0 16px;border-radius:4px;max-width:576px">${esc(DEMO_BANNER)}</div>` +
+        lender.html,
+      text: `${DEMO_BANNER}\n\n${lender.text}`,
+    };
+  }
   return {
     to: [s.email],
     subject: "Your sample lender submission package (Keystone demo)",
-    attachments: [{ filename: filename || "Lender-Submission-Package-SAMPLE.pdf", contentType: "application/pdf", base64: pdfBase64 }],
+    attachments: pdfBase64 ? [{ filename: filename || "Lender-Submission-Package-SAMPLE.pdf", contentType: "application/pdf", base64: pdfBase64 }] : [],
     ...bodies([
       `Hi ${firstName(s.name)},`,
       "Nice work - you just took a file from the borrower's phone to lenders. Attached is the lender submission package Keystone built from what you did: the credit summary, the call note, every document with its fraud-check result, and the documents you accepted.",
