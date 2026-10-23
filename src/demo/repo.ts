@@ -3,7 +3,7 @@ import type { Q } from "../db.js";
 import type { DemoEvent, Digest } from "./digest.js";
 
 export type DemoSignup = {
-  id: string; name: string; email: string; company: string; ip: string | null; user_agent: string | null; token_hash: string;
+  id: string; name: string; email: string; phone: string | null; company: string; ip: string | null; user_agent: string | null; token_hash: string;
   status: "pending" | "active" | "completed" | "wiped"; link_sends: number; last_link_sent_at: Date; server_session_id: string | null;
   opened_at: Date | null; open_count: number; first_activity_at: Date | null; last_activity_at: Date | null; event_count: number;
   completed_at: Date | null; expires_at: Date; digest: Partial<Digest>; package_filename: string | null; has_package?: boolean;
@@ -11,7 +11,7 @@ export type DemoSignup = {
   mail_attempts: number; wiped_at: Date | null; created_at: Date; updated_at: Date;
 };
 
-const COLS = `id, name, email, company, ip, user_agent, token_hash, status, link_sends, last_link_sent_at, server_session_id,
+const COLS = `id, name, email, phone, company, ip, user_agent, token_hash, status, link_sends, last_link_sent_at, server_session_id,
   opened_at, open_count, first_activity_at, last_activity_at, event_count, completed_at, expires_at, digest, package_filename,
   (package_pdf IS NOT NULL) AS has_package, prospect_package_sent_at, sales_completed_sent_at, sales_unfinished_sent_at,
   mail_attempts, wiped_at, created_at, updated_at`;
@@ -49,21 +49,22 @@ export async function countActive(db: Q, now: Date): Promise<number> {
 
 export async function insertSignup(
   db: Q,
-  s: { name: string; email: string; company: string; ip: string; userAgent: string; tokenHash: string; expiresAt: Date; now: Date },
+  s: { name: string; email: string; phone: string | null; company: string; ip: string; userAgent: string; tokenHash: string; expiresAt: Date; now: Date },
 ): Promise<DemoSignup> {
   const r = await db.query(
-    `INSERT INTO demo_signups (name, email, company, ip, user_agent, token_hash, expires_at, created_at, last_link_sent_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8) RETURNING ${COLS}`,
-    [s.name, s.email, s.company, s.ip || null, s.userAgent || null, s.tokenHash, s.expiresAt, s.now],
+    `INSERT INTO demo_signups (name, email, phone, company, ip, user_agent, token_hash, expires_at, created_at, last_link_sent_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) RETURNING ${COLS}`,
+    [s.name, s.email, s.phone, s.company, s.ip || null, s.userAgent || null, s.tokenHash, s.expiresAt, s.now],
   );
   return r.rows[0] as DemoSignup;
 }
 
 /** A fresh magic link for an existing demo (the old link stops working). */
-export async function replaceToken(db: Q, id: string, tokenHash: string, now: Date): Promise<void> {
+export async function replaceToken(db: Q, id: string, tokenHash: string, now: Date, phone: string | null = null): Promise<void> {
   await db.query(
-    `UPDATE demo_signups SET token_hash = $2, link_sends = link_sends + 1, last_link_sent_at = $3, updated_at = now() WHERE id = $1`,
-    [id, tokenHash, now],
+    `UPDATE demo_signups SET token_hash = $2, link_sends = link_sends + 1, last_link_sent_at = $3, phone = COALESCE($4, phone), updated_at = now()
+      WHERE id = $1`,
+    [id, tokenHash, now, phone],
   );
 }
 

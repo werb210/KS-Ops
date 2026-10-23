@@ -1,6 +1,7 @@
 // The self-serve sales demo.
 // Public (the website's "Try it yourself" page and the demo portal; CORS: PUBLIC_SITE_URL + KS_DEMO_PORTAL_URL):
-//   POST /api/public/demo/signup { name, email, company, website_url (honeypot, must be empty), turnstile_token? }
+//   POST /api/public/demo/signup { name, email, company, phone?, website_url (honeypot, must be empty), turnstile_token? }
+//        (phone: a Canadian/US mobile; the link is texted to it as well as emailed when Twilio is set up, see lib/sms.ts)
 //        -> 201 { ok, message } (a magic link is emailed) | 400 { errors } | 429 { error, message } | 503 { error, message }
 //   POST /api/public/demo/open { demo_id, token }   (the magic link: {KS_DEMO_PORTAL_URL}/demo#d=<id>&t=<token>)
 //        -> 200 { server_url, staff_token, client_url, expires_at, name, company } | 404 | 410 (expired) | 503
@@ -18,7 +19,8 @@ import { turnstileEnabled, verifyTurnstile } from "../lib/turnstile.js";
 import {
   demoConfigured, demoMaxActive, demoOpsKey, demoPerEmail, demoPerIpDay, demoPortalUrl, demoServerUrl, demoSessionDays,
 } from "../demo/config.js";
-import { magicLinkMail, magicLinkUrl } from "../demo/emails.js";
+import { magicLinkMail, magicLinkSms, magicLinkUrl } from "../demo/emails.js";
+import { normalizeNaPhone, prettyNaPhone, sendSms } from "../lib/sms.js";
 import * as repo from "../demo/repo.js";
 import { openServerSession } from "../demo/server.js";
 import { sendCompletionMails } from "../demo/jobs.js";
@@ -35,11 +37,29 @@ export const demoSignupSchema = z.object({
   name: text(120),
   email: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.string().max(200).email("Enter a valid email address")),
   company: text(160),
+  phone: z.string().max(40).optional(),
   turnstile_token: z.string().max(4096).optional(),
   website_url: z.any().optional(),
 });
 
 const NAME_OK = /\p{L}/u;
+
+/** Texts the link when a phone was given (and SMS is set up), and always emails it. Returns what to tell the person. */
+async function deliverLink(deps: Deps, s: Parameters<typeof magicLinkMail>[0], url: string, phone: string | null, resent: boolean): Promise<string> {
+  let texted = false;
+  if (phone) {
+    const r = await sendSms(deps.fetch, phone, magicLinkSms(s, url));
+    texted = r.ok;
+    if (!r.ok && r.error !== "sms_not_configured") console.warn(`[demo] link text failed: ${r.error}`);
+  }
+  await sendQuietly(deps.mailer, magicLinkMail(s, url, demoSessionDays()), resent ? "demo link (resent)" : "demo link");
+  if (texted && phone) {
+    return resent
+      ? `You already have a demo - we've texted a fresh link to ${prettyNaPhone(phone)} and emailed it too.`
+      : `We've texted your demo link to ${prettyNaPhone(phone)} and emailed it too.`;
+  }
+  return resent ? DEMO_RESENT_MESSAGE : DEMO_SENT_MESSAGE;
+}
 
 export function demoPublicRouter(deps: Deps): Router {
   const router = Router();
@@ -59,6 +79,9 @@ export function demoPublicRouter(deps: Deps): Router {
       if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
       const input = parsed.data;
       if (!NAME_OK.test(input.name)) return res.status(400).json({ errors: { name: "Enter your name" } });
+      const rawPhone = (input.phone ?? "").trim();
+      const phone = rawPhone ? normalizeNaPhone(rawPhone) : null;
+      if (rawPhone && !phone) return res.status(400).json({ errors: { phone: "Enter a Canadian or US mobile number, like (403) 555-0199" } });
       const now = deps.now();
       const ip = clientIp(req);
 
@@ -73,9 +96,9 @@ export function demoPublicRouter(deps: Deps): Router {
           return res.status(400).json({ errors: { turnstile_token: "Please confirm you are not a robot and try again." } });
         }
         const token = newSecret(24);
-        await repo.replaceToken(deps.db, live.id, sha256Hex(token), now);
-        await sendQuietly(deps.mailer, magicLinkMail(live, magicLinkUrl(demoPortalUrl(), live.id, token), demoSessionDays()), "demo link (resent)");
-        return res.status(200).json({ ok: true, resent: true, message: DEMO_RESENT_MESSAGE });
+        await repo.replaceToken(deps.db, live.id, sha256Hex(token), now, phone);
+        const message = await deliverLink(deps, live, magicLinkUrl(demoPortalUrl(), live.id, token), phone ?? live.phone ?? null, true);
+        return res.status(200).json({ ok: true, resent: true, message });
       }
       if ((await repo.countRecentForEmail(deps.db, input.email, new Date(now.getTime() - 30 * 86_400_000))) >= demoPerEmail()) {
         return res.status(429).json({ error: "too_many_demos", message: "This email has had several demos recently. Contact us and we'll walk you through it live." });
@@ -91,12 +114,12 @@ export function demoPublicRouter(deps: Deps): Router {
       }
       const token = newSecret(24);
       const s = await repo.insertSignup(deps.db, {
-        name: input.name, email: input.email, company: input.company, ip,
+        name: input.name, email: input.email, phone, company: input.company, ip,
         userAgent: String(req.headers["user-agent"] ?? "").slice(0, 300), tokenHash: sha256Hex(token),
         expiresAt: new Date(now.getTime() + demoSessionDays() * 86_400_000), now,
       });
-      await sendQuietly(deps.mailer, magicLinkMail(s, magicLinkUrl(demoPortalUrl(), s.id, token), demoSessionDays()), "demo link");
-      return res.status(201).json({ ok: true, message: DEMO_SENT_MESSAGE });
+      const message = await deliverLink(deps, s, magicLinkUrl(demoPortalUrl(), s.id, token), phone, false);
+      return res.status(201).json({ ok: true, message });
     }),
   );
 

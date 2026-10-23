@@ -6,7 +6,7 @@ export type MailAttachment = { filename: string; contentType: string; base64: st
 export type Mail = { to: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[] };
 export type Mailer = (mail: Mail) => Promise<{ ok: boolean; error?: string }>;
 
-const esc = (s: unknown) =>
+export const esc = (s: unknown) =>
   String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
 
 /** Paragraphs of plain text as both HTML and text bodies. */
@@ -92,7 +92,9 @@ export function createMailer(fetchImpl: typeof fetch = fetch): Mailer {
               { type: "text/plain", value: mail.text },
               { type: "text/html", value: html },
             ],
-            tracking_settings: { click_tracking: { enable: false, enable_text: false }, open_tracking: { enable: false } },
+            // No tracking and no SendGrid unsubscribe footer: these are one-to-one emails people asked for, and tracked links
+            // plus a bulk-mail footer push them into junk folders.
+            tracking_settings: { click_tracking: { enable: false, enable_text: false }, open_tracking: { enable: false }, subscription_tracking: { enable: false } },
             ...(mail.attachments?.length
               ? { attachments: mail.attachments.map((a) => ({ content: a.base64, filename: a.filename, type: a.contentType, disposition: "attachment" })) }
               : {}),
