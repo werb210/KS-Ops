@@ -12,6 +12,7 @@ import {
 import { crossFieldErrors, staffCreateSchema, staffPatchSchema, STATUSES } from "../licensees/validation.js";
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
 import { addonsOf, isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
+import { crmLicenseeCreated, crmLicenseeStatus, crmLicenseeUpdated } from "../crm/triggers.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 import { biConfig, linkPgi, queuePgiBackfill } from "../sync/pgiLink.js";
 
@@ -37,6 +38,12 @@ function pricingView(l: LicenseeRow) {
     onboarding_fee: dollars(onboardingFeeCents(l.plan)),
   };
 }
+
+
+/** Licensee fields the Keystone CRM shows on the company or its contact. */
+const CRM_FIELDS = [
+  "company_name", "company_code", "website", "plan", "seats", "contact_name", "contact_email", "contact_phone",
+] as const;
 
 export function opsLicenseesRouter(deps: Deps): Router {
   const router = Router();
@@ -125,6 +132,7 @@ export function opsLicenseesRouter(deps: Deps): Router {
       }
       await audit(deps.db, actorOf(req), "licensee.create", l.id, { company_code: l.company_code, plan: l.plan, seats: l.seats });
       const fresh = (await getLicensee(deps.db, l.id))!;
+      await crmLicenseeCreated(deps, fresh);
       // The body carries the ops key: never cached by a browser or proxy.
       res.setHeader("Cache-Control", "no-store");
       return res.status(201).json({
@@ -242,6 +250,9 @@ export function opsLicenseesRouter(deps: Deps): Router {
         }
       }
       const fresh = (await getLicensee(deps.db, l.id))!;
+      // Keystone CRM: a status change is an event on the company; other company details just refresh it.
+      if (changed.includes("status")) await crmLicenseeStatus(deps, fresh, l.status, fresh.status, deps.now(), actor);
+      else if (changed.some((c) => (CRM_FIELDS as readonly string[]).includes(c))) await crmLicenseeUpdated(deps, fresh);
       return res.json({ licensee: staffView(fresh), plan_push: planPush, billing_sync: billingSync });
     }),
   );

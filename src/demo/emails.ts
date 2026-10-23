@@ -98,7 +98,7 @@ export function prospectPackageMail(s: SignupLike, pdfBase64: string | null, fil
   };
 }
 
-function digestLines(d: Digest): string[] {
+export function digestLines(d: Digest): string[] {
   const done = DEMO_STEPS.filter(([k]) => d.steps_completed.includes(k)).map(([, l]) => l);
   const skipped = DEMO_STEPS.filter(([k]) => d.steps_skipped.includes(k)).map(([, l]) => l);
   const notReached = DEMO_STEPS.filter(([k]) => !d.steps_completed.includes(k) && !d.steps_skipped.includes(k)).map(([, l]) => l);

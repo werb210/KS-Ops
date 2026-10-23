@@ -28,6 +28,8 @@ import { normalizeNaPhone, prettyNaPhone, sendSms } from "../lib/sms.js";
 import * as repo from "../demo/repo.js";
 import { openServerSession } from "../demo/server.js";
 import { sendCompletionMails } from "../demo/jobs.js";
+import { digestEvents } from "../demo/digest.js";
+import { crmDemoCompleted, crmDemoOpened, crmDemoProgress, crmDemoSignup } from "../crm/triggers.js";
 
 export const DEMO_SENT_MESSAGE = "Check your email - we've sent you a private link to your demo.";
 export const DEMO_RESENT_MESSAGE = "Welcome back - we've emailed you a fresh link to your demo.";
@@ -129,6 +131,7 @@ export function demoPublicRouter(deps: Deps): Router {
         userAgent: String(req.headers["user-agent"] ?? "").slice(0, 300), tokenHash: sha256Hex(token),
         expiresAt: new Date(now.getTime() + demoSessionDays() * 86_400_000), now,
       });
+      await crmDemoSignup(deps, s);
       const url = magicLinkUrl(demoPortalUrl(), s.id, token);
       const message = await deliverLink(deps, s, url, phone, false);
       return res.status(201).json({ ok: true, message, open_url: url });
@@ -157,6 +160,7 @@ export function demoPublicRouter(deps: Deps): Router {
         return res.status(503).json({ error: "demo_server_unavailable", message: "The demo could not start just now. Please try the link again in a minute." });
       }
       await repo.markOpened(deps.db, s.id, opened.session.session_id);
+      if (!s.opened_at) await crmDemoOpened(deps, s, deps.now());
       return res.json({
         server_url: demoServerUrl(),
         staff_token: opened.session.staff_token,
@@ -240,6 +244,12 @@ export function demoOpsRouter(deps: Deps): Router {
         events.push({ type: p.data.type, step: p.data.step ?? null, data, at: new Date(p.data.at) });
       }
       const stored = await repo.addEvents(deps.db, s.id, events);
+      // Keystone CRM: the steps reached (held back a minute and coalesced), and "finished" once they submit.
+      if (stored && events.some((e) => e.step)) await crmDemoProgress(deps, s, await repo.eventsFor(deps.db, s.id));
+      if (!s.completed_at && events.some((e) => e.type === "submitted")) {
+        const fresh = await repo.getSignup(deps.db, s.id);
+        if (fresh?.completed_at) await crmDemoCompleted(deps, fresh, null);
+      }
       return res.status(202).json({ ok: true, stored });
     }),
   );
@@ -258,6 +268,8 @@ export function demoOpsRouter(deps: Deps): Router {
       await repo.storePackage(deps.db, s.id, pdfOk ? pdf : null, filename, mail);
       // Emails go out now; anything that fails is retried by the demo job.
       await sendCompletionMails(deps, s.id);
+      const fresh = (await repo.getSignup(deps.db, s.id)) ?? s;
+      await crmDemoCompleted(deps, fresh, digestEvents(await repo.eventsFor(deps.db, s.id)));
       return res.status(202).json({ ok: true });
     }),
   );

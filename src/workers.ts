@@ -10,6 +10,9 @@ import { retryPendingPlanPushes } from "./sync/planPush.js";
 import { syncPgiLinks } from "./sync/pgiLink.js";
 import { isFinal, pullUsageReport } from "./sync/usage.js";
 import { runDemoJobs } from "./demo/jobs.js";
+import { getLicensee } from "./licensees/repo.js";
+import { crmLicenseeStatus } from "./crm/triggers.js";
+import { flushCrmOutbox } from "./crm/outbox.js";
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -79,6 +82,11 @@ export async function expirePendingSignups(deps: Pick<Deps, "db" | "now">): Prom
   );
   for (const row of r.rows) {
     await audit(deps.db, "ks-ops", "signup.expired", row.id, { released_company_code: row.released_company_code, days });
+    // Keystone CRM: the company keeps the code it signed up with (the stored one is now a placeholder).
+    const l = await getLicensee(deps.db, row.id);
+    if (l) {
+      await crmLicenseeStatus(deps, { ...l, company_code: row.released_company_code ?? l.company_code }, "pending_payment", "cancelled", deps.now(), `unpaid after ${days} days`);
+    }
   }
   return r.rows.length;
 }
@@ -178,7 +186,23 @@ export function startWorkers(deps: Deps): () => void {
       demoBusy = false;
     }
   };
+  // Keystone CRM pushes (src/crm/outbox.ts): due ones go every 30 seconds.
+  let crmBusy = false;
+  const crm = async () => {
+    if (crmBusy) return;
+    crmBusy = true;
+    try {
+      const r = await flushCrmOutbox(deps);
+      if (r.tried) console.log(`[workers] crm push: ${r.sent}/${r.tried} sent`);
+    } catch (err) {
+      console.error("[workers] crm push failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      crmBusy = false;
+    }
+  };
   const timers = [
+    setInterval(crm, 30_000),
+    setTimeout(crm, 20_000),
     setInterval(demo, 10 * 60_000),
     setTimeout(demo, 60_000),
     setInterval(push, 5 * 60_000),
