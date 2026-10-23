@@ -1,6 +1,6 @@
 // The demo's emails: the magic link, the prospect's lender package, and the two notes to sales (finished / started
 // but did not finish). Plain words; every value a prospect typed is escaped by bodies().
-import { bodies, type Mail } from "../lib/email.js";
+import { bodies, esc, type Mail } from "../lib/email.js";
 import { DEMO_STEPS } from "./config.js";
 import { minutes, type Digest } from "./digest.js";
 
@@ -14,18 +14,54 @@ export function magicLinkUrl(portalUrl: string, id: string, token: string): stri
   return `${portalUrl.replace(/\/+$/, "")}/demo#d=${encodeURIComponent(id)}&t=${encodeURIComponent(token)}`;
 }
 
+const DEMO_HIGHLIGHTS: Array<[string, string]> = [
+  ["Be the borrower", "Scan a code with your phone and upload documents the way your clients do."],
+  ["Catch the fraud", "One bank statement has been doctored. Keystone flags it before it ever reaches a lender."],
+  ["Take the call", "Your client rings on iPhone and Apple Watch with their file already on screen, and AI writes the call note."],
+  ["Send it to lenders", "Build the credit summary in one click, pick lenders from the match list, and get the finished lender package in your inbox."],
+];
+
 export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
-  return {
-    to: [s.email],
-    subject: "Your Keystone demo is ready",
-    ...bodies([
-      `Hi ${firstName(s.name)},`,
-      `Here is your private Keystone demo for ${s.company}. Open it on a computer or tablet, keep your phone handy, and you will play both sides of a real file: the borrower uploading documents from their phone, and the broker reviewing it, catching a doctored bank statement, taking the client's call and sending the file to lenders.`,
-      `Open your demo: ${url}`,
-      `The link is just for you - it works for ${days} days, and you can come back to it any time to pick up where you left off. Everything in the demo is sample data.`,
-      "If you did not ask for this, you can ignore this email.",
-    ]),
-  };
+  const first = firstName(s.name);
+  const text = [
+    `Hi ${first},`,
+    `Your private Keystone demo for ${s.company} is ready. In about ten minutes you will run a real deal from start to finish:`,
+    DEMO_HIGHLIGHTS.map(([h, b]) => `- ${h}: ${b}`).join("\n"),
+    `Start your demo: ${url}`,
+    `It works best on a computer or tablet with your phone nearby. Your link works for ${days} days and picks up where you left off. Everything in it is sample data.`,
+    "Questions? Just reply - a real person reads every email.",
+    "The Keystone team",
+    "You are getting this because someone asked for a Keystone demo with this email address. If that was not you, ignore it and nothing else will be sent.",
+  ].join("\n\n");
+  const ink = "#0B1F3A";
+  const muted = "#475569";
+  const p = (t: string, extra = "") => `<p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:${ink};${extra}">${t}</p>`;
+  const html =
+    `<div style="background:#F4F6F9;padding:24px 12px;font-family:Arial,Helvetica,sans-serif">` +
+    `<div style="max-width:560px;margin:0 auto;background:#FFFFFF;border-radius:12px;padding:32px 28px">` +
+    `<p style="margin:0 0 24px;font-size:20px;font-weight:bold;color:${ink}">Keystone</p>` +
+    p(`Hi ${esc(first)},`) +
+    p(`Your private Keystone demo for <strong>${esc(s.company)}</strong> is ready. In about ten minutes you will run a real deal from start to finish:`) +
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;width:100%">` +
+    DEMO_HIGHLIGHTS.map(
+      ([h, b], i) =>
+        `<tr><td style="vertical-align:top;padding:0 12px 14px 0;width:28px"><div style="width:26px;height:26px;border-radius:13px;background:#E7F0EC;color:#1F5C46;font-weight:bold;font-size:14px;line-height:26px;text-align:center">${i + 1}</div></td>` +
+        `<td style="padding:0 0 14px;font-size:15px;line-height:1.5;color:${ink}"><strong>${esc(h)}.</strong> ${esc(b)}</td></tr>`,
+    ).join("") +
+    `</table>` +
+    `<p style="margin:0 0 24px;text-align:center"><a href="${esc(url)}" style="display:inline-block;background:#1F5C46;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:17px;padding:14px 32px;border-radius:8px">Start my demo</a></p>` +
+    p(`It works best on a computer or tablet with your phone nearby. Your link works for ${days} days and picks up where you left off. Everything in it is sample data.`, `color:${muted};font-size:15px`) +
+    p("Questions? Just reply - a real person reads every email.") +
+    p("The Keystone team", "margin-bottom:24px") +
+    `<p style="margin:0;font-size:13px;line-height:1.5;color:${muted}">If the button does not work, copy this link into your browser:<br/><a href="${esc(url)}" style="color:#1F5C46;word-break:break-all">${esc(url)}</a></p>` +
+    `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:${muted}">You are getting this because someone asked for a Keystone demo with this email address. If that was not you, ignore it and nothing else will be sent.</p>` +
+    `</div></div>`;
+  return { to: [s.email], subject: `${first}, your Keystone demo is ready`, text, html };
+}
+
+/** The same link by text message. Short: carriers split long texts and some drop them. */
+export function magicLinkSms(s: Pick<SignupLike, "name">, url: string): string {
+  return `Keystone: Hi ${firstName(s.name)}, your private demo is ready. Open it on a computer or tablet and keep this phone handy: ${url} Reply STOP to opt out.`;
 }
 
 export function prospectPackageMail(s: SignupLike, pdfBase64: string, filename: string): Mail {
