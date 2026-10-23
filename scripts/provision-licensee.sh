@@ -72,6 +72,7 @@ SERVER_APP="ks-${CODE}-server"
 AGENT_APP="ks-${CODE}-agent"
 PORTAL_SWA="ks-${CODE}-portal"
 CLIENT_SWA="ks-${CODE}-client"
+GH_ENV="ks-${CODE}"   # the GitHub environment the four deploy workflows use for this licensee
 
 say() { printf '\n==> %s\n' "$*"; }
 exists() { "$@" --only-show-errors >/dev/null 2>&1; }
@@ -248,15 +249,29 @@ Keystone licensee "$CODE" is provisioned in resource group $RG.
                 The password is stored only in the DATABASE_URL app setting of $SERVER_APP. To read it:
                 az webapp config appsettings list -g $RG -n $SERVER_APP --query "[?name=='DATABASE_URL'].value" -o tsv
 
-GitHub variables (not secret):
-  KS-server  AZURE_WEBAPP_NAME = $SERVER_APP
-  KS-Agent   AZURE_WEBAPP_NAME = $AGENT_APP
-  KS-Portal  VITE_API_BASE_URL = $SERVER_URL      (the workflow reads it as a secret today)
+GitHub: each of KS-server, KS-Agent, KS-Portal and KS-Client deploys this licensee from a GitHub environment named
+  $GH_ENV  (repo Settings > Environments > New environment, in each of the four repositories)
+and a registry entry in deploy/licensees.json of each of the four repositories (same line in all four):
+  { "code": "$CODE", "environment": "$GH_ENV", "enabled": true, "apps": ["server", "agent", "portal", "client"] }
+
+Environment variables (not secret), per repository:
+  KS-server  AZURE_WEBAPP_NAME = $SERVER_APP      (optional: this is the default)
+  KS-Agent   AZURE_WEBAPP_NAME = $AGENT_APP       (optional: this is the default)
+  KS-Portal  VITE_API_BASE_URL = $SERVER_URL
              VITE_APP_URL = $PORTAL_URL
              VITE_CLIENT_APP_URL = $CLIENT_URL
              VITE_MSAL_REDIRECT_URI = $PORTAL_URL
-             VITE_MSAL_CLIENT_ID / VITE_MSAL_TENANT_ID / VITE_MSAL_SCOPES = the licensee's Microsoft app (set up separately)
-  KS-Client  VITE_API_BASE_URL = $SERVER_URL      (the build reads client-app/.env.production today)
+             VITE_MSAL_CLIENT_ID / VITE_MSAL_TENANT_ID / VITE_MSAL_SCOPES = the licensee's Microsoft app (optional;
+             without VITE_MSAL_CLIENT_ID Microsoft sign-in stays off)
+  KS-Client  VITE_API_BASE_URL = $SERVER_URL
+             VITE_CLIENT_APP_URL = $CLIENT_URL
+             VITE_LICENSEE = <folder under KS-Client licensees/> (optional: the branded build)
+Environment secrets, per repository (values in the COPY THIS NOW block below):
+  KS-server  AZURE_CREDENTIALS
+  KS-Agent   AZURE_CREDENTIALS
+  KS-Portal  AZURE_STATIC_WEB_APPS_API_TOKEN (the portal's token)
+  KS-Client  AZURE_STATIC_WEB_APPS_API_TOKEN (the client's token)
+KS-server needs no DATABASE_URL in GitHub: it migrates on startup with its DATABASE_URL app setting.
 SUMMARY
 [[ -n "$KS_LICENSEE_ID" ]] || echo "  Note: KS_LICENSEE_ID was not given, so KS-server cannot report usage to KS-Ops yet."
 [[ -n "${KS_OPS_KEY:-}" ]] || echo "  Note: no ops key was set on KS-server. Rotate one in KS-Ops and set KS_OPS_KEY on $SERVER_APP."
@@ -268,11 +283,15 @@ cat <<SECRETS
 GitHub secrets. They are not saved anywhere else by this script; run it again to print them again.
 (The database password is not printed: it lives in $SERVER_APP's DATABASE_URL app setting, see above.)
 
+GitHub environment $GH_ENV:
   KS-Portal  AZURE_STATIC_WEB_APPS_API_TOKEN = $PORTAL_TOKEN
   KS-Client  AZURE_STATIC_WEB_APPS_API_TOKEN = $CLIENT_TOKEN
 SECRETS
 if [[ -n "$DEPLOY_CREDS" ]]; then
   echo "  KS-server and KS-Agent  AZURE_CREDENTIALS ="
   echo "$DEPLOY_CREDS" | sed 's/^/    /'
+else
+  echo "  KS-server and KS-Agent  AZURE_CREDENTIALS: not made (run again with CREATE_DEPLOY_SP=1, or reuse the licensee's"
+  echo "  existing ks-$CODE-deploy service principal's JSON)."
 fi
 echo "---------------------------------------------------------------------------------------------------"
