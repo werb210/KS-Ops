@@ -7,6 +7,7 @@ import { bodies, sendQuietly } from "./lib/email.js";
 import { periodOf, previousPeriod } from "./lib/http.js";
 import { audit } from "./licensees/repo.js";
 import { retryPendingPlanPushes } from "./sync/planPush.js";
+import { syncPgiLinks } from "./sync/pgiLink.js";
 import { isFinal, pullUsageReport } from "./sync/usage.js";
 import { runDemoJobs } from "./demo/jobs.js";
 
@@ -141,6 +142,20 @@ export function startWorkers(deps: Deps): () => void {
       pushing = false;
     }
   };
+  // PGI referrals: link live licensees to the insurance partner (and switch stopped ones off) every 5 minutes.
+  let pgiBusy = false;
+  const pgi = async () => {
+    if (pgiBusy) return;
+    pgiBusy = true;
+    try {
+      const r = await syncPgiLinks(deps);
+      if (r.tried) console.log(`[workers] pgi link: ${r.linked} linked, ${r.disabled} switched off, of ${r.tried}`);
+    } catch (err) {
+      console.error("[workers] pgi link failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      pgiBusy = false;
+    }
+  };
   const runDaily = async () => {
     if (daily) return;
     daily = true;
@@ -170,6 +185,8 @@ export function startWorkers(deps: Deps): () => void {
     setInterval(runDaily, 60 * 60_000),
     setTimeout(runDaily, 2 * 60_000),
     setTimeout(push, 30_000),
+    setInterval(pgi, 5 * 60_000),
+    setTimeout(pgi, 90_000),
   ];
   timers.forEach((t) => t.unref());
   return () => timers.forEach((t) => clearInterval(t as NodeJS.Timeout));

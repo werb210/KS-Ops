@@ -54,6 +54,8 @@ again after a price changes.
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
 | `OPS_WORKERS` | no | `off` stops the background jobs (they never run under `NODE_ENV=test`) |
 | `TRUST_PROXY_HOPS` | no | proxies in front of the app (default 1, Azure App Service) |
+| `BI_SERVER_URL` | for PGI referrals | the insurance partner's server (Boreal Insurance BI-Server), e.g. `https://bi-server-<id>.canadacentral-01.azurewebsites.net`. Every live licensee is made a PGI referral source there (20% referral fee) and its credentials are pushed to the licensee's server (`PUT /api/pgi/link`) |
+| `BI_KEYSTONE_OPS_KEY` | for PGI referrals | the same value as `BI_KEYSTONE_OPS_KEY` on BI-Server (sent as `X-BI-Keystone-Key`). Without these two the PGI link worker does nothing |
 | `KS_WATCHLIST_OPS_PEPPER` | recommended | keys every shared-watchlist hash once more before it is stored, so a copy of this database alone is useless. Set it once and never change it (stored hashes would stop matching) |
 
 Stripe webhook events to send: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
