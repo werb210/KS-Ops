@@ -60,13 +60,21 @@ export async function insertSignup(
   return r.rows[0] as DemoSignup;
 }
 
-/** A fresh magic link for an existing demo (the old link stops working). */
-export async function replaceToken(db: Q, id: string, tokenHash: string, now: Date, phone: string | null = null): Promise<void> {
-  await db.query(
-    `UPDATE demo_signups SET token_hash = $2, link_sends = link_sends + 1, last_link_sent_at = $3, phone = COALESCE($4, phone), updated_at = now()
-      WHERE id = $1`,
-    [id, tokenHash, now, phone],
+/**
+ * A fresh magic link for an existing demo (the old link stops working). A repeat sign-up also brings what the person just
+ * typed: name and company replace the old ones, and a phone (when given) replaces the old phone. Returns the updated row.
+ */
+export async function replaceToken(
+  db: Q, id: string, tokenHash: string, now: Date, phone: string | null = null,
+  details: { name?: string | null; company?: string | null } = {},
+): Promise<DemoSignup | null> {
+  const r = await db.query(
+    `UPDATE demo_signups SET token_hash = $2, link_sends = link_sends + 1, last_link_sent_at = $3, phone = COALESCE($4, phone),
+            name = COALESCE($5, name), company = COALESCE($6, company), updated_at = now()
+      WHERE id = $1 RETURNING ${COLS}`,
+    [id, tokenHash, now, phone, details.name ?? null, details.company ?? null],
   );
+  return (r.rows[0] as DemoSignup) ?? null;
 }
 
 export async function markOpened(db: Q, id: string, serverSessionId: string): Promise<void> {
