@@ -143,6 +143,35 @@ describe("demo: sign-up to finished", () => {
     expect(row.digest.submitted).toBe(true);
   });
 
+  it("KS_OPS_v12 with the real lender email in the completion, the prospect gets that email and its zip; it is wiped at expiry", async () => {
+    mail.sent.length = 0;
+    expect((await signUp("lena@lenderco.example", "203.0.113.55")).status).toBe(201);
+    const l = linkFrom(mail.sent[0]!.text);
+    expect((await request(app()).post("/api/public/demo/open").send({ demo_id: l.id, token: l.token })).status).toBe(200);
+    mail.sent.length = 0;
+    const zip = Buffer.from("PK\x03\x04 zip", "latin1").toString("base64");
+    const lender_email = {
+      lender_name: "Aspen Ridge Capital", subject: "BrokerCo application package: Juniper Hollow Millwork Ltd. ($250,000)",
+      html: "<div>Hello Aspen Ridge Capital team,</div>", text: "Hello Aspen Ridge Capital team,",
+      attachments: [{ filename: "application-x.zip", content_type: "application/zip", base64: zip }],
+    };
+    const bad = await request(app()).post(`/api/demo/sessions/${l.id}/complete`).set("X-KS-Ops-Key", KEY)
+      .send({ package_pdf_base64: Buffer.from("%PDF-1.7").toString("base64"), lender_email: { ...lender_email, attachments: [] } });
+    expect(bad.status).toBe(400);
+    const r = await request(app()).post(`/api/demo/sessions/${l.id}/complete`).set("X-KS-Ops-Key", KEY)
+      .send({ package_pdf_base64: Buffer.from("%PDF-1.7 signed app").toString("base64"), package_filename: "signed-application.pdf", lender_email });
+    expect(r.status).toBe(202);
+    const toProspect = mail.sent.find((m) => m.to[0] === "lena@lenderco.example")!;
+    expect(toProspect.subject).toBe(lender_email.subject);
+    expect(toProspect.attachments).toEqual([{ filename: "application-x.zip", contentType: "application/zip", base64: zip }]);
+    expect(toProspect.html).toContain("Keystone demo - this is exactly what your lender would receive (sample data).");
+    expect(toProspect.html!.endsWith(lender_email.html)).toBe(true);
+    expect(mail.sent.some((m) => m.subject.startsWith("Demo finished:"))).toBe(true);
+    await pool.query("UPDATE demo_signups SET expires_at = $2 WHERE id = $1", [l.id, new Date(now.getTime() - 1000)]);
+    await runDemoJobs(deps);
+    expect((await pool.query("SELECT status, package_pdf, package_mail FROM demo_signups WHERE id = $1", [l.id])).rows[0]).toMatchObject({ status: "wiped", package_pdf: null, package_mail: null });
+  });
+
   it("after 7 days the session is wiped on the demo server and here (events, package, link), keeping the lead for sales", async () => {
     now = new Date(now.getTime() + 8 * 86_400_000);
     const r = await runDemoJobs(deps);

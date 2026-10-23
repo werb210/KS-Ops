@@ -1,6 +1,7 @@
 // Demo sign-ups and their progress events.
 import type { Q } from "../db.js";
 import type { DemoEvent, Digest } from "./digest.js";
+import type { LenderEmail } from "./emails.js";
 
 export type DemoSignup = {
   id: string; name: string; email: string; phone: string | null; company: string; ip: string | null; user_agent: string | null; token_hash: string;
@@ -112,19 +113,26 @@ export async function eventsFor(db: Q, id: string): Promise<DemoEvent[]> {
   return r.rows as DemoEvent[];
 }
 
-export async function storePackage(db: Q, id: string, pdf: Buffer, filename: string): Promise<void> {
+/** The first package wins (a retried completion does not replace it). mail: the real lender email (KS_OPS_v12). */
+export async function storePackage(db: Q, id: string, pdf: Buffer | null, filename: string, mail: LenderEmail | null = null): Promise<void> {
   await db.query(
-    `UPDATE demo_signups SET package_pdf = COALESCE(package_pdf, $2), package_filename = COALESCE(package_filename, $3),
+    `UPDATE demo_signups SET
+            package_mail = CASE WHEN package_pdf IS NULL AND package_mail IS NULL THEN $4::jsonb ELSE package_mail END,
+            package_pdf = COALESCE(package_pdf, $2), package_filename = COALESCE(package_filename, $3),
             status = CASE WHEN status IN ('pending','active') THEN 'completed' ELSE status END,
             completed_at = COALESCE(completed_at, now()), updated_at = now()
       WHERE id = $1`,
-    [id, pdf, filename],
+    [id, pdf, filename, mail ? JSON.stringify(mail) : null],
   );
 }
 
-export async function packageOf(db: Q, id: string): Promise<{ pdf: Buffer; filename: string } | null> {
-  const r = await db.query(`SELECT package_pdf, package_filename FROM demo_signups WHERE id = $1 AND package_pdf IS NOT NULL`, [id]);
-  return r.rows[0] ? { pdf: r.rows[0].package_pdf as Buffer, filename: String(r.rows[0].package_filename ?? "") } : null;
+export async function packageOf(db: Q, id: string): Promise<{ pdf: Buffer | null; filename: string; mail: LenderEmail | null } | null> {
+  const r = await db.query(
+    `SELECT package_pdf, package_filename, package_mail FROM demo_signups WHERE id = $1 AND (package_pdf IS NOT NULL OR package_mail IS NOT NULL)`,
+    [id],
+  );
+  const row = r.rows[0];
+  return row ? { pdf: (row.package_pdf as Buffer) ?? null, filename: String(row.package_filename ?? ""), mail: (row.package_mail as LenderEmail) ?? null } : null;
 }
 
 export async function setDigest(db: Q, id: string, digest: Digest): Promise<void> {
@@ -149,7 +157,7 @@ export async function releaseMail(db: Q, id: string, column: "prospect_package_s
 export async function markWiped(db: Q, id: string): Promise<void> {
   await db.query(`DELETE FROM demo_events WHERE signup_id = $1`, [id]);
   await db.query(
-    `UPDATE demo_signups SET status = 'wiped', wiped_at = now(), package_pdf = NULL, token_hash = '', updated_at = now() WHERE id = $1`,
+    `UPDATE demo_signups SET status = 'wiped', wiped_at = now(), package_pdf = NULL, package_mail = NULL, token_hash = '', updated_at = now() WHERE id = $1`,
     [id],
   );
 }

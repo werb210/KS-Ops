@@ -21,7 +21,7 @@ export async function sendCompletionMails(deps: Pick<Deps, "db" | "mailer">, id:
   if (!s || s.status === "wiped" || s.mail_attempts >= MAX_MAIL_ATTEMPTS) return out;
   const pkg = await repo.packageOf(deps.db, id);
   if (pkg && !s.prospect_package_sent_at && (await repo.claimMail(deps.db, id, "prospect_package_sent_at"))) {
-    out.prospect = await sendQuietly(deps.mailer, prospectPackageMail(s, pkg.pdf.toString("base64"), pkg.filename), "demo package");
+    out.prospect = await sendQuietly(deps.mailer, prospectPackageMail(s, pkg.pdf ? pkg.pdf.toString("base64") : null, pkg.filename, pkg.mail), "demo package");
     if (!out.prospect) await repo.releaseMail(deps.db, id, "prospect_package_sent_at");
   }
   if (s.completed_at && !s.sales_completed_sent_at && (await repo.claimMail(deps.db, id, "sales_completed_sent_at"))) {
@@ -51,7 +51,7 @@ export async function runDemoJobs(deps: Pick<Deps, "db" | "mailer" | "fetch" | "
   const owed = await deps.db.query(
     `SELECT id FROM demo_signups
       WHERE status = 'completed' AND mail_attempts < $1
-        AND ((package_pdf IS NOT NULL AND prospect_package_sent_at IS NULL) OR sales_completed_sent_at IS NULL)
+        AND (((package_pdf IS NOT NULL OR package_mail IS NOT NULL) AND prospect_package_sent_at IS NULL) OR sales_completed_sent_at IS NULL)
       LIMIT 50`,
     [MAX_MAIL_ATTEMPTS],
   );

@@ -2,9 +2,9 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { digestEvents, minutes, type DemoEvent } from "../../src/demo/digest.js";
-import { magicLinkMail, magicLinkUrl, prospectPackageMail, salesCompletedMail, salesUnfinishedMail } from "../../src/demo/emails.js";
+import { DEMO_BANNER, magicLinkMail, magicLinkUrl, prospectPackageMail, salesCompletedMail, salesUnfinishedMail } from "../../src/demo/emails.js";
 import { demoConfigured } from "../../src/demo/config.js";
-import { demoSignupSchema } from "../../src/routes/demo.js";
+import { demoSignupSchema, parseLenderEmail } from "../../src/routes/demo.js";
 import { makeDeps } from "../helpers.js";
 
 const signup = {
@@ -75,6 +75,38 @@ describe("demo emails", () => {
     expect(m.to).toEqual(["dana@brokerco.example"]);
     expect(m.attachments).toEqual([{ filename: "Pkg.pdf", contentType: "application/pdf", base64: Buffer.from("%PDF-1.7 x").toString("base64") }]);
     expect(m.text).toMatch(/sample data/);
+  });
+
+  it("KS_OPS_v12 with the real lender email, the prospect gets exactly it (subject, body, attachments) under a one-line banner", () => {
+    const zip = Buffer.from("PK\x03\x04 zip bytes", "latin1").toString("base64");
+    const lender = parseLenderEmail({
+      lender_name: "Aspen Ridge Capital", subject: "BrokerCo application package: Juniper Hollow Millwork Ltd. ($250,000)",
+      html: "<div><p>Hello Aspen Ridge Capital team,</p></div><br/><br/><p>Dana</p>", text: "Hello Aspen Ridge Capital team,\n\nDana",
+      attachments: [{ filename: "application-abc.zip", content_type: "application/zip", base64: zip }],
+    });
+    if (lender === "invalid") throw new Error("expected valid");
+    const m = prospectPackageMail(signup, Buffer.from("%PDF-1.7 x").toString("base64"), "signed-application.pdf", lender);
+    expect(m.to).toEqual(["dana@brokerco.example"]);
+    expect(m.subject).toBe("BrokerCo application package: Juniper Hollow Millwork Ltd. ($250,000)");
+    expect(m.attachments).toEqual([{ filename: "application-abc.zip", contentType: "application/zip", base64: zip }]);
+    expect(m.html!.endsWith("<div><p>Hello Aspen Ridge Capital team,</p></div><br/><br/><p>Dana</p>")).toBe(true);
+    expect(m.html).toContain(DEMO_BANNER);
+    expect(DEMO_BANNER).toBe("Keystone demo - this is exactly what your lender would receive (sample data).");
+    expect(m.text).toBe(`${DEMO_BANNER}\n\nHello Aspen Ridge Capital team,\n\nDana`);
+  });
+
+  it("KS_OPS_v12 a lender email that is malformed, mislabelled or too big is refused", () => {
+    const ok = { subject: "S", html: "<p>h</p>", text: "t", attachments: [{ filename: "a.zip", content_type: "application/zip", base64: Buffer.from("PK\x03\x04x", "latin1").toString("base64") }] };
+    expect(parseLenderEmail(ok)).not.toBe("invalid");
+    expect(parseLenderEmail({ ...ok, attachments: [] })).toBe("invalid");
+    expect(parseLenderEmail({ ...ok, attachments: [{ ...ok.attachments[0], content_type: "text/html" }] })).toBe("invalid");
+    expect(parseLenderEmail({ ...ok, attachments: [{ ...ok.attachments[0], base64: Buffer.from("not a zip").toString("base64") }] })).toBe("invalid");
+    expect(parseLenderEmail({ ...ok, attachments: [{ ...ok.attachments[0], base64: Buffer.alloc(13 * 1024 * 1024, 0x50).toString("base64") }] })).toBe("invalid");
+    expect(parseLenderEmail({ ...ok, subject: "" })).toBe("invalid");
+    const cleaned = parseLenderEmail({ ...ok, subject: "a\r\nBcc: x@y", attachments: [{ ...ok.attachments[0], filename: "../../etc/pass?wd.zip" }] });
+    if (cleaned === "invalid") throw new Error("expected valid");
+    expect(cleaned.subject).toBe("a Bcc: x@y");
+    expect(cleaned.attachments[0]!.filename).toBe(".._.._etc_pass_wd.zip");
   });
 
   it("sales gets who, time spent, phone use, steps, clicks and skips when a demo finishes", () => {
