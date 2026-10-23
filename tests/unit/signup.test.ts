@@ -127,6 +127,35 @@ describe("POST /api/public/signup", () => {
     expect(params.metadata.licensee_id).toBe("44444444-4444-4444-8444-444444444444");
   });
 
+  it("takes extra storage blocks at sign-up, saves them and bills them in Checkout", async () => {
+    const { db, inserted } = signupDb();
+    const stripe = fakeStripe();
+    const res = await request(createApp(makeDeps({ db, stripe: () => stripe })))
+      .post("/api/public/signup")
+      .send({ ...validSignup(), billing_interval: "monthly", extra_storage_blocks: 2 });
+    expect(res.status).toBe(201);
+    expect(inserted[0]).toMatchObject({ extra_storage_blocks: 2 });
+    const params = (stripe.checkout.sessions.create as any).mock.calls[0][0];
+    expect(params.line_items).toContainEqual({ price: "price_storage_block:monthly", quantity: 2 });
+  });
+
+  it("defaults extra storage to none and rejects bad amounts", async () => {
+    const ok = signupSchema.safeParse(validSignup());
+    expect(ok.success && ok.data.extra_storage_blocks).toBe(0);
+    const app = createApp(makeDeps({ db: signupDb().db }));
+    for (const [v, msg] of [
+      [-1, "Extra storage cannot be negative."],
+      [1.5, "Extra storage must be a whole number of 50 GB blocks."],
+      [1001, "Extra storage is limited to 1,000 blocks."],
+    ] as const) {
+      const res = await request(app).post("/api/public/signup").send({ ...validSignup(), extra_storage_blocks: v });
+      expect(res.status).toBe(400);
+      expect(res.body.errors.extra_storage_blocks).toBe(msg);
+    }
+    const tooMany = await request(app).post("/api/public/signup").send({ ...validSignup(), seats: 1001 });
+    expect(tooMany.body.errors.seats).toBe("For more than 1,000 seats, please contact us.");
+  });
+
   it("requires Turnstile when TURNSTILE_SECRET is set", async () => {
     process.env.TURNSTILE_SECRET = "ts-secret";
     const f = vi.fn(async (_url: string, init: RequestInit) =>

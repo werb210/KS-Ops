@@ -1,7 +1,7 @@
 // Input rules for licensees: the public sign-up form, staff create and staff edit. Messages are shown to people.
 import { z } from "zod";
 import { allowedServerHostSuffixes } from "../config.js";
-import { BILLING_INTERVALS, MIN_SEATS, PLANS, PLAN_NAMES, SUPPORT_LEVELS } from "../pricing.js";
+import { BILLING_INTERVALS, MAX_SEATS, MAX_STORAGE_BLOCKS, MIN_SEATS, PLANS, PLAN_NAMES, SUPPORT_LEVELS } from "../pricing.js";
 
 export const STATUSES = ["pending_payment", "provisioning", "trial", "active", "past_due", "suspended", "cancelled"] as const;
 export type LicenseeStatus = (typeof STATUSES)[number];
@@ -169,7 +169,14 @@ const seatsSchema = z.coerce
   .number({ invalid_type_error: "Seats must be a whole number." })
   .int("Seats must be a whole number.")
   .min(1, "You need at least 1 seat.")
-  .max(1000, "For more than 1,000 seats, please contact us.");
+  .max(MAX_SEATS, `For more than ${MAX_SEATS.toLocaleString("en-CA")} seats, please contact us.`);
+
+/** Extra 50 GB storage blocks; optional on sign-up (none when left out). */
+const storageBlocksSchema = z.coerce
+  .number({ invalid_type_error: "Extra storage must be a whole number of 50 GB blocks." })
+  .int("Extra storage must be a whole number of 50 GB blocks.")
+  .min(0, "Extra storage cannot be negative.")
+  .max(MAX_STORAGE_BLOCKS, `Extra storage is limited to ${MAX_STORAGE_BLOCKS.toLocaleString("en-CA")} blocks.`);
 
 function regionCheck(country: string | undefined, region: string | undefined, ctx: z.RefinementCtx, path = "province_state") {
   if (!region) return;
@@ -217,6 +224,7 @@ export const signupSchema = z
     plan: planSchema,
     billing_interval: intervalSchema,
     support_level: supportSchema,
+    extra_storage_blocks: z.preprocess((v) => (v === null || v === "" ? undefined : v), storageBlocksSchema.default(0)),
     primary_color: colorSchema,
     logo_url: urlSchema("Logo address"),
     assistant_name: optionalText("Assistant name", 40),
@@ -277,7 +285,7 @@ export const staffCreateSchema = z
     primary_color: colorSchema,
     assistant_name: optionalText("Assistant name", 40),
     status: z.enum(STATUSES).optional(),
-    extra_storage_blocks: z.coerce.number().int().min(0).max(1000).optional(),
+    extra_storage_blocks: storageBlocksSchema.optional(),
   })
   .superRefine((v, ctx) => {
     regionCheck(v.country, v.province_state, ctx);
@@ -313,11 +321,7 @@ export const staffPatchSchema = z
     billing: intervalSchema,
     support_level: supportSchema,
     seats: seatsSchema,
-    extra_storage_blocks: z.coerce
-      .number()
-      .int("Extra storage must be a whole number of 50 GB blocks.")
-      .min(0, "Extra storage cannot be negative.")
-      .max(1000, "Extra storage is limited to 1,000 blocks."),
+    extra_storage_blocks: storageBlocksSchema,
     server_url: nullableAppUrl("Server address", { serverHosts: true }),
     client_url: nullableAppUrl("Client app address"),
     portal_url: nullableAppUrl("Staff portal address"),

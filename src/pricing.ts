@@ -27,6 +27,10 @@ export const SEAT_PRICE_CENTS: Record<Plan, Record<BillingInterval, number>> = {
 
 export const ONBOARDING_FEE_CENTS: Record<Plan, number> = { starter: 0, growth: 75000, pro: 200000 };
 export const MIN_SEATS: Record<Plan, number> = { starter: 1, growth: 1, pro: 2 };
+/** Most seats a licensee can buy (sign-up and staff); larger teams contact sales. */
+export const MAX_SEATS = 1000;
+/** Most extra 50 GB storage blocks a licensee can buy. */
+export const MAX_STORAGE_BLOCKS = 1000;
 
 export type Allowance = {
   minutes_per_seat: number;
@@ -225,6 +229,7 @@ export function publicPlans() {
       seat_price_monthly: dollars(SEAT_PRICE_CENTS[key].monthly),
       onboarding_fee: dollars(ONBOARDING_FEE_CENTS[key]),
       min_seats: MIN_SEATS[key],
+      max_seats: MAX_SEATS,
       allowances: { ...ALLOWANCES[key] },
       features: featuresFor(key),
     })),
@@ -241,7 +246,7 @@ export function publicPlans() {
         live_help: s.live_help,
       };
     }),
-    extra_storage: { block_gb: STORAGE_BLOCK.gb, price: dollars(STORAGE_BLOCK.price_cents) },
+    extra_storage: { block_gb: STORAGE_BLOCK.gb, price: dollars(STORAGE_BLOCK.price_cents), max_blocks: MAX_STORAGE_BLOCKS },
     overage: { minute: dollars(OVERAGE_CENTS.minute), text: dollars(OVERAGE_CENTS.text) },
     trial: { ...TRIAL },
     currency: CURRENCY,
