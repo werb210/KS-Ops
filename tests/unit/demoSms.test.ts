@@ -112,7 +112,7 @@ describe("POST /api/public/demo/signup with a phone", () => {
       .post("/api/public/demo/signup")
       .send({ name: "Dana Prospect", email: "dana@brokerco.example", company: "BrokerCo", phone: "(403) 555-0199" });
     expect(r.status).toBe(201);
-    expect(r.body.message).toBe("We've texted your demo link to (403) 555-0199 and emailed it too.");
+    expect(r.body.message).toBe("Your demo is ready - we've texted the link to (403) 555-0199 and emailed it too.");
     const insert = db.calls.find((c) => /INSERT INTO demo_signups/.test(c.sql));
     expect(insert?.params[2]).toBe("+14035550199");
     const twilio = f.mock.calls.find((c) => String((c as unknown[])[0]).includes("api.twilio.com")) as unknown as [string, RequestInit];
@@ -128,7 +128,7 @@ describe("POST /api/public/demo/signup with a phone", () => {
       .post("/api/public/demo/signup")
       .send({ name: "Dana Prospect", email: "dana@brokerco.example", company: "BrokerCo", phone: "403 555 0199" });
     expect(r.status).toBe(201);
-    expect(r.body.message).toBe("Check your email - we've sent you a private link to your demo.");
+    expect(r.body.message).toBe("Your demo is ready - we couldn't text (403) 555-0199 just now, so we've emailed you the link.");
     expect(sent).toHaveLength(1);
   });
 

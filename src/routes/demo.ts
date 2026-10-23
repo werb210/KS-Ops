@@ -26,7 +26,7 @@ import { openServerSession } from "../demo/server.js";
 import { sendCompletionMails } from "../demo/jobs.js";
 
 export const DEMO_SENT_MESSAGE = "Check your email - we've sent you a private link to your demo.";
-export const DEMO_RESENT_MESSAGE = "You already have a demo - we've emailed you a fresh link to it.";
+export const DEMO_RESENT_MESSAGE = "Welcome back - we've emailed you a fresh link to your demo.";
 export const DEMO_NOT_CONFIGURED = { error: "demo_not_configured", message: "The demo is not available right now. Please contact us and we will show you around." };
 
 const MAX_LINK_SENDS = 6;
@@ -53,10 +53,16 @@ async function deliverLink(deps: Deps, s: Parameters<typeof magicLinkMail>[0], u
     if (!r.ok && r.error !== "sms_not_configured") console.warn(`[demo] link text failed: ${r.error}`);
   }
   await sendQuietly(deps.mailer, magicLinkMail(s, url, demoSessionDays()), resent ? "demo link (resent)" : "demo link");
-  if (texted && phone) {
+  const where = phone ? prettyNaPhone(phone) : "";
+  if (texted) {
     return resent
-      ? `You already have a demo - we've texted a fresh link to ${prettyNaPhone(phone)} and emailed it too.`
-      : `We've texted your demo link to ${prettyNaPhone(phone)} and emailed it too.`;
+      ? `Welcome back - we've texted a fresh link to your demo to ${where} and emailed it too.`
+      : `Your demo is ready - we've texted the link to ${where} and emailed it too.`;
+  }
+  if (phone) {
+    return resent
+      ? `Welcome back - we couldn't text ${where} just now, so we've emailed you a fresh link to your demo.`
+      : `Your demo is ready - we couldn't text ${where} just now, so we've emailed you the link.`;
   }
   return resent ? DEMO_RESENT_MESSAGE : DEMO_SENT_MESSAGE;
 }
