@@ -11,6 +11,7 @@ import { digestEvents } from "./digest.js";
 import { prospectPackageMail, salesCompletedMail, salesUnfinishedMail } from "./emails.js";
 import * as repo from "./repo.js";
 import { wipeServerSession } from "./server.js";
+import { crmDemoUnfinished } from "../crm/triggers.js";
 
 const MAX_MAIL_ATTEMPTS = 20;
 
@@ -33,12 +34,14 @@ export async function sendCompletionMails(deps: Pick<Deps, "db" | "mailer">, id:
   return out;
 }
 
-export async function sendUnfinishedMail(deps: Pick<Deps, "db" | "mailer">, id: string, reason: "idle" | "expired"): Promise<boolean> {
+export async function sendUnfinishedMail(deps: Pick<Deps, "db" | "mailer"> & Partial<Pick<Deps, "now">>, id: string, reason: "idle" | "expired"): Promise<boolean> {
   const s = await repo.getSignup(deps.db, id);
   if (!s || s.completed_at || s.sales_unfinished_sent_at || s.mail_attempts >= MAX_MAIL_ATTEMPTS) return false;
   if (!(await repo.claimMail(deps.db, id, "sales_unfinished_sent_at"))) return false;
   const digest = digestEvents(await repo.eventsFor(deps.db, id));
   await repo.setDigest(deps.db, id, digest);
+  // The Keystone CRM gets the same summary as a note (no stage change).
+  await crmDemoUnfinished({ db: deps.db, now: deps.now ?? (() => new Date()) }, s, digest, reason, demoIdleHours());
   const ok = await sendQuietly(deps.mailer, salesUnfinishedMail(salesEmail(), s, digest, reason, demoIdleHours()), "demo unfinished (sales)");
   if (!ok) await repo.releaseMail(deps.db, id, "sales_unfinished_sent_at");
   return ok;

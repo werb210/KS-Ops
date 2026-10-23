@@ -16,8 +16,10 @@ import { audit, newSignupToken, signupTokenOf, type LicenseeRow } from "../licen
 import { PLAN_NAMES } from "../pricing.js";
 import { queueStatusPush } from "../sync/planPush.js";
 import { liveSubscriptionStatus } from "./billing.js";
+import { crmLicenseePaid, crmLicenseeStatus } from "../crm/triggers.js";
 
-type HookDeps = Pick<Deps, "db" | "mailer"> & Partial<Pick<Deps, "stripe">>;
+type HookDeps = Pick<Deps, "db" | "mailer"> & Partial<Pick<Deps, "stripe" | "now">>;
+const crmDeps = (deps: HookDeps) => ({ db: deps.db, now: deps.now ?? (() => new Date()) });
 const ACTOR = "stripe-webhook";
 const affected = (r: { rowCount: number | null; rows: unknown[] }) => (r.rowCount ?? r.rows.length) > 0;
 
@@ -171,6 +173,8 @@ async function checkoutCompleted(deps: HookDeps, s: Obj, paidNow: boolean): Prom
   );
   const moved = affected(r);
   if (moved) {
+    const c = crmDeps(deps);
+    await crmLicenseePaid(c, l, "provisioning", c.now(), "Paid through Stripe Checkout; Keystone is being set up.");
     const sales = bodies([
       `${l.company_name} has paid and is ready to be set up.`,
       licenseeSummary(l),
@@ -243,6 +247,8 @@ async function setStatus(deps: HookDeps, l: LicenseeRow, sql: string, to: string
   const r = await deps.db.query(sql, [l.id]);
   if (!affected(r)) return false;
   await queueStatusPush(deps.db, l.id, l.status, to, ACTOR);
+  const c = crmDeps(deps);
+  await crmLicenseeStatus(c, l, l.status, to, c.now(), "Stripe");
   return true;
 }
 
@@ -303,6 +309,16 @@ async function invoiceEvent(deps: HookDeps, type: string, inv: Obj): Promise<str
       `UPDATE licensees SET status = 'active', past_due_since = NULL, past_due_reminder_sent_at = NULL, updated_at = now()
         WHERE id = $1 AND status = 'past_due' AND stripe_subscription_id IS NOT NULL RETURNING id`,
       "active",
+    );
+    const c = crmDeps(deps);
+    const amount = Number(inv.amount_paid ?? 0) / 100;
+    const what = `Invoice ${inv.number ?? inv.id ?? ""}`.trim() + " paid";
+    await crmLicenseePaid(
+      c,
+      l,
+      moved ? "active" : l.status,
+      ts(inv.status_transitions?.paid_at) ?? c.now(),
+      `${what}: ${amount.toFixed(2)} ${String(inv.currency ?? "").toUpperCase()}`.trim(),
     );
     return moved ? "paid_reactivated" : "paid";
   }

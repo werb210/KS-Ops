@@ -14,6 +14,7 @@ import {
 } from "../licensees/repo.js";
 import { CODE_MESSAGES, codeProblem, crossFieldErrors, normalizeCode, signupSchema } from "../licensees/validation.js";
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
+import { crmLicenseeCreated } from "../crm/triggers.js";
 
 const limited = (limit: number, windowMs: number) => limiter(limit, windowMs);
 
@@ -128,6 +129,7 @@ export function publicRouter(deps: Deps): Router {
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks, ip: clientIp(req),
       });
+      await crmLicenseeCreated(deps, l);
 
       let checkoutUrl: string | null = null;
       let message: string | undefined;
