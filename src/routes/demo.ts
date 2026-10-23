@@ -2,7 +2,8 @@
 // Public (the website's "Try it yourself" page and the demo portal; CORS: PUBLIC_SITE_URL + KS_DEMO_PORTAL_URL):
 //   POST /api/public/demo/signup { name, email, company, phone?, website_url (honeypot, must be empty), turnstile_token? }
 //        (phone: a Canadian/US mobile; the link is texted to it as well as emailed when Twilio is set up, see lib/sms.ts)
-//        -> 201 { ok, message } (a magic link is emailed) | 400 { errors } | 429 { error, message } | 503 { error, message }
+//        -> 201 { ok, message, open_url } (KS_OPS_v11_LIVE_DEMO: the website opens open_url straight away; the same link
+//           is texted and emailed so they can come back) | 400 { errors } | 429 { error, message } | 503 { error, message }
 //   POST /api/public/demo/open { demo_id, token }   (the magic link: {KS_DEMO_PORTAL_URL}/demo#d=<id>&t=<token>)
 //        -> 200 { server_url, staff_token, client_url, expires_at, name, company } | 404 | 410 (expired) | 503
 // From the demo server (X-KS-Ops-Key = KS_DEMO_OPS_KEY):
@@ -103,8 +104,9 @@ export function demoPublicRouter(deps: Deps): Router {
         }
         const token = newSecret(24);
         await repo.replaceToken(deps.db, live.id, sha256Hex(token), now, phone);
-        const message = await deliverLink(deps, live, magicLinkUrl(demoPortalUrl(), live.id, token), phone ?? live.phone ?? null, true);
-        return res.status(200).json({ ok: true, resent: true, message });
+        const url = magicLinkUrl(demoPortalUrl(), live.id, token);
+        const message = await deliverLink(deps, live, url, phone ?? live.phone ?? null, true);
+        return res.status(200).json({ ok: true, resent: true, message, open_url: url });
       }
       if ((await repo.countRecentForEmail(deps.db, input.email, new Date(now.getTime() - 30 * 86_400_000))) >= demoPerEmail()) {
         return res.status(429).json({ error: "too_many_demos", message: "This email has had several demos recently. Contact us and we'll walk you through it live." });
@@ -124,8 +126,9 @@ export function demoPublicRouter(deps: Deps): Router {
         userAgent: String(req.headers["user-agent"] ?? "").slice(0, 300), tokenHash: sha256Hex(token),
         expiresAt: new Date(now.getTime() + demoSessionDays() * 86_400_000), now,
       });
-      const message = await deliverLink(deps, s, magicLinkUrl(demoPortalUrl(), s.id, token), phone, false);
-      return res.status(201).json({ ok: true, message });
+      const url = magicLinkUrl(demoPortalUrl(), s.id, token);
+      const message = await deliverLink(deps, s, url, phone, false);
+      return res.status(201).json({ ok: true, message, open_url: url });
     }),
   );
 
