@@ -64,7 +64,9 @@ describe("publicPlans", () => {
     expect(p.support_levels.find((s) => s.key === "premium")).toMatchObject({ price: 499, covered_seats: 10, extra_seat_price: 30 });
     expect(p.support_levels[0]).toMatchObject({ key: "email", price: 0, covered_seats: null });
     for (const s of p.support_levels) expect(Object.keys(s)).toEqual(["key", "name", "price", "covered_seats", "extra_seat_price", "channels", "first_reply", "live_help"]);
-    expect(p.extra_storage).toEqual({ block_gb: 50, price: 10 });
+    expect(p.extra_storage).toEqual({ block_gb: 50, price: 10, max_blocks: 1000 });
+    // Seat limits the sign-up form uses: the plan minimum and the most the sign-up accepts.
+    expect(p.plans.map((x) => [x.min_seats, x.max_seats])).toEqual([[1, 1000], [1, 1000], [2, 1000]]);
     expect(p.overage).toEqual({ minute: 0.04, text: 0.03 });
     expect(p.trial).toEqual({ days: 14, plan: "pro", for: "starter", bonus_minutes_per_seat: 100, bonus_texts_per_seat: 100 });
   });

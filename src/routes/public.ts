@@ -39,7 +39,8 @@ function salesSignupMail(l: LicenseeRow, note: string) {
       [
         `Company: ${l.company_name} (${l.legal_name})`,
         `Company code: ${l.company_code}`,
-        `Plan: ${PLAN_NAMES[l.plan]}, ${l.seats} seat(s), ${l.billing_interval} billing, ${l.support_level} support`,
+        `Plan: ${PLAN_NAMES[l.plan]}, ${l.seats} seat(s), ${l.billing_interval} billing, ${l.support_level} support` +
+          (l.extra_storage_blocks > 0 ? `, ${l.extra_storage_blocks} extra 50 GB storage block(s)` : ""),
         `Contact: ${l.contact_name}, ${l.contact_email}, ${l.contact_phone}`,
         `Address: ${l.mailing_address ?? ""}, ${l.province_state ?? ""}, ${l.country}`,
       ].join("\n"),
@@ -111,6 +112,7 @@ export function publicRouter(deps: Deps): Router {
           billing_interval: input.billing_interval,
           support_level: input.support_level,
           seats: input.seats,
+          extra_storage_blocks: input.extra_storage_blocks,
           primary_color: input.primary_color,
           logo_url: input.logo_url,
           assistant_name: input.assistant_name,
@@ -123,7 +125,9 @@ export function publicRouter(deps: Deps): Router {
         if (isUniqueViolation(err)) return res.status(409).json({ errors: { company_code: "taken" } });
         throw err;
       }
-      await audit(deps.db, "website", "signup", l.id, { plan: l.plan, seats: l.seats, ip: clientIp(req) });
+      await audit(deps.db, "website", "signup", l.id, {
+        plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks, ip: clientIp(req),
+      });
 
       let checkoutUrl: string | null = null;
       let message: string | undefined;
