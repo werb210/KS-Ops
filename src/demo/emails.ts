@@ -15,20 +15,20 @@ export function magicLinkUrl(portalUrl: string, id: string, token: string): stri
 }
 
 const DEMO_HIGHLIGHTS: Array<[string, string]> = [
-  ["Be the borrower", "Scan a code with your phone and upload documents the way your clients do."],
+  ["See it as your client", "Walk through the client app the way your borrowers do - every answer is already filled in, you just click Next."],
+  ["See it as the broker", "The application lands in your pipeline. Accept the documents, check the financials and the bank summary, and approve the credit summary."],
   ["Catch the fraud", "One bank statement has been doctored. Keystone flags it before it ever reaches a lender."],
-  ["Take the call", "Your client rings on iPhone and Apple Watch with their file already on screen, and AI writes the call note."],
-  ["Send it to lenders", "Build the credit summary in one click, pick lenders from the match list, and get the finished lender package in your inbox."],
-];
+  ["Take the call and send it", "Your client rings on iPhone and Apple Watch with their file on screen, AI writes the call note, and you send the file to a lender."],
+]
 
 export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
   const first = firstName(s.name);
   const text = [
     `Hi ${first},`,
-    `Your private Keystone demo for ${s.company} is ready. In about ten minutes you will run a real deal from start to finish:`,
+    `Your private Keystone demo for ${s.company} is ready. In about ten minutes you will see a real deal from both sides:`,
     DEMO_HIGHLIGHTS.map(([h, b]) => `- ${h}: ${b}`).join("\n"),
     `Start your demo: ${url}`,
-    `It works best on a computer or tablet with your phone nearby. Your link works for ${days} days and picks up where you left off. Everything in it is sample data.`,
+    `It works best on a computer or tablet. Nothing to download or type. Your link works for ${days} days. Everything in it is sample data.`,
     "Questions? Just reply - a real person reads every email.",
     "The Keystone team",
     "You are getting this because someone asked for a Keystone demo with this email address. If that was not you, ignore it and nothing else will be sent.",
@@ -41,7 +41,7 @@ export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
     `<div style="max-width:560px;margin:0 auto;background:#FFFFFF;border-radius:12px;padding:32px 28px">` +
     `<p style="margin:0 0 24px;font-size:20px;font-weight:bold;color:${ink}">Keystone</p>` +
     p(`Hi ${esc(first)},`) +
-    p(`Your private Keystone demo for <strong>${esc(s.company)}</strong> is ready. In about ten minutes you will run a real deal from start to finish:`) +
+    p(`Your private Keystone demo for <strong>${esc(s.company)}</strong> is ready. In about ten minutes you will see a real deal from both sides:`) +
     `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;width:100%">` +
     DEMO_HIGHLIGHTS.map(
       ([h, b], i) =>
@@ -50,7 +50,7 @@ export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
     ).join("") +
     `</table>` +
     `<p style="margin:0 0 24px;text-align:center"><a href="${esc(url)}" style="display:inline-block;background:#1F5C46;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:17px;padding:14px 32px;border-radius:8px">Start my demo</a></p>` +
-    p(`It works best on a computer or tablet with your phone nearby. Your link works for ${days} days and picks up where you left off. Everything in it is sample data.`, `color:${muted};font-size:15px`) +
+    p(`It works best on a computer or tablet. Nothing to download or type. Your link works for ${days} days. Everything in it is sample data.`, `color:${muted};font-size:15px`) +
     p("Questions? Just reply - a real person reads every email.") +
     p("The Keystone team", "margin-bottom:24px") +
     `<p style="margin:0;font-size:13px;line-height:1.5;color:${muted}">If the button does not work, copy this link into your browser:<br/><a href="${esc(url)}" style="color:#1F5C46;word-break:break-all">${esc(url)}</a></p>` +
@@ -61,7 +61,7 @@ export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
 
 /** The same link by text message. Short: carriers split long texts and some drop them. */
 export function magicLinkSms(s: Pick<SignupLike, "name">, url: string): string {
-  return `Keystone: Hi ${firstName(s.name)}, your private demo is ready. Open it on a computer or tablet and keep this phone handy: ${url} Reply STOP to opt out.`;
+  return `Keystone: Hi ${firstName(s.name)}, here is your private demo (best on a computer or tablet): ${url} Reply STOP to opt out.`;
 }
 
 export function prospectPackageMail(s: SignupLike, pdfBase64: string, filename: string): Mail {

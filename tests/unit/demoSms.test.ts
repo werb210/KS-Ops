@@ -84,7 +84,7 @@ describe("the demo link messages", () => {
     expect(m.html).toContain('href="https://portal.example/demo#d=1&amp;t=a&amp;b"');
     expect(m.html).toContain("BrokerCo &lt;Capital&gt;");
     expect(m.html).not.toContain("<Capital>");
-    for (const t of ["Catch the fraud", "Take the call", "real person reads every email", "works for 7 days"]) expect(m.text).toContain(t);
+    for (const t of ["See it as your client", "See it as the broker", "Catch the fraud", "real person reads every email", "works for 7 days"]) expect(m.text).toContain(t);
     expect(m.text).toContain("https://portal.example/demo#d=1&t=a&b");
   });
 
@@ -113,6 +113,7 @@ describe("POST /api/public/demo/signup with a phone", () => {
       .send({ name: "Dana Prospect", email: "dana@brokerco.example", company: "BrokerCo", phone: "(403) 555-0199" });
     expect(r.status).toBe(201);
     expect(r.body.message).toBe("Your demo is ready - we've texted the link to (403) 555-0199 and emailed it too.");
+    expect(r.body.open_url).toMatch(/^https:\/\/portal\.example\/demo#d=66666666-6666-4666-8666-666666666666&t=/);
     const insert = db.calls.find((c) => /INSERT INTO demo_signups/.test(c.sql));
     expect(insert?.params[2]).toBe("+14035550199");
     const twilio = f.mock.calls.find((c) => String((c as unknown[])[0]).includes("api.twilio.com")) as unknown as [string, RequestInit];
