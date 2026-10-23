@@ -97,7 +97,8 @@ export function demoPublicRouter(deps: Deps): Router {
       const now = deps.now();
       const ip = clientIp(req);
 
-      // One live demo per email: asking again re-sends a fresh link to the same demo.
+      // One live demo per email: asking again re-sends a fresh link to the same demo, with the name, company and phone
+      // updated to what was just typed.
       const live = await repo.liveSignupForEmail(deps.db, input.email, now);
       if (live) {
         const resentToday = live.last_link_sent_at && now.getTime() - new Date(live.last_link_sent_at).getTime() < 86_400_000;
@@ -108,9 +109,11 @@ export function demoPublicRouter(deps: Deps): Router {
           return res.status(400).json({ errors: { turnstile_token: "Please confirm you are not a robot and try again." } });
         }
         const token = newSecret(24);
-        await repo.replaceToken(deps.db, live.id, sha256Hex(token), now, phone);
+        // What they just typed wins: the demo they open greets the new name and shows the new brokerage (the demo
+        // server is sent these again on open and refreshes its session).
+        const updated = (await repo.replaceToken(deps.db, live.id, sha256Hex(token), now, phone, { name: input.name, company: input.company })) ?? live;
         const url = magicLinkUrl(demoPortalUrl(), live.id, token);
-        const message = await deliverLink(deps, live, url, phone ?? live.phone ?? null, true);
+        const message = await deliverLink(deps, updated, url, phone ?? updated.phone ?? null, true);
         return res.status(200).json({ ok: true, resent: true, message, open_url: url });
       }
       if ((await repo.countRecentForEmail(deps.db, input.email, new Date(now.getTime() - 30 * 86_400_000))) >= demoPerEmail()) {

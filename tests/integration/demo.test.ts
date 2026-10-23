@@ -12,6 +12,7 @@ import { freshPool } from "./db.js";
 let pool: pg.Pool;
 let now = new Date("2026-10-22T12:00:00Z");
 const KEY = "demo-ops-key-0123456789";
+const lastOpenBody: Record<string, any> = {};
 const server = { sessions: new Map<string, any>(), deleted: [] as string[], up: true };
 
 const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -21,6 +22,7 @@ const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
   const m = /\/api\/demo\/ops\/sessions(?:\/([^/]+))?$/.exec(url);
   if (m && init.method === "POST") {
     const body = JSON.parse(String(init.body));
+    lastOpenBody[body.ops_session_id] = body;
     const existing = server.sessions.get(body.ops_session_id);
     const s = existing ?? { session_id: `9${String(server.sessions.size).padStart(7, "0")}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`, body };
     server.sessions.set(body.ops_session_id, s);
@@ -182,6 +184,41 @@ describe("demo: sign-up to finished", () => {
     expect(row.digest.submitted).toBe(true);
     expect((await pool.query("SELECT count(*)::int AS n FROM demo_events WHERE signup_id = $1", [id])).rows[0].n).toBe(0);
     expect((await request(app()).post("/api/public/demo/open").send({ demo_id: id, token })).status).toBe(404);
+  });
+});
+
+describe("demo: a repeat sign-up with new details", () => {
+  it("updates the same demo's name, company and phone, and the reopened demo (and demo server) uses them", async () => {
+    const ip = "198.51.100.77";
+    const first = await request(app()).post("/api/public/demo/signup").set("X-Forwarded-For", ip)
+      .send({ name: "Claude", email: "repeat@brokerco.example", company: "Test Brokerage", phone: "(403) 555-0199" });
+    expect(first.status).toBe(201);
+    const { id, token } = linkFrom(mail.sent[0]!.text);
+    expect((await request(app()).post("/api/public/demo/open").send({ demo_id: id, token })).body).toMatchObject({ name: "Claude", company: "Test Brokerage" });
+    mail.sent.length = 0;
+
+    const again = await request(app()).post("/api/public/demo/signup").set("X-Forwarded-For", ip)
+      .send({ name: "Demo Check", email: "Repeat@BrokerCo.example", company: "Big Broker", phone: "(403) 555-0123" });
+    expect(again.status).toBe(200);
+    expect(again.body.resent).toBe(true);
+    const fresh = linkFrom(mail.sent[0]!.text);
+    expect(fresh.id).toBe(id);
+    expect(mail.sent[0]!.text).toContain("Hi Demo,");
+    expect(mail.sent[0]!.text).toContain("Big Broker");
+    const rows = (await pool.query("SELECT name, company, phone FROM demo_signups WHERE lower(email) = 'repeat@brokerco.example'")).rows;
+    expect(rows).toEqual([{ name: "Demo Check", company: "Big Broker", phone: "+14035550123" }]);
+
+    const open = await request(app()).post("/api/public/demo/open").send({ demo_id: id, token: fresh.token });
+    expect(open.status).toBe(200);
+    expect(open.body).toMatchObject({ name: "Demo Check", company: "Big Broker" });
+    expect(lastOpenBody[id]).toMatchObject({ name: "Demo Check", company: "Big Broker", email: "repeat@brokerco.example" });
+
+    // No phone the second time: the earlier phone is kept.
+    await request(app()).post("/api/public/demo/signup").set("X-Forwarded-For", ip)
+      .send({ name: "Demo Check", email: "repeat@brokerco.example", company: "Big Broker" });
+    expect((await pool.query("SELECT phone FROM demo_signups WHERE id = $1", [id])).rows[0].phone).toBe("+14035550123");
+    // Out of the way of the idle and cap tests below.
+    await pool.query("DELETE FROM demo_signups WHERE id = $1", [id]);
   });
 });
 
