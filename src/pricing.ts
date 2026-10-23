@@ -89,6 +89,8 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "office_sync", label: "Office 365 / Google sync", plan: "starter" },
   { key: "ai_assistant", label: "AI assistant", plan: "starter" },
   { key: "lender_portal", label: "Lender portal (lenders can send you deals they can't place)", plan: "starter" },
+  // PGI referrals to the insurance partner on every plan (20% referral fee on bound policies); same key as KS-server.
+  { key: "pgi_referrals", label: "Personal Guarantee Insurance referrals (20% referral fee)", plan: "starter" },
   { key: "call_recording", label: "Call recording", plan: "growth" },
   { key: "call_summaries", label: "AI call summaries", plan: "growth" },
   { key: "voicemail_transcription", label: "Voicemail transcription", plan: "growth" },

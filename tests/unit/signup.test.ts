@@ -148,6 +148,7 @@ describe("POST /api/public/signup", () => {
     const res = await request(createApp(makeDeps())).get("/api/public/plans");
     const keys = (plan: string) => res.body.plans.find((p: { key: string }) => p.key === plan).features.map((f: { key: string }) => f.key);
     expect(keys("starter")).toContain("lender_portal");
+    expect(keys("starter")).toContain("pgi_referrals"); // every plan
     expect(keys("starter")).not.toContain("broker_portal");
     expect(keys("starter")).not.toContain("referrer_portal");
     expect(keys("growth")).toEqual(expect.arrayContaining(["referrer_portal", "broker_portal"]));

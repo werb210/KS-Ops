@@ -13,6 +13,7 @@ import { crossFieldErrors, staffCreateSchema, staffPatchSchema, STATUSES } from 
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
 import { isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
+import { biConfig, linkPgi, queuePgiBackfill } from "../sync/pgiLink.js";
 
 export const OPS_KEY_MESSAGE =
   "Copy this key now - it will not be shown again. Set it as KS_OPS_KEY in the licensee's server settings.";
@@ -279,6 +280,33 @@ export function opsLicenseesRouter(deps: Deps): Router {
         }
         throw err;
       }
+    }),
+  );
+
+  // PGI referrals: create / refresh the licensee's referral source at the insurance partner and push the credentials
+  // to its server now (the worker does this every 5 minutes anyway).
+  router.post(
+    "/licensees/:id/pgi-link",
+    h(async (req, res) => {
+      const l = await load(req.params.id);
+      if (!l) return res.status(404).json(notFound);
+      if (!biConfig()) return res.status(503).json({ error: "bi_not_configured", message: "Set BI_SERVER_URL and BI_KEYSTONE_OPS_KEY on KS-Ops first." });
+      const r = await linkPgi(deps, l.id);
+      await audit(deps.db, actorOf(req), "licensee.pgi_link", l.id, r.ok ? { action: r.action } : { error: r.error });
+      if (!r.ok) return res.status(502).json({ error: "pgi_link_failed", reason: r.error, message: "The licensee could not be linked to the insurance partner yet; it will be retried." });
+      const fresh = (await getLicensee(deps.db, l.id))!;
+      return res.json({ ok: true, action: r.action, licensee: staffView(fresh) });
+    }),
+  );
+
+  // Backfill: every live licensee is linked again on the worker's next pass (fresh credentials).
+  router.post(
+    "/pgi/backfill",
+    h(async (req, res) => {
+      if (!biConfig()) return res.status(503).json({ error: "bi_not_configured", message: "Set BI_SERVER_URL and BI_KEYSTONE_OPS_KEY on KS-Ops first." });
+      const queued = await queuePgiBackfill(deps);
+      await audit(deps.db, actorOf(req), "pgi.backfill", null, { queued });
+      return res.json({ ok: true, queued });
     }),
   );
 
