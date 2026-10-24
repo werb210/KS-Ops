@@ -17,6 +17,7 @@ import {
 import { CODE_MESSAGES, codeProblem, crossFieldErrors, normalizeCode, signupSchema } from "../licensees/validation.js";
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
+import { BrandScanError, scanBrand } from "../lib/brandScan.js";
 
 const limited = (limit: number, windowMs: number) => limiter(limit, windowMs);
 
@@ -132,6 +133,7 @@ export function publicRouter(deps: Deps): Router {
           primary_color: input.primary_color,
           accent_color: input.accent_color,
           background_color: input.background_color,
+          font_family: input.font_family,
           logo_url: input.logo_url,
           assistant_name: input.assistant_name,
           ...signupTokenColumns(token),
@@ -174,6 +176,24 @@ export function publicRouter(deps: Deps): Router {
         await sendQuietly(deps.mailer, salesSignupMail(l, "Online payment was not available: please send them a payment link."), "sales signup notice");
       }
       return res.status(201).json({ licensee_id: l.id, signup_token: token, checkout_url: checkoutUrl, ...(message ? { message } : {}) });
+    }),
+  );
+
+  // KS_OPS_v14_BRAND_SCAN - "Use my website" on the sign-up branding step: reads the brokerage's public home page and
+  // suggests a logo, favicon, colours and font. Public and rate-limited; the fetch is SSRF-checked (lib/safeFetch.ts).
+  router.post(
+    "/brand-scan",
+    limited(10, 10 * 60_000),
+    h(async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      try {
+        const scan = await scanBrand(req.body?.url, deps.brandScan);
+        return res.json({ ok: true, ...scan });
+      } catch (err) {
+        if (err instanceof BrandScanError) return res.status(err.status).json({ ok: false, error: err.code, message: err.message });
+        console.error("[brand-scan] failed", err instanceof Error ? err.message : String(err));
+        return res.status(502).json({ ok: false, error: "fetch_failed", message: "We couldn't read that website. You can fill in your branding yourself." });
+      }
     }),
   );
 

@@ -38,6 +38,7 @@ export type LicenseeRow = {
   /** KS_OPS_v13_BRAND - accent (secondary) and optional background / surface colours. */
   accent_color?: string | null;
   background_color?: string | null;
+  font_family?: string | null; // KS_OPS_v14_BRAND_FONT
   assistant_name: string | null;
   ops_key_hash: string | null;
   /** v3 shared fraud watchlist (opt-in from the licensee's portal). */
@@ -137,7 +138,7 @@ export const INSERTABLE = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
-  "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color",
+  "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
   "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
 ] as const;
 

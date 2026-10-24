@@ -6,7 +6,7 @@ import { fakeDb, makeDeps } from "../helpers.js";
 const row = {
   company_code: "northwind", company_name: "Northwind Capital", server_url: "https://ks-northwind.example",
   client_url: "https://apply.northwind.example", portal_url: "https://staff.northwind.example",
-  logo_url: null, primary_color: "#123456", accent_color: "#2563eb", background_color: null,
+  logo_url: null, primary_color: "#123456", accent_color: "#2563eb", background_color: null, font_family: "Lato",
 };
 
 describe("GET /api/directory/:code", () => {

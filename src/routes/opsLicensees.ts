@@ -26,7 +26,7 @@ const PATCH_COLUMNS = [
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
   "onboarding_fee_paid", "payment_method",
-  "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color",
+  "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
 ] as const;
 
 const ADDRESS_PARTS = ["address_line1", "address_line2", "city", "postal_code", "province_state", "country"] as const;

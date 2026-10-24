@@ -75,6 +75,8 @@ export function makeDeps(partial: Partial<Deps> = {}): Deps {
     mailer: partial.mailer ?? fakeMailer().mailer,
     stripe: partial.stripe ?? (() => null),
     now: partial.now ?? (() => new Date()),
+    // Never the real network in unit tests: an unknown host fails to resolve.
+    brandScan: partial.brandScan ?? { resolve: async () => { throw new Error("ENOTFOUND"); } },
   };
 }
 
