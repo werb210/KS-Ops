@@ -1,6 +1,7 @@
 // Input rules for licensees: the public sign-up form, staff create and staff edit. Messages are shown to people.
 import { z } from "zod";
 import { allowedServerHostSuffixes } from "../config.js";
+import { DEFAULT_PAYMENT_METHOD, PAYMENT_METHODS } from "../billing/paymentMethods.js";
 import { BILLING_INTERVALS, MAX_SEATS, MAX_STORAGE_BLOCKS, MIN_SEATS, PLANS, PLAN_NAMES, SUPPORT_LEVELS } from "../pricing.js";
 
 export const STATUSES = ["pending_payment", "provisioning", "trial", "active", "past_due", "suspended", "cancelled"] as const;
@@ -165,6 +166,10 @@ const intervalSchema = z.enum(BILLING_INTERVALS, { errorMap: () => ({ message: "
 const supportSchema = z.enum(SUPPORT_LEVELS, {
   errorMap: () => ({ message: "Choose Email, Priority, Premium or Dedicated support." }),
 });
+const paymentMethodSchema = z.enum(PAYMENT_METHODS, {
+  errorMap: () => ({ message: "Choose bank debit or credit card." }),
+});
+
 const seatsSchema = z.coerce
   .number({ invalid_type_error: "Seats must be a whole number." })
   .int("Seats must be a whole number.")
@@ -225,6 +230,7 @@ export const signupSchema = z
     billing_interval: intervalSchema,
     support_level: supportSchema,
     extra_storage_blocks: z.preprocess((v) => (v === null || v === "" ? undefined : v), storageBlocksSchema.default(0)),
+    payment_method: z.preprocess((v) => (v === null || v === "" ? undefined : v), paymentMethodSchema.default(DEFAULT_PAYMENT_METHOD)),
     primary_color: colorSchema,
     logo_url: urlSchema("Logo address"),
     assistant_name: optionalText("Assistant name", 40),
@@ -286,6 +292,7 @@ export const staffCreateSchema = z
     assistant_name: optionalText("Assistant name", 40),
     status: z.enum(STATUSES).optional(),
     extra_storage_blocks: storageBlocksSchema.optional(),
+    payment_method: paymentMethodSchema.optional(),
   })
   .superRefine((v, ctx) => {
     regionCheck(v.country, v.province_state, ctx);
@@ -322,6 +329,7 @@ export const staffPatchSchema = z
     support_level: supportSchema,
     seats: seatsSchema,
     extra_storage_blocks: storageBlocksSchema,
+    payment_method: paymentMethodSchema,
     server_url: nullableAppUrl("Server address", { serverHosts: true }),
     client_url: nullableAppUrl("Client app address"),
     portal_url: nullableAppUrl("Staff portal address"),

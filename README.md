@@ -55,6 +55,9 @@ again after a price changes.
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` | no | texts the demo link (`KS_SMS_FROM` is the sending number in +1 format; `TWILIO_MESSAGING_SERVICE_SID` can replace it) |
 | `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` |
 | `BF_CRM_KEY` | for the CRM | the same value as `KS_OPS_CRM_KEY` on BF-Server (sent as `X-KS-Ops-Key`). Unset: nothing is pushed (logged once at startup). Pushes wait in `crm_outbox` and are retried after 1 min, 5 min, 30 min, 2 h, 12 h, then daily until BF-Server accepts them |
+| `KS_QBO_CLIENT_ID`, `KS_QBO_CLIENT_SECRET`, `KS_QBO_TOKEN_ENCRYPTION_KEY` | for Keystone's QuickBooks | Keystone's own QuickBooks Online (Stripe invoices, payments, refunds and fees posted there). The key is 32 bytes (64 hex characters). Unset: off. See `docs/QUICKBOOKS.md` |
+| `KS_QBO_ENVIRONMENT` | no | `sandbox` (default) or `production` |
+| `KS_QBO_REDIRECT_URI` | no | default `https://<ks-ops host>/api/ops/quickbooks/oauth/callback` (host from `KS_OPS_PUBLIC_URL` or Azure's `WEBSITE_HOSTNAME`); register it in the Intuit app |
 | `OPS_WORKERS` | no | `off` stops the background jobs (they never run under `NODE_ENV=test`) |
 | `TRUST_PROXY_HOPS` | no | proxies in front of the app (default 1, Azure App Service) |
 | `BI_SERVER_URL` | for PGI referrals | the insurance partner's server (Boreal Insurance BI-Server), e.g. `https://bi-server-<id>.canadacentral-01.azurewebsites.net`. Every live licensee is made a PGI referral source there (20% referral fee) and its credentials are pushed to the licensee's server (`PUT /api/pgi/link`) |
@@ -64,7 +67,11 @@ again after a price changes.
 Stripe webhook events to send: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
 `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`,
 `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.created`, `invoice.finalized`,
-`invoice.updated`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, `invoice.marked_uncollectible`.
+`invoice.updated`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, `invoice.marked_uncollectible`, and
+`charge.refunded` (for QuickBooks).
+
+Payment methods: Checkout offers Canadian pre-authorized debit (`acss_debit`, with the PAD mandate) by default and
+card as the alternative; a licensee whose `payment_method` is `card` gets card only. Turn on ACSS Debit in Stripe.
 
 How they are handled:
 - A sign-up moves to `provisioning` (and the welcome emails go out) only when the Checkout is paid
@@ -131,6 +138,9 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
 - `GET /api/ops/licensees/:id/invoices`, `POST /api/ops/licensees/:id/invoices/preview?period=YYYY-MM`
 - `POST /api/ops/licensees/:id/billing/checkout` — Stripe Checkout link for the subscription (and onboarding fee if unpaid)
 - `POST /api/ops/stripe/webhook` — Stripe only (signature checked)
+- `GET /api/ops/quickbooks/status`, `POST /api/ops/quickbooks/connect`, `POST /api/ops/quickbooks/disconnect`,
+  `PATCH /api/ops/quickbooks/settings`, `GET /api/ops/quickbooks/outbox`, `POST /api/ops/quickbooks/outbox/:id/retry`;
+  `GET /api/ops/quickbooks/oauth/callback` (Intuit only); page `GET /ops/quickbooks`. See `docs/QUICKBOOKS.md`
 - `GET /api/ops/tickets`, `POST /api/ops/tickets`, `GET /api/ops/tickets/:id`, `PATCH /api/ops/tickets/:id`,
   `POST /api/ops/tickets/:id/messages`
 - `GET /api/ops/requests`, `PATCH /api/ops/requests/:id`
@@ -140,6 +150,7 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
 
 ## Background jobs
 
+- Every minute: post queued Stripe invoices, payments, fees and refunds to Keystone's QuickBooks (`qbo_outbox`).
 - Every 5 minutes: push plans that are waiting (`pending_sync`) to licensees' servers.
 - Daily: pull usage reports from servers that did not send them, bill overage for finished months (once per licensee
   and month; progress is kept in `overage_billing`, and Stripe is searched by metadata before anything is created, so

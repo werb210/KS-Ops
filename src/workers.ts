@@ -13,6 +13,7 @@ import { runDemoJobs } from "./demo/jobs.js";
 import { getLicensee } from "./licensees/repo.js";
 import { crmLicenseeStatus } from "./crm/triggers.js";
 import { flushCrmOutbox } from "./crm/outbox.js";
+import { flushQboOutbox } from "./qbo/outbox.js";
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -200,7 +201,23 @@ export function startWorkers(deps: Deps): () => void {
       crmBusy = false;
     }
   };
+  // Keystone's QuickBooks (src/qbo/outbox.ts): due postings every minute.
+  let qboBusy = false;
+  const qbo = async () => {
+    if (qboBusy) return;
+    qboBusy = true;
+    try {
+      const r = await flushQboOutbox(deps);
+      if (r.tried) console.log(`[workers] quickbooks: ${r.done} posted, ${r.skipped} skipped, ${r.failed} failed of ${r.tried}`);
+    } catch (err) {
+      console.error("[workers] quickbooks posting failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      qboBusy = false;
+    }
+  };
   const timers = [
+    setInterval(qbo, 60_000),
+    setTimeout(qbo, 45_000),
     setInterval(crm, 30_000),
     setTimeout(crm, 20_000),
     setInterval(demo, 10 * 60_000),

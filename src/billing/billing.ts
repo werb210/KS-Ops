@@ -11,6 +11,7 @@ import {
 } from "../pricing.js";
 import { isFinal } from "../sync/usage.js";
 import { BillingNotConfigured, type StripeLike } from "./stripeClient.js";
+import { checkoutPaymentParams } from "./paymentMethods.js";
 
 type Obj = Record<string, any>;
 
@@ -89,6 +90,8 @@ export async function createCheckout(
     client_reference_id: l.id,
     metadata: { licensee_id: l.id, company_code: l.company_code },
     subscription_data: { metadata: { licensee_id: l.id, company_code: l.company_code } },
+    // Bank debit (Canadian PAD, with its mandate) by default; card when the licensee chose it.
+    ...checkoutPaymentParams(l.payment_method),
     ...urls,
   });
   if (!session.url) throw new Error("stripe_checkout_without_url");

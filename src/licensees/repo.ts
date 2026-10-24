@@ -21,6 +21,8 @@ export type LicenseeRow = {
   support_level: SupportLevel;
   seats: number;
   extra_storage_blocks: number;
+  /** How the licensee pays: "acss_debit" (Canadian pre-authorized debit, the default) or "card". */
+  payment_method?: string | null;
   /** KS_OPS_BANK_CONNECT_ADDON - add-ons switched on by Keystone staff (not plan features). Missing = none. */
   addons?: Record<string, boolean> | null;
   server_url: string | null;
@@ -118,7 +120,7 @@ export const INSERTABLE = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
-  "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at",
+  "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
 ] as const;
 
 export async function insertLicensee(db: Q, fields: Partial<Record<(typeof INSERTABLE)[number], unknown>>): Promise<LicenseeRow> {
