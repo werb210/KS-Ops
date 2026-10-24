@@ -22,6 +22,7 @@ KS_LICENSEE_ID=<licensee id from KS-Ops> \
 OPS_TOKEN=<staff token> \
 KS_PLAN=growth \
 OPENAI_API_KEY=<key> \
+QBO_CLIENT_ID=<Intuit client id> QBO_CLIENT_SECRET=<Intuit client secret> QBO_ENVIRONMENT=production \
 CREATE_DEPLOY_SP=1 \
 scripts/provision-licensee.sh northwind canadacentral
 ```
@@ -43,6 +44,11 @@ App settings it writes:
 - **KS-server:** `DATABASE_URL` (generated), `JWT_SECRET` and `OTP_HASH_SALT` (generated once, then kept),
   `KS_SERVER_URL`, `KS_PORTAL_URL`, `KS_CLIENT_URL`, `KS_OPS_URL`, `KS_LICENSEE_ID`, `KS_OPS_KEY`, `MAYA_URL` (the
   agent), `KS_PLAN` (first run only), `OPENAI_API_KEY` when given, `NODE_ENV=production`.
+  QuickBooks Online fee invoices: `QBO_TOKEN_ENCRYPTION_KEY` (generated once, then kept) and `QBO_ENVIRONMENT`
+  (`sandbox` unless given) always; `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET` and `QBO_REDIRECT_URI` (default
+  `<KS-server>/api/quickbooks/oauth/callback`) when `QBO_CLIENT_ID` is given. Without `QBO_CLIENT_ID` QuickBooks
+  stays off. The script prints the redirect URI to add to the licensee's Intuit app (see KS-server
+  `docs/QUICKBOOKS.md`).
 - **KS-Agent:** `SERVER_URL` (the licensee's KS-server), `JWT_SECRET` (same as KS-server), `OPENAI_API_KEY` when given.
 
 Brand settings (`KS_COMPANY_NAME`, `KS_PRIMARY_COLOR` and so on) are not written: the licensee's admin sets them on
@@ -62,7 +68,7 @@ Settings > Environments > New environment, name `ks-<code>` (e.g. `ks-northwind`
 
 | Repository | Secrets | Variables |
 | --- | --- | --- |
-| KS-server | `AZURE_CREDENTIALS` (required) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-server`) |
+| KS-server | `AZURE_CREDENTIALS` (required); `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_TOKEN_ENCRYPTION_KEY` (optional, QuickBooks) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-server`); `QBO_ENVIRONMENT`, `QBO_REDIRECT_URI` (optional, QuickBooks) |
 | KS-Agent | `AZURE_CREDENTIALS` (required) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-agent`) |
 | KS-Portal | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-portal`'s token) | `VITE_API_BASE_URL`, `VITE_APP_URL`, `VITE_CLIENT_APP_URL` (required, https); `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_REDIRECT_URI`, `VITE_MSAL_SCOPES` (Microsoft sign-in, off without a client id); `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME`, `VITE_ASSISTANT_NAME` (optional) |
 | KS-Client | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-client`'s token) | `VITE_API_BASE_URL` (required, https); `VITE_LICENSEE` (optional: a folder under KS-Client `licensees/` for the branded build); `VITE_CLIENT_APP_URL`, `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME` (optional) |
@@ -70,6 +76,10 @@ Settings > Environments > New environment, name `ks-<code>` (e.g. `ks-northwind`
 - `AZURE_CREDENTIALS` is the JSON of the deploy service principal `ks-<code>-deploy` (contributor on `ks-<code>`
   only), printed when the script runs with `CREATE_DEPLOY_SP=1`.
 - The `VITE_*` values are compiled into the public JavaScript, so they are variables, not secrets.
+- QuickBooks (optional): when the KS-server environment has `QBO_CLIENT_ID`, each deploy writes `QBO_CLIENT_ID`,
+  `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT` (default `sandbox`), and `QBO_REDIRECT_URI` / `QBO_TOKEN_ENCRYPTION_KEY`
+  when given, to the licensee's KS-server app settings. If the app has no token key yet, the deploy makes one.
+  Without `QBO_CLIENT_ID` the deploy leaves the QuickBooks settings alone (whatever the provisioning script wrote).
 - KS-server needs no `DATABASE_URL` in GitHub: it applies its migrations on startup with the `DATABASE_URL` app
   setting the script wrote. (To read it: `az webapp config appsettings list -g ks-<code> -n ks-<code>-server --query
   "[?name=='DATABASE_URL'].value" -o tsv`.)

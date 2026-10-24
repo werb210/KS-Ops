@@ -17,6 +17,11 @@
 #                      on the licensee in KS-Ops, which then pushes the plan to the new server.
 #   KS_PLAN            starter | growth | pro, written to KS-server as its starting plan (default starter)
 #   OPENAI_API_KEY     written to KS-server and KS-Agent when set
+#   QBO_CLIENT_ID      the licensee's Intuit app (QuickBooks Online fee invoices). With QBO_CLIENT_SECRET, written to
+#   QBO_CLIENT_SECRET  KS-server together with QBO_ENVIRONMENT (sandbox | production, default sandbox) and
+#   QBO_ENVIRONMENT    QBO_REDIRECT_URI (default <KS-server>/api/quickbooks/oauth/callback). QBO_TOKEN_ENCRYPTION_KEY
+#   QBO_REDIRECT_URI   is made once and then kept. Without QBO_CLIENT_ID QuickBooks stays off. See KS-server
+#                      docs/QUICKBOOKS.md.
 #   NODE_RUNTIME       App Service runtime (default NODE:22-lts; KS-server's package.json requires Node 22)
 #   APP_SKU            App Service plan size (default B1)
 #   PG_SKU             Postgres size (default Standard_B1ms, Burstable)
@@ -163,6 +168,17 @@ CLIENT_URL="https://$(az staticwebapp show -g "$RG" -n "$CLIENT_SWA" --query def
 # Secrets: keep what the apps already have.
 JWT_SECRET="$(setting "$SERVER_APP" JWT_SECRET)"; [[ -n "$JWT_SECRET" ]] || JWT_SECRET="$(secret 32)"
 OTP_HASH_SALT="$(setting "$SERVER_APP" OTP_HASH_SALT)"; [[ -n "$OTP_HASH_SALT" ]] || OTP_HASH_SALT="$(secret 32)"
+# QuickBooks Online (KS-server v13): the token key is made once and kept, so connected companies stay connected.
+QBO_TOKEN_ENCRYPTION_KEY="$(setting "$SERVER_APP" QBO_TOKEN_ENCRYPTION_KEY)"; [[ -n "$QBO_TOKEN_ENCRYPTION_KEY" ]] || QBO_TOKEN_ENCRYPTION_KEY="$(secret 32)"
+QBO_ENVIRONMENT="${QBO_ENVIRONMENT:-$(setting "$SERVER_APP" QBO_ENVIRONMENT)}"; QBO_ENVIRONMENT="${QBO_ENVIRONMENT:-sandbox}"
+if [[ "$QBO_ENVIRONMENT" != "sandbox" && "$QBO_ENVIRONMENT" != "production" ]]; then
+  echo "QBO_ENVIRONMENT must be sandbox or production (got $QBO_ENVIRONMENT)." >&2
+  exit 2
+fi
+if [[ -n "${QBO_CLIENT_ID:-}" && -z "${QBO_CLIENT_SECRET:-}" ]]; then
+  echo "QBO_CLIENT_ID is set but QBO_CLIENT_SECRET is not; give both, or neither." >&2
+  exit 2
+fi
 KS_LICENSEE_ID="${KS_LICENSEE_ID:-$(setting "$SERVER_APP" KS_LICENSEE_ID)}"
 if [[ -z "${KS_OPS_KEY:-}" ]]; then
   KS_OPS_KEY="$(setting "$SERVER_APP" KS_OPS_KEY)"
@@ -200,6 +216,11 @@ SERVER_SETTINGS=(
 [[ -n "$KS_LICENSEE_ID" ]] && SERVER_SETTINGS+=("KS_LICENSEE_ID=$KS_LICENSEE_ID")
 [[ -n "${KS_OPS_KEY:-}" ]] && SERVER_SETTINGS+=("KS_OPS_KEY=$KS_OPS_KEY")
 [[ -n "${OPENAI_API_KEY:-}" ]] && SERVER_SETTINGS+=("OPENAI_API_KEY=$OPENAI_API_KEY")
+SERVER_SETTINGS+=("QBO_TOKEN_ENCRYPTION_KEY=$QBO_TOKEN_ENCRYPTION_KEY" "QBO_ENVIRONMENT=$QBO_ENVIRONMENT")
+if [[ -n "${QBO_CLIENT_ID:-}" ]]; then
+  SERVER_SETTINGS+=("QBO_CLIENT_ID=$QBO_CLIENT_ID" "QBO_CLIENT_SECRET=$QBO_CLIENT_SECRET"
+    "QBO_REDIRECT_URI=${QBO_REDIRECT_URI:-$SERVER_URL/api/quickbooks/oauth/callback}")
+fi
 az webapp config appsettings set -g "$RG" -n "$SERVER_APP" --settings "${SERVER_SETTINGS[@]}" --only-show-errors -o none
 echo "saved ${#SERVER_SETTINGS[@]} settings"
 
@@ -276,6 +297,17 @@ SUMMARY
 [[ -n "$KS_LICENSEE_ID" ]] || echo "  Note: KS_LICENSEE_ID was not given, so KS-server cannot report usage to KS-Ops yet."
 [[ -n "${KS_OPS_KEY:-}" ]] || echo "  Note: no ops key was set on KS-server. Rotate one in KS-Ops and set KS_OPS_KEY on $SERVER_APP."
 [[ -n "${OPENAI_API_KEY:-}" ]] || echo "  Note: OPENAI_API_KEY was not given; set it on $SERVER_APP and $AGENT_APP."
+QBO_ID_NOW="${QBO_CLIENT_ID:-$(setting "$SERVER_APP" QBO_CLIENT_ID)}"
+cat <<QBO
+
+QuickBooks Online (fee invoices, optional):
+  Redirect URI to add to the licensee's Intuit app (Keys & credentials, $QBO_ENVIRONMENT keys):
+    ${QBO_REDIRECT_URI:-$SERVER_URL/api/quickbooks/oauth/callback}
+  KS-server settings: QBO_TOKEN_ENCRYPTION_KEY (made once, kept), QBO_ENVIRONMENT=$QBO_ENVIRONMENT$( [[ -n "$QBO_ID_NOW" ]] && echo ", QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_REDIRECT_URI" )
+  Or, in the KS-server GitHub environment $GH_ENV: secrets QBO_CLIENT_ID, QBO_CLIENT_SECRET; variable
+  QBO_ENVIRONMENT. The KS-server deploy then writes them. An admin then connects in Settings > Company.
+QBO
+[[ -n "$QBO_ID_NOW" ]] || echo "  Note: QBO_CLIENT_ID was not given, so QuickBooks stays off until it is set (with QBO_CLIENT_SECRET) on $SERVER_APP."
 
 cat <<SECRETS
 
