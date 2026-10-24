@@ -201,6 +201,13 @@ export const appUrlSchema = (label: string, opts: { serverHosts?: boolean } = {}
       .optional(),
   );
 
+// KS_OPS_v14_BRAND_FONT - the font for the licensee's client app and pages: a family name only (no URL or CSS).
+export const FONT_RE = /^[A-Za-z0-9][A-Za-z0-9 -]{0,59}$/;
+const fontSchema = z.preprocess(
+  (v) => (v === null || v === undefined || String(v).trim() === "" ? undefined : String(v).trim().replace(/\s+/g, " ")),
+  z.string().regex(FONT_RE, "Font name can use letters, numbers, spaces and dashes (60 at most).").optional(),
+);
+
 const colorSchema = z.preprocess(
   (v) => (v === null || v === undefined || String(v).trim() === "" ? undefined : String(v).trim()),
   z.string().regex(/^#[0-9a-fA-F]{6}$/, "Colour must look like #1A2B3C.").optional(),
@@ -292,6 +299,7 @@ export const signupSchema = z
     primary_color: colorSchema,
     accent_color: colorSchema,
     background_color: colorSchema,
+    font_family: fontSchema,
     logo_url: urlSchema("Logo address"),
     // KS_OPS_v13_LOGO - an uploaded logo (PNG, JPG or SVG, base64), checked in lib/logo.ts.
     logo_file: z
@@ -375,6 +383,7 @@ export const staffCreateSchema = z
     primary_color: colorSchema,
     accent_color: colorSchema,
     background_color: colorSchema,
+    font_family: fontSchema,
     assistant_name: optionalText("Assistant name", 40),
     status: z.enum(STATUSES).optional(),
     extra_storage_blocks: storageBlocksSchema.optional(),
@@ -428,6 +437,7 @@ export const staffPatchSchema = z
     primary_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
     accent_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
     background_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
+    font_family: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), fontSchema])),
     assistant_name: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(40).nullable()),
     onboarding_fee_paid: z.boolean(),
     // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.

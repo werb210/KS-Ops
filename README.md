@@ -109,6 +109,19 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
   written as one line made from the parts. `accent_color` and `background_color` (optional, `#RRGGBB`) next to
   `primary_color`. `logo_file: { content_type, data_base64, filename? }` - PNG, JPG or SVG up to 500 KB (checked by its
   bytes; SVGs with scripts or links are refused), stored in `licensee_logos` and linked from `logo_url`
+- Sign-up v14: `font_family` (optional) - a font family name only (letters, numbers, spaces, dashes; 60 at most), e.g.
+  `Lato`. Stored in `licensees.font_family` next to the colours and returned by the directory like `primary_color`
+- `POST /api/public/brand-scan { url }` — "Use my website" on the sign-up branding step (10 per 10 minutes per
+  address). Reads the brokerage's home page and up to 3 of its same-site style sheets and returns
+  `{ ok, url, site_name, logo: { source_url, content_type, data_base64, filename } | null, logo_candidates, favicon_url,
+  colors: { theme_color, variables, palette, body_background }, fonts: { body, headings, google, font_faces },
+  suggestions: { primary_color, accent_color, background_color, font: { family, source } } }`. Nothing is saved: the
+  website pre-fills the form and sends a chosen logo as the normal `logo_file`. SSRF guards (`src/lib/safeFetch.ts`):
+  http/https on ports 80/443 only, no credentials in the address, every DNS answer must be public (private, loopback,
+  link-local, CGNAT, multicast and reserved ranges refused, IPv4-mapped/NAT64 included) and the connection goes to the
+  checked address, at most 3 redirects each checked again, 6 s per request, 15 s per scan, size limits (1.5 MB page,
+  400 KB per style sheet, 500 KB per logo). Errors: 400 `bad_url`/`blocked`, 422 `not_html`, 502 `fetch_failed`,
+  504 `timeout`, each with a `message` for the person
 - `GET /api/public/logos/:key` — an uploaded logo (image only, `Content-Security-Policy: default-src 'none'`)
 - `POST /api/public/demo/prefill { demo_id, key }` — the name, email, company and phone a prospect gave for their demo,
   for the website's sign-up and contact forms. The key comes from `{site}/signup#demo=<id>&k=<key>` links (in the demo
