@@ -17,6 +17,7 @@ import { demoOpsRouter, demoPublicRouter } from "./routes/demo.js";
 import { opsQuickbooksRouter, qboCallbackRouter, qboPageRouter } from "./routes/opsQuickbooks.js";
 import { opsTrialsRouter } from "./routes/opsTrials.js";
 import { trialsPageRouter } from "./routes/opsTrialsPage.js";
+import { presenterOpsRouter, presenterPublicRouter } from "./routes/presenter.js";
 
 /** CORS for a list of allowed origins read from env vars at request time. */
 function corsFor(...envNames: string[]) {
@@ -55,6 +56,8 @@ export function createApp(deps: Deps) {
   app.use(express.json({ limit: "1mb" }));
 
   // The self-serve demo: sign-up from the website, the magic link from the demo portal, progress from the demo server.
+  // KS_OPS_v13_PRESENTER - the demo portal checks a staff presenter link before the presenter-mode demo starts.
+  app.use("/api/public/demo/presenter", corsFor("KS_DEMO_PORTAL_URL"), presenterPublicRouter());
   app.use("/api/public/demo", corsFor("PUBLIC_SITE_URL", "KS_DEMO_PORTAL_URL"), demoPublicRouter(deps));
   app.use("/api/demo", demoOpsRouter(deps));
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps));
@@ -64,6 +67,8 @@ export function createApp(deps: Deps) {
   app.use("/api/licensees", licenseeApiRouter(deps));
   app.use("/api/ops", corsFor("OPS_ALLOWED_ORIGINS"));
   app.use("/api/ops/auth", opsAuthRouter(deps));
+  // KS_OPS_v13_PRESENTER - a signed link to the staff presenter-mode demo (the staff portal's "Start sales demo").
+  app.use("/api/ops/demo", requireStaff, presenterOpsRouter());
   // Intuit sends the browser back here without a staff token; the single-use OAuth state is the check.
   app.use("/api/ops/quickbooks/oauth/callback", qboCallbackRouter(deps));
   app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps), opsTrialsRouter(deps));
