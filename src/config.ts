@@ -69,3 +69,23 @@ export function pendingSignupDays(e: NodeJS.ProcessEnv = process.env): number {
 export function signupTurnstileOptional(e: NodeJS.ProcessEnv = process.env): boolean {
   return env("SIGNUP_TURNSTILE_OPTIONAL", e).toLowerCase() === "true";
 }
+
+/**
+ * This server's public address: KS_OPS_PUBLIC_URL, or Azure's WEBSITE_HOSTNAME, or the request's origin. Used for
+ * links that point back here (the uploaded-logo address).
+ */
+export function opsPublicUrl(requestOrigin?: string, e: NodeJS.ProcessEnv = process.env): string {
+  return (
+    env("KS_OPS_PUBLIC_URL", e).replace(/\/+$/, "") ||
+    (env("WEBSITE_HOSTNAME", e) ? `https://${env("WEBSITE_HOSTNAME", e)}` : "") ||
+    (requestOrigin ?? "").replace(/\/+$/, "")
+  );
+}
+
+/**
+ * DEMO_SMS_ENABLED=true texts the demo link to the prospect's mobile as well as emailing it. Off by default (Todd,
+ * Oct 24: "we don't text anyone anymore for the trial"); the mobile number is still collected so sales can call.
+ */
+export function demoSmsEnabled(e: NodeJS.ProcessEnv = process.env): boolean {
+  return env("DEMO_SMS_ENABLED", e).toLowerCase() === "true";
+}

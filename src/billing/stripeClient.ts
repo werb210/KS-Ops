@@ -10,6 +10,8 @@ export type StripeLike = {
   subscriptions: {
     retrieve: (id: string) => Promise<Obj>;
     update: (id: string, params: Obj, opts?: Opts) => Promise<Obj>;
+    /** The staff-only free trial creates its subscription directly (no Checkout). */
+    create?: (params: Obj, opts?: Opts) => Promise<Obj & { id: string }>;
   };
   invoiceItems: {
     create: (params: Obj, opts?: Opts) => Promise<{ id: string }>;
@@ -22,7 +24,10 @@ export type StripeLike = {
     listLineItems?: (id: string, params?: Obj) => Promise<{ data: Obj[]; has_more?: boolean }>;
   };
   /** Sets the customer's default payment method (invoice_settings) after Checkout. */
-  customers?: { update: (id: string, params: Obj, opts?: Opts) => Promise<Obj> };
+  customers?: {
+    update: (id: string, params: Obj, opts?: Opts) => Promise<Obj>;
+    create?: (params: Obj, opts?: Opts) => Promise<Obj & { id: string }>;
+  };
   /** The QuickBooks posting reads these; optional so test fakes stay small. */
   invoicePayments?: { list: (params: Obj) => Promise<{ data: Obj[] }> };
   paymentIntents?: { retrieve: (id: string, params?: Obj) => Promise<Obj> };

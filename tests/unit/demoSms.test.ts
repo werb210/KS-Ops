@@ -6,7 +6,7 @@ import { magicLinkMail, magicLinkSms } from "../../src/demo/emails.js";
 import { normalizeNaPhone, prettyNaPhone, sendSms, smsConfigured } from "../../src/lib/sms.js";
 import { fakeDb, fakeMailer, makeDeps } from "../helpers.js";
 
-const SMS_KEYS = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "KS_SMS_FROM", "TWILIO_MESSAGING_SERVICE_SID", "KS_DEMO_SERVER_URL", "KS_DEMO_OPS_KEY", "KS_DEMO_PORTAL_URL"] as const;
+const SMS_KEYS = ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "KS_SMS_FROM", "TWILIO_MESSAGING_SERVICE_SID", "KS_DEMO_SERVER_URL", "KS_DEMO_OPS_KEY", "KS_DEMO_PORTAL_URL", "DEMO_SMS_ENABLED"] as const;
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -103,8 +103,25 @@ describe("POST /api/public/demo/signup with a phone", () => {
     created_at: new Date(), expires_at: new Date(Date.now() + 7 * 86_400_000), link_sends: 1,
   }];
 
-  it("texts and emails the link and says so", async () => {
+  it("by default (DEMO_SMS_ENABLED unset) only emails the link, even when Twilio is set up, and keeps the number", async () => {
     twilioOn();
+    const db = fakeDb([[/INSERT INTO demo_signups/, row]]);
+    const { mailer, sent } = fakeMailer();
+    const f = vi.fn(async () => new Response("{}", { status: 201 }));
+    const r = await request(createApp(makeDeps({ db, mailer, fetch: f as unknown as typeof fetch })))
+      .post("/api/public/demo/signup")
+      .send({ name: "Dana Prospect", email: "dana@brokerco.example", company: "BrokerCo", phone: "(403) 555-0199" });
+    expect(r.status).toBe(201);
+    expect(r.body.message).toBe("Check your email - we've sent you a private link to your demo.");
+    expect(f.mock.calls.some((c) => String((c as unknown[])[0]).includes("api.twilio.com"))).toBe(false);
+    const insert = db.calls.find((c) => /INSERT INTO demo_signups/.test(c.sql));
+    expect(insert?.params[2]).toBe("+14035550199");
+    expect(sent).toHaveLength(1);
+  });
+
+  it("with DEMO_SMS_ENABLED=true texts and emails the link and says so", async () => {
+    twilioOn();
+    process.env.DEMO_SMS_ENABLED = "true";
     const db = fakeDb([[/INSERT INTO demo_signups/, row]]);
     const { mailer, sent } = fakeMailer();
     const f = vi.fn(async () => new Response("{}", { status: 201 }));
@@ -122,7 +139,8 @@ describe("POST /api/public/demo/signup with a phone", () => {
     expect(sent[0].to).toEqual(["dana@brokerco.example"]);
   });
 
-  it("still emails the link when texting is not set up", async () => {
+  it("with DEMO_SMS_ENABLED=true still emails the link when Twilio is not set up", async () => {
+    process.env.DEMO_SMS_ENABLED = "true";
     const db = fakeDb([[/INSERT INTO demo_signups/, row]]);
     const { mailer, sent } = fakeMailer();
     const r = await request(createApp(makeDeps({ db, mailer })))

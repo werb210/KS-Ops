@@ -7,6 +7,7 @@ import { bodies, sendQuietly } from "./lib/email.js";
 import { periodOf, previousPeriod } from "./lib/http.js";
 import { audit } from "./licensees/repo.js";
 import { retryPendingPlanPushes } from "./sync/planPush.js";
+import { endAdminTrials } from "./billing/adminTrial.js";
 import { syncPgiLinks } from "./sync/pgiLink.js";
 import { isFinal, pullUsageReport } from "./sync/usage.js";
 import { runDemoJobs } from "./demo/jobs.js";
@@ -143,6 +144,12 @@ export function startWorkers(deps: Deps): () => void {
     if (pushing) return;
     pushing = true;
     try {
+      // KS_OPS_v13_ADMIN_TRIAL - trials whose 28 days are up go back to their stored plan before the push runs.
+      const ended = await endAdminTrials(deps).catch((err) => {
+        console.error("[workers] ending free trials failed", err instanceof Error ? err.message : String(err));
+        return 0;
+      });
+      if (ended) console.log(`[workers] free trials ended: ${ended}`);
       const r = await retryPendingPlanPushes(deps);
       if (r.tried) console.log(`[workers] plan push retry: ${r.pushed}/${r.tried} pushed`);
     } catch (err) {

@@ -8,6 +8,7 @@ import { salesEmail } from "../config.js";
 import { sendQuietly } from "../lib/email.js";
 import { demoConfigured, demoIdleHours } from "./config.js";
 import { digestEvents } from "./digest.js";
+import { signupLinkFor } from "./prefill.js";
 import { prospectPackageMail, salesCompletedMail, salesUnfinishedMail } from "./emails.js";
 import * as repo from "./repo.js";
 import { wipeServerSession } from "./server.js";
@@ -22,7 +23,7 @@ export async function sendCompletionMails(deps: Pick<Deps, "db" | "mailer">, id:
   if (!s || s.status === "wiped" || s.mail_attempts >= MAX_MAIL_ATTEMPTS) return out;
   const pkg = await repo.packageOf(deps.db, id);
   if (pkg && !s.prospect_package_sent_at && (await repo.claimMail(deps.db, id, "prospect_package_sent_at"))) {
-    out.prospect = await sendQuietly(deps.mailer, prospectPackageMail(s, pkg.pdf ? pkg.pdf.toString("base64") : null, pkg.filename, pkg.mail), "demo package");
+    out.prospect = await sendQuietly(deps.mailer, prospectPackageMail(s, pkg.pdf ? pkg.pdf.toString("base64") : null, pkg.filename, pkg.mail, signupLinkFor(s.id)), "demo package");
     if (!out.prospect) await repo.releaseMail(deps.db, id, "prospect_package_sent_at");
   }
   if (s.completed_at && !s.sales_completed_sent_at && (await repo.claimMail(deps.db, id, "sales_completed_sent_at"))) {

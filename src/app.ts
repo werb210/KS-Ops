@@ -14,6 +14,8 @@ import { publicRouter } from "./routes/public.js";
 import { stripeWebhookRouter } from "./routes/stripeWebhook.js";
 import { demoOpsRouter, demoPublicRouter } from "./routes/demo.js";
 import { opsQuickbooksRouter, qboCallbackRouter, qboPageRouter } from "./routes/opsQuickbooks.js";
+import { opsTrialsRouter } from "./routes/opsTrials.js";
+import { trialsPageRouter } from "./routes/opsTrialsPage.js";
 
 /** CORS for a list of allowed origins read from env vars at request time. */
 function corsFor(...envNames: string[]) {
@@ -61,9 +63,10 @@ export function createApp(deps: Deps) {
   app.use("/api/ops/auth", opsAuthRouter(deps));
   // Intuit sends the browser back here without a staff token; the single-use OAuth state is the check.
   app.use("/api/ops/quickbooks/oauth/callback", qboCallbackRouter(deps));
-  app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps));
-  // The QuickBooks ops page (holds no data; its calls need a staff token).
+  app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps), opsTrialsRouter(deps));
+  // The QuickBooks and free-trial ops pages (they hold no data; their calls need a staff token).
   app.use("/ops/quickbooks", qboPageRouter());
+  app.use("/ops/trials", trialsPageRouter());
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "not_found" }));
 

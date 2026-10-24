@@ -9,7 +9,9 @@ import {
   audit, codeTaken, EncryptionNotConfigured, getLicensee, insertLicensee, isUniqueViolation, markPurged, rotateOpsKey,
   staffView, type LicenseeRow,
 } from "../licensees/repo.js";
-import { crossFieldErrors, staffCreateSchema, staffPatchSchema, STATUSES } from "../licensees/validation.js";
+import {
+  composeMailingAddress, crossFieldErrors, normalizePostal, POSTAL_MESSAGES, staffCreateSchema, staffPatchSchema, STATUSES,
+} from "../licensees/validation.js";
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
 import { addonsOf, isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
 import { crmLicenseeCreated, crmLicenseeStatus, crmLicenseeUpdated } from "../crm/triggers.js";
@@ -24,7 +26,10 @@ const PATCH_COLUMNS = [
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
   "onboarding_fee_paid", "payment_method",
+  "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color",
 ] as const;
+
+const ADDRESS_PARTS = ["address_line1", "address_line2", "city", "postal_code", "province_state", "country"] as const;
 
 function pricingView(l: LicenseeRow) {
   const c = monthlyCharge(l);
@@ -189,6 +194,18 @@ export function opsLicenseesRouter(deps: Deps): Router {
       const parsed = parseBody(staffPatchSchema, req.body);
       if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
       const v = parsed.data as Record<string, unknown>;
+      // KS_OPS_v13_ADDRESS - a changed address part rewrites the one-line mailing_address (unless it was sent too), and
+      // the postal code is checked against the country.
+      if (ADDRESS_PARTS.some((k) => v[k] !== undefined) && (l.address_line1 || v.address_line1 !== undefined)) {
+        const merged = { ...l, ...Object.fromEntries(ADDRESS_PARTS.filter((k) => v[k] !== undefined).map((k) => [k, v[k]])) } as LicenseeRow;
+        if (merged.postal_code) {
+          const postal = normalizePostal(merged.country === "US" ? "US" : "CA", merged.postal_code);
+          if (!postal) return res.status(400).json({ errors: { postal_code: POSTAL_MESSAGES[merged.country === "US" ? "US" : "CA"] } });
+          if (v.postal_code !== undefined) v.postal_code = postal;
+          merged.postal_code = postal;
+        }
+        if (v.mailing_address === undefined) v.mailing_address = composeMailingAddress(merged);
+      }
       const changed = PATCH_COLUMNS.filter((c) => v[c] !== undefined && v[c] !== (l as Record<string, unknown>)[c]);
       // KS_OPS_BANK_CONNECT_ADDON - add-ons are merged into the stored set; only real changes count.
       const addonsBefore = addonsOf(l);

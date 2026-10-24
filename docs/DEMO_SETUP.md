@@ -81,7 +81,8 @@ workflow then ships the same build to the demo web app after it deploys the dev 
 | `PUBLIC_SITE_URL` | already set (the website); the sign-up form posts from there |
 | `KS_SALES_EMAIL` | where the sales notes go (default `keystone@boreal.financial`) |
 | `MS_GRAPH_*` or `SENDGRID_*` | already needed for KS-Ops email; without one, demo emails are only logged |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` (or `TWILIO_MESSAGING_SERVICE_SID`) | texts the demo link to the mobile number given on the sign-up form (Canadian/US numbers). Without them the link is emailed only |
+| `DEMO_SMS_ENABLED` | `true` texts the demo link as well as emailing it. **Off by default**: the link is emailed only, and the mobile number is kept so sales can call |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` (or `TWILIO_MESSAGING_SERVICE_SID`) | with `DEMO_SMS_ENABLED=true`, texts the demo link to the mobile number given on the sign-up form (Canadian/US numbers) |
 | `TURNSTILE_SECRET` | optional; when set, the demo sign-up requires the Turnstile check |
 | `DEMO_SESSION_DAYS` | optional, default 7 |
 | `DEMO_IDLE_HOURS` | optional, default 24 - when the "started but didn't finish" note goes to sales |
