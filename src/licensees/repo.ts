@@ -50,6 +50,8 @@ export type LicenseeRow = {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_checkout_session_id: string | null;
+  /** The payment method KS-Ops last made the Stripe customer's default for invoices (from the subscription). */
+  stripe_default_payment_method?: string | null;
   onboarding_fee_paid: boolean;
   plan_sync_status: string;
   plan_sync_error: string | null;

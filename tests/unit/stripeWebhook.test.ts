@@ -296,3 +296,62 @@ describe("POST /api/ops/licensees/:id/billing/checkout with a subscription on fi
     expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 });
+
+describe("customer default payment method", () => {
+  const withCustomers = (pm: string | null, update = vi.fn(async (id: string) => ({ id }))) => ({
+    subscriptions: {
+      retrieve: vi.fn(async (id: string) => ({ id, status: "active", customer: "cus_1", default_payment_method: pm, items: { data: [] } })),
+      update: vi.fn(async (id: string) => ({ id })),
+    },
+    customers: { update },
+  });
+  const pmSet = (db: ReturnType<typeof webhookDb>) =>
+    db.calls.filter((c) => /SET stripe_default_payment_method/.test(c.sql)).map((c) => c.params[1]);
+
+  it("after Checkout, makes the subscription's bank debit the customer's invoice default", async () => {
+    const { stripe, db, app } = setup({}, withCustomers("pm_acss_1"));
+    expect((await send(app, completed)).status).toBe(200);
+    expect((stripe as any).customers.update).toHaveBeenCalledWith(
+      "cus_1",
+      { invoice_settings: { default_payment_method: "pm_acss_1" } },
+      { idempotencyKey: "ks-default-pm-cus_1-pm_acss_1" },
+    );
+    expect(pmSet(db)).toEqual(["pm_acss_1"]);
+  });
+
+  it("also while a bank debit Checkout is still settling", async () => {
+    const { stripe, app } = setup({}, withCustomers("pm_acss_2"));
+    await send(app, evt("checkout.session.completed", session({ payment_status: "unpaid" })));
+    expect((stripe as any).customers.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("follows the subscription's default payment method when it changes, and skips one already set", async () => {
+    const { stripe, db, app } = setup({ row: { stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1", stripe_default_payment_method: "pm_old" } }, withCustomers(null));
+    const sub = (pm: string | null) => ({ id: "sub_1", customer: "cus_1", status: "active", default_payment_method: pm, metadata: { licensee_id: L.id } });
+    await send(app, evt("customer.subscription.updated", sub("pm_old")));
+    expect((stripe as any).customers.update).not.toHaveBeenCalled();
+    await send(app, evt("customer.subscription.updated", sub("pm_card_9")));
+    expect((stripe as any).customers.update).toHaveBeenCalledWith("cus_1", { invoice_settings: { default_payment_method: "pm_card_9" } }, expect.anything());
+    expect(pmSet(db)).toEqual(["pm_card_9"]);
+    // No payment method on the subscription: nothing to copy.
+    await send(app, evt("customer.subscription.updated", sub(null)));
+    expect((stripe as any).customers.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("not for another subscription that KS-Ops did not adopt, nor for an ended one", async () => {
+    const { stripe, app } = setup({ row: { stripe_subscription_id: "sub_1", stripe_customer_id: "cus_1" } }, withCustomers("pm_x"));
+    await send(app, evt("customer.subscription.deleted", { id: "sub_1", customer: "cus_1", status: "canceled", default_payment_method: "pm_x", metadata: { licensee_id: L.id } }));
+    await send(app, evt("customer.subscription.updated", { id: "sub_other", customer: "cus_1", status: "active", default_payment_method: "pm_x", metadata: { licensee_id: L.id } }));
+    expect((stripe as any).customers.update).not.toHaveBeenCalled();
+  });
+
+  it("a Stripe failure is logged and audited, and the webhook still succeeds", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db, app } = setup({}, withCustomers("pm_acss_1", vi.fn(async () => { throw new Error("stripe down"); })));
+    expect((await send(app, completed)).status).toBe(200);
+    expect(err.mock.calls.some((c) => /could not make the subscription's payment method the default.*stripe down/.test(String(c[0])))).toBe(true);
+    expect(db.calls.some((c) => /INSERT INTO staff_audit/.test(c.sql) && c.params[1] === "stripe.default_payment_method_failed")).toBe(true);
+    expect(pmSet(db)).toEqual([]);
+    err.mockRestore();
+  });
+});

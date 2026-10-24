@@ -72,6 +72,10 @@ Stripe webhook events to send: `checkout.session.completed`, `checkout.session.a
 
 Payment methods: Checkout offers Canadian pre-authorized debit (`acss_debit`, with the PAD mandate) by default and
 card as the alternative; a licensee whose `payment_method` is `card` gets card only. Turn on ACSS Debit in Stripe.
+After Checkout (and whenever the subscription's `default_payment_method` changes) that payment method is also set as
+the Stripe customer's `invoice_settings.default_payment_method`, so usage-overage and other one-off invoices collect
+automatically. The last one set is kept in `licensees.stripe_default_payment_method`; a Stripe failure is logged and
+audited (`stripe.default_payment_method_failed`) and tried again on the next subscription event.
 
 How they are handled:
 - A sign-up moves to `provisioning` (and the welcome emails go out) only when the Checkout is paid

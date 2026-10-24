@@ -14,6 +14,9 @@ settings on their KS-server).
 - **Card** when the licensee chose it: Checkout offers card only.
 - The choice is `payment_method` (`acss_debit` | `card`) on the licensee: from the website sign-up, staff create, or
   `PATCH /api/ops/licensees/:id { "payment_method": "card" }`. It applies to the next Checkout.
+- Checkout saves the bank debit or card on the subscription; KS-Ops copies it to the customer's
+  `invoice_settings.default_payment_method` (on `checkout.session.completed` and `customer.subscription.*`), so usage
+  overage and other one-off invoices are collected automatically too.
 - Stripe: turn on **ACSS Debit** under Settings > Payment methods (live and test). A bank debit settles in a few
   business days: the licensee moves to `provisioning` on `checkout.session.async_payment_succeeded`, as before.
 - Stripe API 2026-09-30 (stripe-node 23) replaced Checkout's `payment_method_types` with

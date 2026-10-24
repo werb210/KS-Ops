@@ -7,6 +7,8 @@
 //   the contact a link to resume payment.
 // - A subscription id already on file is never replaced while that subscription is still live in Stripe: the new one
 //   is logged, audited and reported to sales instead.
+// - The subscription's payment method (from Checkout) is also made the customer's invoice default, so one-off
+//   invoices such as usage overage collect automatically by bank debit or card.
 // - invoice.paid only brings a past_due licensee back to active, and only for its own subscription's invoices.
 // - Status changes are queued for a push to the licensee's server (see sync/planPush.ts).
 // - invoice.finalized, invoice.paid and charge.refunded are queued for Keystone's QuickBooks (see qbo/outbox.ts).
@@ -134,6 +136,46 @@ function licenseeSummary(l: LicenseeRow): string {
   ].join("\n");
 }
 
+/**
+ * Makes the subscription's payment method (the bank debit or card saved in Checkout) the Stripe customer's
+ * invoice_settings.default_payment_method too. Checkout only sets it on the subscription, so one-off invoices (usage
+ * overage, anything staff create) would otherwise not collect automatically. Only for the licensee's own live
+ * subscription; skipped when it is already the one KS-Ops set. A Stripe failure is logged and audited (the next
+ * subscription event tries again); it never stops the webhook.
+ */
+export async function syncCustomerDefaultPaymentMethod(
+  deps: HookDeps,
+  l: LicenseeRow,
+  customer: string | null,
+  sub: Obj | string | null,
+  source: string,
+): Promise<"set" | "same" | "none" | "failed"> {
+  const stripe = deps.stripe?.() ?? null;
+  if (!stripe?.customers || !customer || !sub) return "none";
+  let subscription: Obj | null = typeof sub === "object" ? sub : null;
+  try {
+    if (!subscription || subscription.default_payment_method === undefined) {
+      subscription = await stripe.subscriptions.retrieve(idOf(sub)!);
+    }
+    const pm = idOf(subscription?.default_payment_method);
+    if (!pm) return "none";
+    if (l.stripe_default_payment_method === pm) return "same";
+    await stripe.customers.update(
+      customer,
+      { invoice_settings: { default_payment_method: pm } },
+      { idempotencyKey: `ks-default-pm-${customer}-${pm}` },
+    );
+    await deps.db.query("UPDATE licensees SET stripe_default_payment_method = $2, updated_at = now() WHERE id = $1", [l.id, pm]);
+    await audit(deps.db, ACTOR, "stripe.default_payment_method_set", l.id, { source, customer, payment_method: pm });
+    return "set";
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[stripe] ${source}: could not make the subscription's payment method the default for customer ${customer} (${l.company_code}): ${msg}`);
+    await audit(deps.db, ACTOR, "stripe.default_payment_method_failed", l.id, { source, customer, error: msg.slice(0, 300) });
+    return "failed";
+  }
+}
+
 export const isPaidSession = (s: Obj) => s.payment_status === "paid" || s.payment_status === "no_payment_required";
 
 /** checkout.session.completed (paid now, or waiting for a delayed payment) and async_payment_succeeded (paid). */
@@ -151,6 +193,9 @@ async function checkoutCompleted(deps: HookDeps, s: Obj, paidNow: boolean): Prom
     [l.id, idOf(s.customer), s.id ?? null, paid],
   );
   const sub = await adoptSubscription(deps, l, idOf(s.subscription), "checkout");
+  if (sub === "set" || sub === "same" || sub === "replaced") {
+    await syncCustomerDefaultPaymentMethod(deps, l, idOf(s.customer) ?? l.stripe_customer_id, s.subscription, "checkout");
+  }
   if (sub === "kept_existing" && paid) {
     await sendQuietly(
       deps.mailer,
@@ -266,6 +311,7 @@ async function subscriptionChanged(deps: HookDeps, sub: Obj, deleted: boolean): 
   // An ended subscription is never adopted; a live one only when nothing live is on file.
   const adopted = ended ? (l.stripe_subscription_id === sub.id ? "same" : "kept_existing") : await adoptSubscription(deps, l, sub.id ?? null, "subscription");
   if (adopted === "kept_existing" || adopted === "none") return "other_subscription";
+  if (!ended) await syncCustomerDefaultPaymentMethod(deps, l, idOf(sub.customer) ?? l.stripe_customer_id, sub, "subscription");
   if (ended) {
     await setStatus(deps, l, "UPDATE licensees SET status = 'cancelled', updated_at = now() WHERE id = $1 AND status <> 'cancelled' RETURNING id", "cancelled");
     return "cancelled";
