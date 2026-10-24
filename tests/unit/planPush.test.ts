@@ -24,7 +24,7 @@ describe("plan push", () => {
     expect(url).toBe("https://ks-northwind.example/api/plan");
     expect(init.method).toBe("PUT");
     expect((init.headers as Record<string, string>)["X-KS-Ops-Key"]).toBe("ksops_abc");
-    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false } });
+    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false }, beta_features: [] });
     expect(d.calls.some((c) => /plan_sync_status = 'synced'/.test(c.sql))).toBe(true);
     expect(d.calls.some((c) => /UPDATE plan_changes SET status = 'pushed'/.test(c.sql))).toBe(true);
   });
