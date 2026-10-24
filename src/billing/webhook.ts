@@ -9,6 +9,7 @@
 //   is logged, audited and reported to sales instead.
 // - invoice.paid only brings a past_due licensee back to active, and only for its own subscription's invoices.
 // - Status changes are queued for a push to the licensee's server (see sync/planPush.ts).
+// - invoice.finalized, invoice.paid and charge.refunded are queued for Keystone's QuickBooks (see qbo/outbox.ts).
 import { publicSiteUrl, salesEmail } from "../config.js";
 import type { Deps } from "../deps.js";
 import { bodies, sendQuietly } from "../lib/email.js";
@@ -17,6 +18,7 @@ import { PLAN_NAMES } from "../pricing.js";
 import { queueStatusPush } from "../sync/planPush.js";
 import { liveSubscriptionStatus } from "./billing.js";
 import { crmLicenseePaid, crmLicenseeStatus } from "../crm/triggers.js";
+import { queueQboForStripeEvent } from "../qbo/outbox.js";
 
 type HookDeps = Pick<Deps, "db" | "mailer"> & Partial<Pick<Deps, "stripe" | "now">>;
 const crmDeps = (deps: HookDeps) => ({ db: deps.db, now: deps.now ?? (() => new Date()) });
@@ -372,6 +374,10 @@ export async function handleStripeEvent(deps: HookDeps, event: Obj): Promise<{ d
     default:
       break;
   }
+  // Keystone's own QuickBooks (when set up): invoice.finalized, invoice.paid and charge.refunded are queued for
+  // posting. A failure here throws, so Stripe sends the event again.
+  const queued = await queueQboForStripeEvent(deps, event);
+  if (queued && result === "ignored") result = "queued_for_quickbooks";
   await deps.db.query("INSERT INTO stripe_events (id, type) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING", [event.id, event.type]);
   return { duplicate: false, result };
 }

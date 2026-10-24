@@ -131,6 +131,22 @@ answer cannot be read, the script stops with an error rather than continuing wit
 3. KS-Ops pushes the licensee's plan to the new server within 5 minutes of it answering.
 4. Set the licensee's status to `trial` or `active`. From then on the company code resolves in the apps' directory.
 
+## Keystone's own KS-Ops settings (once, not per licensee)
+
+Keystone invoicing its licensees: Stripe collects (bank debit by default, card as the alternative) and every Stripe
+invoice, payment, refund and fee is posted to Keystone's own QuickBooks Online. App settings on the **ks-ops** app
+(not on any licensee's apps):
+
+| Setting | Value |
+| --- | --- |
+| `KS_QBO_CLIENT_ID`, `KS_QBO_CLIENT_SECRET` | Keystone's Intuit app keys (sandbox keys with `KS_QBO_ENVIRONMENT=sandbox`) |
+| `KS_QBO_TOKEN_ENCRYPTION_KEY` | `openssl rand -hex 32`, set once and kept |
+| `KS_QBO_ENVIRONMENT` | `sandbox` (default) or `production` |
+| `KS_QBO_REDIRECT_URI` | optional; default `https://<ks-ops host>/api/ops/quickbooks/oauth/callback`, which must be listed in the Intuit app |
+
+Then add `charge.refunded` (and keep `invoice.finalized`, `invoice.paid`) on the Stripe webhook, turn on ACSS Debit
+in Stripe, open `https://<ks-ops host>/ops/quickbooks`, connect, and fill in the settings. See `docs/QUICKBOOKS.md`.
+
 ## Today's limits
 
 - Creating the four `ks-<code>` GitHub environments, their secrets and variables, and the `deploy/licensees.json`

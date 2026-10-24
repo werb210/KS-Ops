@@ -4,6 +4,7 @@ import { isProduction, salesEmail, signupTurnstileOptional } from "../config.js"
 import type { Deps } from "../deps.js";
 import { BillingNotConfigured } from "../billing/stripeClient.js";
 import { createCheckout } from "../billing/billing.js";
+import { DEFAULT_PAYMENT_METHOD, PAYMENT_METHOD_NAMES, isPaymentMethod } from "../billing/paymentMethods.js";
 import { matchesHash, newSecret } from "../lib/crypto.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { limiter } from "../lib/clientIp.js";
@@ -42,6 +43,7 @@ function salesSignupMail(l: LicenseeRow, note: string) {
         `Company code: ${l.company_code}`,
         `Plan: ${PLAN_NAMES[l.plan]}, ${l.seats} seat(s), ${l.billing_interval} billing, ${l.support_level} support` +
           (l.extra_storage_blocks > 0 ? `, ${l.extra_storage_blocks} extra 50 GB storage block(s)` : ""),
+        `Pays by: ${PAYMENT_METHOD_NAMES[isPaymentMethod(l.payment_method) ? l.payment_method : DEFAULT_PAYMENT_METHOD]}`,
         `Contact: ${l.contact_name}, ${l.contact_email}, ${l.contact_phone}`,
         `Address: ${l.mailing_address ?? ""}, ${l.province_state ?? ""}, ${l.country}`,
       ].join("\n"),
@@ -114,6 +116,7 @@ export function publicRouter(deps: Deps): Router {
           support_level: input.support_level,
           seats: input.seats,
           extra_storage_blocks: input.extra_storage_blocks,
+          payment_method: input.payment_method,
           primary_color: input.primary_color,
           logo_url: input.logo_url,
           assistant_name: input.assistant_name,
@@ -127,7 +130,8 @@ export function publicRouter(deps: Deps): Router {
         throw err;
       }
       await audit(deps.db, "website", "signup", l.id, {
-        plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks, ip: clientIp(req),
+        plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
+        payment_method: l.payment_method, ip: clientIp(req),
       });
       await crmLicenseeCreated(deps, l);
 

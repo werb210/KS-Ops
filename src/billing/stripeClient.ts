@@ -18,7 +18,13 @@ export type StripeLike = {
   invoices: {
     create: (params: Obj, opts?: Opts) => Promise<{ id: string }>;
     list: (params: Obj) => Promise<{ data: Obj[] }>;
+    /** All of an invoice's lines (webhook payloads carry the first page only). Used by the QuickBooks posting. */
+    listLineItems?: (id: string, params?: Obj) => Promise<{ data: Obj[]; has_more?: boolean }>;
   };
+  /** The QuickBooks posting reads these; optional so test fakes stay small. */
+  invoicePayments?: { list: (params: Obj) => Promise<{ data: Obj[] }> };
+  paymentIntents?: { retrieve: (id: string, params?: Obj) => Promise<Obj> };
+  refunds?: { list: (params: Obj) => Promise<{ data: Obj[]; has_more?: boolean }> };
   products: { create: (params: Obj, opts?: Opts) => Promise<{ id: string }> };
   prices: {
     create: (params: Obj, opts?: Opts) => Promise<Obj>;

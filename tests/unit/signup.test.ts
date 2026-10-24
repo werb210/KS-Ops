@@ -139,6 +139,36 @@ describe("POST /api/public/signup", () => {
     expect(params.line_items).toContainEqual({ price: "price_storage_block:monthly", quantity: 2 });
   });
 
+  it("defaults to Canadian pre-authorized debit with the PAD mandate, card as the fallback", async () => {
+    const { db, inserted } = signupDb();
+    const stripe = fakeStripe();
+    const res = await request(createApp(makeDeps({ db, stripe: () => stripe }))).post("/api/public/signup").send(validSignup());
+    expect(res.status).toBe(201);
+    expect(inserted[0]).toMatchObject({ payment_method: "acss_debit" });
+    const params = (stripe.checkout.sessions.create as any).mock.calls[0][0];
+    expect(params.allowed_payment_method_types).toEqual(["acss_debit", "card"]);
+    expect(params.payment_method_options.acss_debit).toMatchObject({
+      mandate_options: { payment_schedule: "combined", transaction_type: "business" },
+      verification_method: "automatic",
+    });
+    expect(params.payment_method_options.acss_debit.mandate_options.interval_description).toMatch(/monthly or yearly/);
+  });
+
+  it("offers card only when the licensee chose card, and refuses unknown methods", async () => {
+    const { db, inserted } = signupDb();
+    const stripe = fakeStripe();
+    const app = createApp(makeDeps({ db, stripe: () => stripe }));
+    const res = await request(app).post("/api/public/signup").send({ ...validSignup(), payment_method: "card" });
+    expect(res.status).toBe(201);
+    expect(inserted[0]).toMatchObject({ payment_method: "card" });
+    const params = (stripe.checkout.sessions.create as any).mock.calls[0][0];
+    expect(params.allowed_payment_method_types).toEqual(["card"]);
+    expect(params.payment_method_options).toBeUndefined();
+    const bad = await request(app).post("/api/public/signup").send({ ...validSignup(), payment_method: "cheque" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.errors.payment_method).toBe("Choose bank debit or credit card.");
+  });
+
   it("defaults extra storage to none and rejects bad amounts", async () => {
     const ok = signupSchema.safeParse(validSignup());
     expect(ok.success && ok.data.extra_storage_blocks).toBe(0);

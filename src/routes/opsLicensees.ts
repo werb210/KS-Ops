@@ -23,7 +23,7 @@ const PATCH_COLUMNS = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
-  "onboarding_fee_paid",
+  "onboarding_fee_paid", "payment_method",
 ] as const;
 
 function pricingView(l: LicenseeRow) {
