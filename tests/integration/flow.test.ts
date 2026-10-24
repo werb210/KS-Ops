@@ -146,7 +146,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
   it("PATCH plan pushes to the licensee and records the change; failures retry", async () => {
     const ok = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "growth", extra_storage_blocks: 1 });
     expect(ok.body.plan_push).toEqual({ ok: true });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false } });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [] });
 
     remote.up = false;
     const fail = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "pro" });
@@ -159,7 +159,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     now = new Date(now.getTime() + 6 * 60_000);
     // Northwind (from the sign-up tests) is also waiting: its status changes are queued but it has no ops key yet.
     expect(await retryPendingPlanPushes(deps)).toEqual({ tried: 2, pushed: 1 });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false } });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [] });
     const changes = (await pool.query("SELECT status FROM plan_changes WHERE licensee_id = $1", [id])).rows;
     expect(changes.map((c) => c.status)).toEqual(["pushed", "pushed"]);
   });

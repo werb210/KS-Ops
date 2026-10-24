@@ -8,6 +8,8 @@
 // Licensees (source "website_signup" for website sign-ups, "licensee" for staff-created; external_id = licensees.id):
 //   created -> stage signed_up + event signup; Stripe payment -> paying + event payment; status changes (suspended,
 //   cancelled, past_due, ...) -> event status_change and the company status (cancelled never sets "lost").
+// Beta programme sign-ups (KS_OPS_BETA_v1; source "website_signup", external_id = beta_signups.id): stage lead (none
+//   when the email is already a licensee contact) + event signup + a note of their interests.
 import type { Deps } from "../deps.js";
 import { DEMO_STEPS } from "../demo/config.js";
 import { digestEvents, type DemoEvent, type Digest } from "../demo/digest.js";
@@ -164,4 +166,42 @@ export async function crmLicenseeStatus(deps: CrmDeps, l: LicenseeLike, from: st
 /** Company details changed by staff (name, plan, seats, ...): refresh the company, no event. */
 export async function crmLicenseeUpdated(deps: CrmDeps, l: LicenseeLike): Promise<void> {
   await enqueueCrm(deps, licenseeBase(l));
+}
+
+// ---- beta programme sign-ups (KS_OPS_BETA_v1) ----
+
+type BetaSignupLike = {
+  id: string; name: string; email: string; brokerage: string; interests: string[]; message?: string | null; created_at?: Date | string;
+};
+
+export function betaSignupNote(s: BetaSignupLike): string {
+  return [
+    `${s.name} from ${s.brokerage} joined the Keystone beta programme on the website.`,
+    `Interests: ${s.interests.length ? s.interests.join(", ") : "none chosen"}.`,
+    ...(s.message && s.message.trim() ? [`Their note: ${s.message.trim()}`] : []),
+  ].join("\n");
+}
+
+/**
+ * A website beta programme sign-up: a website lead (source "website_signup", external_id = beta_signups.id) with a
+ * signup event and a note of their interests. When the email already belongs to a licensee's contact, no stage is
+ * sent, so a paying customer is never moved back to "lead".
+ */
+export async function crmBetaSignup(deps: CrmDeps, s: BetaSignupLike): Promise<void> {
+  let existing = false;
+  try {
+    const r = await deps.db.query("SELECT 1 FROM licensees WHERE lower(contact_email) = lower($1) LIMIT 1", [s.email]);
+    existing = r.rows.length > 0;
+  } catch (err) {
+    console.warn(`[crm] beta sign-up licensee check failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  await enqueueCrm(deps, {
+    source: "website_signup",
+    external_id: s.id,
+    ...(existing ? {} : { stage: "lead" as const }),
+    contact: { name: s.name, email: s.email, phone: null, title: null },
+    company: { name: s.brokerage },
+    events: [{ type: "signup", at: iso(s.created_at, deps.now()), summary: "Joined the beta programme on the Keystone website." }],
+    note: betaSignupNote(s),
+  });
 }
