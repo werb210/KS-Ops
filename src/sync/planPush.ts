@@ -3,6 +3,9 @@
 // pending_sync and the retry worker tries again every 5 minutes. The push always sends the licensee's current values,
 // so the latest change wins.
 //
+// beta_features (KS_OPS_BETA_v1) is the licensee's full view of the beta catalogue (see beta/catalogue.ts); it replaces
+// what the server had. Servers that do not know the field ignore it.
+//
 // status is only sent once the licensee is live (trial, active, past_due, suspended, cancelled). KS-server: suspended =
 // the staff portal shows a notice and blocks new applications and calls but data stays readable; cancelled = read-only
 // export only. Servers that do not know the field ignore it. addons (KS_OPS_BANK_CONNECT_ADDON) is always sent in full.
@@ -10,6 +13,7 @@ import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { getLicensee, opsKeyOf, type LicenseeRow } from "../licensees/repo.js";
 import { pushPlanFor } from "../billing/adminTrialPlan.js";
+import { betaSnapshot, type BetaFlag } from "../beta/catalogue.js";
 
 export const RETRY_MINUTES = 5;
 
@@ -70,6 +74,19 @@ export async function queueStatusPush(db: Q, licenseeId: string, from: string, t
 
 export type PushResult = { ok: true } | { ok: false; error: string };
 
+/**
+ * KS_OPS_BETA_v1 - the licensee's beta features for the push, or undefined when they cannot be read (the push then goes
+ * without them, so a beta problem never holds up a plan or status change; the next push sends them).
+ */
+export async function betaFeaturesFor(deps: Pick<Deps, "db" | "now">, l: LicenseeRow): Promise<BetaFlag[] | undefined> {
+  try {
+    return await betaSnapshot(deps.db, l, deps.now());
+  } catch (err) {
+    console.warn(`[plan-push] beta features for ${l.id} could not be read: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+}
+
 export async function recordPlanChange(
   deps: Pick<Deps, "db">,
   before: Pick<LicenseeRow, "id" | "plan" | "extra_storage_blocks"> & { status?: string },
@@ -113,11 +130,12 @@ export async function pushPlan(deps: Pick<Deps, "db" | "fetch" | "now">, license
   if (!l.server_url) return fail("no_server_url");
   const key = opsKeyOf(l);
   if (!key) return fail("no_ops_key");
+  const beta = await betaFeaturesFor(deps, l);
   try {
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/plan`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120) },
-      body: JSON.stringify(planPushBody(l, deps.now())),
+      body: JSON.stringify({ ...planPushBody(l, deps.now()), ...(beta ? { beta_features: beta } : {}) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
