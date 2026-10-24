@@ -41,8 +41,9 @@ export const TRIALS_PAGE_HTML = `<!doctype html>
     <h2>How the trial works</h2>
     <ol class="plan">
       <li>Days 1 to 14: free, with every Pro feature.</li>
-      <li>Days 15 to 28: billed at the Starter price (Stripe emails the invoice), still with every Pro feature.</li>
-      <li>From day 29: Starter features, unless they choose a plan. Change the plan on the licensee to choose one.</li>
+      <li>Days 15 to 28: billed for the plan and billing interval they signed up for - Starter or Growth, monthly or annual (an annual plan is invoiced for the year on day 15). Stripe emails the invoice. Still with every Pro feature.</li>
+      <li>From day 29: the features of the plan they signed up for.</li>
+      <li>This trial is separate from the 14-day Pro trial a brokerage's admin can start in the app: one never uses up the other.</li>
     </ol>
     <p class="hint">The contact is emailed these dates. Who started the trial is recorded in the audit log.</p>
   </section>
@@ -64,6 +65,12 @@ export const TRIALS_PAGE_HTML = `<!doctype html>
       <button id="search" type="button" class="quiet">Search</button>
       <label for="pick">Licensee</label>
       <select id="pick"><option value="">Search first</option></select>
+      <label for="pickPlan">Bill from day 15 as</label>
+      <select id="pickPlan">
+        <option value="">The plan and interval they signed up for</option>
+        <option value="starter|monthly">Starter, monthly</option><option value="starter|annual">Starter, annual</option>
+        <option value="growth|monthly">Growth, monthly</option><option value="growth|annual">Growth, annual</option>
+      </select>
       <button id="startExisting" type="button">Start free trial</button>
       <div id="existingMsg" class="msg hidden" role="status"></div>
     </section>
@@ -80,6 +87,8 @@ export const TRIALS_PAGE_HTML = `<!doctype html>
         <div><label for="contact_phone">Contact phone</label><input id="contact_phone" name="contact_phone" type="tel" autocomplete="tel"></div>
         <div><label for="country">Country</label><select id="country" name="country"><option value="CA">Canada</option><option value="US">United States</option></select></div>
         <div><label for="province_state">Province or state</label><input id="province_state" name="province_state" placeholder="AB"></div>
+        <div><label for="plan">Plan (billed from day 15)</label><select id="plan" name="plan"><option value="starter">Starter</option><option value="growth">Growth</option></select></div>
+        <div><label for="billing_interval">Billing</label><select id="billing_interval" name="billing_interval"><option value="monthly">Monthly</option><option value="annual">Annual (the year is invoiced on day 15)</option></select></div>
       </form>
       <button id="startNew" type="button">Create and start free trial</button>
       <div id="newMsg" class="msg hidden" role="status"></div>
@@ -87,7 +96,7 @@ export const TRIALS_PAGE_HTML = `<!doctype html>
 
     <section>
       <h2>Trials started</h2>
-      <div class="scroll"><table><thead><tr><th>Company</th><th>Started</th><th>By</th><th>Billing from</th><th>Starter from</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="scroll"><table><thead><tr><th>Company</th><th>Started</th><th>By</th><th>Billing from</th><th>Plan</th><th>Pro until</th><th>Status</th></tr></thead><tbody id="rows"></tbody></table></div>
       <button id="refresh" type="button" class="quiet">Refresh</button>
       <button id="signout" type="button" class="quiet">Sign out</button>
     </section>
@@ -125,11 +134,11 @@ export const TRIALS_PAGE_HTML = `<!doctype html>
       var body = $("rows"); body.innerHTML = "";
       r.trials.forEach(function (t) {
         var tr = document.createElement("tr");
-        [t.company_name + " (" + t.company_code + ")", day(t.started_at), t.started_by || "", day(t.billing_starts_at), day(t.pro_until), t.ended_at ? "ended (" + (t.end_reason || "") + ")" : t.status]
+        [t.company_name + " (" + t.company_code + ")", day(t.started_at), t.started_by || "", day(t.billing_starts_at), (t.plan || "") + (t.billing_interval ? ", " + t.billing_interval : ""), day(t.pro_until), t.ended_at ? "ended (" + (t.end_reason || "") + ")" : t.status]
           .forEach(function (c) { var td = document.createElement("td"); td.textContent = c; tr.appendChild(td); });
         body.appendChild(tr);
       });
-      if (!r.trials.length) { var tr = document.createElement("tr"); var td = document.createElement("td"); td.colSpan = 6; td.textContent = "No trials yet."; tr.appendChild(td); body.appendChild(tr); }
+      if (!r.trials.length) { var tr = document.createElement("tr"); var td = document.createElement("td"); td.colSpan = 7; td.textContent = "No trials yet."; tr.appendChild(td); body.appendChild(tr); }
     });
   }
   $("useToken").onclick = function () {
@@ -152,8 +161,10 @@ export const TRIALS_PAGE_HTML = `<!doctype html>
   }
   $("startExisting").onclick = function () {
     var id = $("pick").value; if (!id) return show($("existingMsg"), "Choose a licensee first.", false);
-    if (!confirm("Start a free trial for this licensee? Its plan becomes Starter, billed from day 15.")) return;
-    start({ licensee_id: id }, $("existingMsg"), $("startExisting"));
+    var choice = $("pickPlan").value; var body = { licensee_id: id };
+    if (choice) { body.plan = choice.split("|")[0]; body.billing_interval = choice.split("|")[1]; }
+    if (!confirm("Start a free trial for this licensee? It is billed from day 15 for " + (choice ? choice.replace("|", ", ") : "the plan it signed up for") + ".")) return;
+    start(body, $("existingMsg"), $("startExisting"));
   };
   $("startNew").onclick = function () {
     var f = {}; Array.prototype.forEach.call($("prospect").elements, function (el) { if (el.name) f[el.name] = el.value.trim(); });
