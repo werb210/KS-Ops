@@ -161,23 +161,32 @@ describe("staff-only free trial", () => {
   const start = new Date("2026-10-24T18:00:00Z");
   const dates = adminTrialDates(start);
 
-  it("is free for 14 days, billed at Starter to day 28, with Pro features for 28 days", () => {
+  it("is free for 14 days, billed on the chosen plan to day 28, with Pro features for 28 days", () => {
     expect(dates.billing_starts_at.toISOString()).toBe("2026-11-07T18:00:00.000Z");
     expect(dates.pro_until.toISOString()).toBe("2026-11-21T18:00:00.000Z");
     const l = { plan: "starter" as const, admin_trial_started_at: start, admin_trial_pro_until: dates.pro_until, admin_trial_ended_at: null };
     expect(pushPlanFor(l, new Date("2026-11-10T00:00:00Z"))).toBe("pro");
     expect(pushPlanFor(l, new Date("2026-11-21T18:00:01Z"))).toBe("starter");
-    expect(pushPlanFor({ ...l, plan: "growth" }, new Date("2026-11-10T00:00:00Z"))).toBe("growth");
+    // KS_OPS_v14_TRIAL_RULES - a Growth brokerage also gets Pro features during the staff trial, then Growth.
+    expect(pushPlanFor({ ...l, plan: "growth" }, new Date("2026-11-10T00:00:00Z"))).toBe("pro");
+    expect(pushPlanFor({ ...l, plan: "growth" }, new Date("2026-11-21T18:00:01Z"))).toBe("growth");
+    expect(pushPlanFor({ ...l, plan: "pro" }, new Date("2026-11-10T00:00:00Z"))).toBe("pro");
     expect(planPushBody({ ...l, extra_storage_blocks: 0, status: "trial" }, new Date("2026-11-01T00:00:00Z")).plan).toBe("pro");
   });
 
   it("emails the dates in plain words", () => {
-    const m = adminTrialMail(licenseeRow({ seats: 2, plan: "starter" }) as never, dates, true);
+    const m = adminTrialMail(licenseeRow({ seats: 2, plan: "starter", billing_interval: "monthly" }) as never, dates, true);
     expect(m.to).toEqual(["nora@northwind.example"]);
     expect(m.text).toContain("Saturday, October 24, 2026 to Friday, November 6, 2026: free, with every Pro feature.");
-    expect(m.text).toContain("Saturday, November 7, 2026 to Friday, November 20, 2026: billed at the Starter price");
+    expect(m.text).toContain("Saturday, November 7, 2026 to Friday, November 20, 2026: billed for Starter (monthly)");
     expect(m.text).toContain("$59.00 per seat a month (2 seats: $118.00 a month");
-    expect(m.text).toContain("From Saturday, November 21, 2026: you're on Starter, unless you choose another plan");
+    expect(m.text).toContain("From Saturday, November 21, 2026: you're on Starter, with its features");
+    // KS_OPS_v14_TRIAL_RULES - an annual Growth sign-up is told the year is invoiced on day 15.
+    const g = adminTrialMail(licenseeRow({ seats: 2, plan: "growth", billing_interval: "annual" }) as never, dates, true);
+    expect(g.text).toContain("billed for Growth (annual)");
+    expect(g.text).toContain("for the year");
+    expect(g.text).toContain("The invoice for the year is emailed to you on Saturday, November 7, 2026");
+    expect(g.text).toContain("you're on Growth");
   });
 
   function trialDb(row: Record<string, unknown>) {
@@ -186,16 +195,16 @@ describe("staff-only free trial", () => {
       [/FROM stripe_prices/, (p) => (p[0] as string[]).map((key) => ({ key, stripe_price_id: `price_${key}` }))],
       [/INSERT INTO plan_changes/, () => [{ id: "pc1" }]],
       [/SELECT \* FROM licensees WHERE id = \$1/, () => [current]],
-      [/UPDATE licensees SET plan = 'starter', billing_interval = 'monthly', status = \$2/, (p) => {
+      [/UPDATE licensees SET plan = \$9, billing_interval = \$10, status = \$2/, (p) => {
         if (current.admin_trial_started_at) return [];
-        current = { ...current, plan: "starter", billing_interval: "monthly", status: p[1], stripe_customer_id: p[2], stripe_subscription_id: p[3], admin_trial_started_at: p[4], admin_trial_started_by: p[5], admin_trial_billing_starts_at: p[6], admin_trial_pro_until: p[7] };
+        current = { ...current, plan: p[8], billing_interval: p[9], status: p[1], stripe_customer_id: p[2], stripe_subscription_id: p[3], admin_trial_started_at: p[4], admin_trial_started_by: p[5], admin_trial_billing_starts_at: p[6], admin_trial_pro_until: p[7] };
         return [{ id: current.id }];
       }],
     ]);
     return { db, get: () => current };
   }
 
-  it("POST /api/ops/trials starts it: Starter subscription with no payment until day 15, audited, emailed", async () => {
+  it("POST /api/ops/trials starts it: a subscription for the plan they signed up for, no payment until day 15, audited, emailed", async () => {
     const { db, get } = trialDb(licenseeRow({ status: "pending_payment", plan: "growth", billing_interval: "annual", server_url: null }));
     const create = vi.fn(async () => ({ id: "sub_trial_1", status: "trialing" }));
     const customers = { update: vi.fn(), create: vi.fn(async () => ({ id: "cus_trial_1" })) };
@@ -213,9 +222,10 @@ describe("staff-only free trial", () => {
       collection_method: "send_invoice",
       metadata: { ks_admin_trial: "1" },
     });
-    expect(params.items).toEqual([{ price: "price_seat:starter:monthly", quantity: 3 }]);
+    // KS_OPS_v14_TRIAL_RULES - Growth, annual: what the brokerage signed up for (was always Starter monthly).
+    expect(params.items).toEqual([{ price: "price_seat:growth:annual", quantity: 3 }]);
     expect(opts.idempotencyKey).toContain("ks-admin-trial-sub-");
-    expect(get()).toMatchObject({ plan: "starter", status: "provisioning", stripe_subscription_id: "sub_trial_1" });
+    expect(get()).toMatchObject({ plan: "growth", billing_interval: "annual", status: "provisioning", stripe_subscription_id: "sub_trial_1" });
     const auditCall = db.calls.find((c) => /INSERT INTO staff_audit/.test(c.sql) && c.params[1] === "licensee.admin_trial_started");
     expect(auditCall?.params[0]).toBe("admin@example.test");
     expect(sent.some((m) => /free Keystone trial has started/.test(m.subject))).toBe(true);
@@ -223,6 +233,35 @@ describe("staff-only free trial", () => {
     const again = await request(app).post("/api/ops/trials").set("Authorization", `Bearer ${staffToken()}`).send({ licensee_id: "22222222-2222-4222-8222-222222222222" });
     expect(again.status).toBe(409);
     expect(again.body.error).toBe("trial_already_used");
+  });
+
+  it("staff can pick the plan and interval when starting it; an invalid choice is refused", async () => {
+    const { db, get } = trialDb(licenseeRow({ status: "pending_payment", plan: "starter", billing_interval: "monthly", server_url: null }));
+    const create = vi.fn(async () => ({ id: "sub_trial_2", status: "trialing" }));
+    const stripe = fakeStripe({ customers: { update: vi.fn(), create: vi.fn(async () => ({ id: "cus_trial_2" })) } });
+    (stripe.subscriptions as Record<string, unknown>).create = create;
+    const app = createApp(makeDeps({ db, mailer: fakeMailer().mailer, stripe: () => stripe, now: () => start }));
+    const bad = await request(app).post("/api/ops/trials").set("Authorization", `Bearer ${staffToken()}`)
+      .send({ licensee_id: "22222222-2222-4222-8222-222222222222", plan: "platinum" });
+    expect(bad.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+    const res = await request(app).post("/api/ops/trials").set("Authorization", `Bearer ${staffToken()}`)
+      .send({ licensee_id: "22222222-2222-4222-8222-222222222222", plan: "growth", billing_interval: "monthly" });
+    expect(res.status).toBe(201);
+    const [params] = create.mock.calls[0] as unknown as [Record<string, any>];
+    expect(params.items).toEqual([{ price: "price_seat:growth:monthly", quantity: 3 }]);
+    expect(get()).toMatchObject({ plan: "growth", billing_interval: "monthly" });
+    expect(res.body.message).toContain("Growth (monthly)");
+  });
+
+  it("does not look at the in-app Pro trial: a licensee whose copy used it can still get the staff trial", async () => {
+    const { db } = trialDb(licenseeRow({ status: "active", plan: "growth", billing_interval: "monthly", server_url: "https://x.example" }));
+    const stripe = fakeStripe({ customers: { update: vi.fn(), create: vi.fn(async () => ({ id: "cus_trial_3" })) } });
+    (stripe.subscriptions as Record<string, unknown>).create = vi.fn(async () => ({ id: "sub_trial_3", status: "trialing" }));
+    const app = createApp(makeDeps({ db, mailer: fakeMailer().mailer, stripe: () => stripe, now: () => start }));
+    const res = await request(app).post("/api/ops/trials").set("Authorization", `Bearer ${staffToken()}`).send({ licensee_id: "22222222-2222-4222-8222-222222222222" });
+    expect(res.status).toBe(201);
+    expect(db.calls.some((c) => /trial_started_at|in_app_trial/.test(c.sql) && !/admin_trial/.test(c.sql))).toBe(false);
   });
 
   it("is for staff only, and needs Stripe", async () => {

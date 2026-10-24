@@ -12,8 +12,8 @@ export function adminTrialActive(l: TrialFields, now: Date = new Date()): boolea
   return now.getTime() < new Date(l.admin_trial_pro_until).getTime();
 }
 
-/** The plan the licensee's server is told about: pro during a staff trial on Starter, else the stored plan. */
+/** The plan the licensee's server is told about: pro during a staff trial (on Starter or Growth), else the stored plan. */
 export function pushPlanFor(l: TrialFields, now: Date = new Date()): Plan {
-  return l.plan === "starter" && adminTrialActive(l, now) ? "pro" : l.plan;
+  return (l.plan === "starter" || l.plan === "growth") && adminTrialActive(l, now) ? "pro" : l.plan;
 }
 
