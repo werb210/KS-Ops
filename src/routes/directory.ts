@@ -15,7 +15,8 @@ export function directoryRouter(deps: Deps): Router {
       res.setHeader("Cache-Control", "no-store");
       if (!CODE_RE.test(code)) return res.status(404).json({ error: "unknown_company" });
       const r = await deps.db.query(
-        `SELECT company_code, company_name, server_url, client_url, portal_url, logo_url, primary_color
+        `SELECT company_code, company_name, server_url, client_url, portal_url, logo_url, primary_color,
+                accent_color, background_color
            FROM licensees WHERE company_code = $1 AND status = ANY($2::text[]) AND server_url IS NOT NULL`,
         [code, DIRECTORY_STATUSES],
       );
@@ -29,6 +30,8 @@ export function directoryRouter(deps: Deps): Router {
         portal_url: row.portal_url,
         logo_url: row.logo_url,
         primary_color: row.primary_color,
+        accent_color: row.accent_color ?? null,
+        background_color: row.background_color ?? null,
       });
     }),
   );

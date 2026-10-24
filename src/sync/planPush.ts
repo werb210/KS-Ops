@@ -9,6 +9,7 @@
 import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { getLicensee, opsKeyOf, type LicenseeRow } from "../licensees/repo.js";
+import { pushPlanFor } from "../billing/adminTrialPlan.js";
 
 export const RETRY_MINUTES = 5;
 
@@ -27,10 +28,17 @@ export function addonsOf(l: Pick<LicenseeRow, "addons">): Record<AddonKey, boole
   return Object.fromEntries(ADDONS.map((k) => [k, raw[k] === true])) as Record<AddonKey, boolean>;
 }
 
-/** The body of PUT {server_url}/api/plan. */
-export function planPushBody(l: Pick<LicenseeRow, "plan" | "extra_storage_blocks" | "status"> & Partial<Pick<LicenseeRow, "addons">>) {
+/**
+ * The body of PUT {server_url}/api/plan. During a staff free trial on Starter the plan sent is "pro"
+ * (KS_OPS_v13_ADMIN_TRIAL, see billing/adminTrial.ts); KS-Ops itself keeps and bills "starter".
+ */
+export function planPushBody(
+  l: Pick<LicenseeRow, "plan" | "extra_storage_blocks" | "status"> &
+    Partial<Pick<LicenseeRow, "addons" | "admin_trial_started_at" | "admin_trial_pro_until" | "admin_trial_ended_at">>,
+  now: Date = new Date(),
+) {
   return {
-    plan: l.plan,
+    plan: pushPlanFor(l, now),
     extra_storage_blocks: l.extra_storage_blocks,
     ...(isServiceStatus(l.status) ? { status: l.status } : {}),
     addons: addonsOf(l), // KS_OPS_BANK_CONNECT_ADDON - servers that do not know the field ignore it
@@ -109,7 +117,7 @@ export async function pushPlan(deps: Pick<Deps, "db" | "fetch" | "now">, license
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/plan`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120) },
-      body: JSON.stringify(planPushBody(l)),
+      body: JSON.stringify(planPushBody(l, deps.now())),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {

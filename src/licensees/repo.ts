@@ -14,6 +14,11 @@ export type LicenseeRow = {
   country: string;
   province_state: string | null;
   mailing_address: string | null;
+  /** KS_OPS_v13_ADDRESS - the address in parts (null on rows from before v13, which have mailing_address only). */
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  postal_code?: string | null;
   website: string | null;
   status: string;
   plan: Plan;
@@ -30,6 +35,9 @@ export type LicenseeRow = {
   portal_url: string | null;
   logo_url: string | null;
   primary_color: string | null;
+  /** KS_OPS_v13_BRAND - accent (secondary) and optional background / surface colours. */
+  accent_color?: string | null;
+  background_color?: string | null;
   assistant_name: string | null;
   ops_key_hash: string | null;
   /** v3 shared fraud watchlist (opt-in from the licensee's portal). */
@@ -60,6 +68,13 @@ export type LicenseeRow = {
   plan_synced_at: Date | null;
   past_due_since: Date | null;
   past_due_reminder_sent_at: Date | null;
+  /** KS_OPS_v13_ADMIN_TRIAL - the staff-only free trial (see src/billing/adminTrial.ts). */
+  admin_trial_started_at?: Date | null;
+  admin_trial_started_by?: string | null;
+  admin_trial_billing_starts_at?: Date | null;
+  admin_trial_pro_until?: Date | null;
+  admin_trial_ended_at?: Date | null;
+  admin_trial_end_reason?: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -122,6 +137,7 @@ export const INSERTABLE = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
+  "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color",
   "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
 ] as const;
 

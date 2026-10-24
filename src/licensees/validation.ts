@@ -42,6 +42,59 @@ export const US_STATES = [
   "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 ];
 
+// KS_OPS_v13_ADDRESS - the mailing address in parts. Canadian postal codes are stored as "T2P 1P6", US ZIP codes as
+// "12345" or "12345-6789".
+export const CA_POSTAL_RE = /^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z] ?\d[ABCEGHJ-NPRSTV-Z]\d$/;
+export const US_ZIP_RE = /^\d{5}(-\d{4})?$/;
+
+/** The postal or ZIP code in its usual form, or null when it is not valid for the country. */
+export function normalizePostal(country: string | undefined, raw: unknown): string | null {
+  const v = String(raw ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (country === "US") return US_ZIP_RE.test(v) ? v : null;
+  const compact = v.replace(/[\s-]/g, "");
+  if (!CA_POSTAL_RE.test(compact)) return null;
+  return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+}
+
+export const POSTAL_MESSAGES = {
+  CA: "Enter a Canadian postal code like T2P 1P6.",
+  US: "Enter a US ZIP code like 94105 or 94105-1234.",
+} as const;
+
+export type AddressParts = {
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  province_state?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+};
+
+/** One line for the older mailing_address column: "123 Main St, Unit 4, Calgary AB T2P 1P6, Canada". */
+export function composeMailingAddress(a: AddressParts): string {
+  const country = a.country === "US" ? "United States" : a.country === "CA" ? "Canada" : (a.country ?? "");
+  const cityLine = [a.city, a.province_state, a.postal_code].map((x) => String(x ?? "").trim()).filter(Boolean).join(" ");
+  return [a.address_line1, a.address_line2, cityLine, country].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+}
+
+/** The address parts given in a body, if any of the required ones is there. */
+function hasAddressParts(v: Record<string, unknown>): boolean {
+  return ["address_line1", "city", "postal_code"].some((k) => String(v[k] ?? "").trim() !== "");
+}
+
+function addressCheck(v: Record<string, unknown>, ctx: z.RefinementCtx, legacyRequired: boolean) {
+  if (hasAddressParts(v)) {
+    if (!String(v.address_line1 ?? "").trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["address_line1"], message: "Street address is required." });
+    if (!String(v.city ?? "").trim()) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["city"], message: "City is required." });
+    const country = String(v.country ?? "CA").toUpperCase() === "US" ? "US" : "CA";
+    if (!normalizePostal(country, v.postal_code)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["postal_code"], message: POSTAL_MESSAGES[country] });
+    }
+  } else if (legacyRequired && String(v.mailing_address ?? "").trim().length < 5) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["address_line1"], message: "Street address is required." });
+  }
+}
+
 const text = (label: string, min: number, max: number) =>
   z
     .string({ required_error: `${label} is required.`, invalid_type_error: `${label} is required.` })
@@ -220,7 +273,12 @@ export const signupSchema = z
     company_code: codeSchema,
     country: z.enum(["CA", "US"], { errorMap: () => ({ message: "Choose Canada or the United States." }) }),
     province_state: region,
-    mailing_address: text("Mailing address", 5, 500),
+    // Either the address in parts (address_line1, city, postal_code required) or, from older clients, mailing_address.
+    mailing_address: optionalText("Mailing address", 500),
+    address_line1: optionalText("Street address", 200),
+    address_line2: optionalText("Unit", 120),
+    city: optionalText("City", 120),
+    postal_code: optionalText("Postal or ZIP code", 20),
     website: urlSchema("Website"),
     contact_name: text("Contact name", 2, 120),
     contact_email: emailSchema,
@@ -232,7 +290,18 @@ export const signupSchema = z
     extra_storage_blocks: z.preprocess((v) => (v === null || v === "" ? undefined : v), storageBlocksSchema.default(0)),
     payment_method: z.preprocess((v) => (v === null || v === "" ? undefined : v), paymentMethodSchema.default(DEFAULT_PAYMENT_METHOD)),
     primary_color: colorSchema,
+    accent_color: colorSchema,
+    background_color: colorSchema,
     logo_url: urlSchema("Logo address"),
+    // KS_OPS_v13_LOGO - an uploaded logo (PNG, JPG or SVG, base64), checked in lib/logo.ts.
+    logo_file: z
+      .object({
+        content_type: z.string().max(100),
+        data_base64: z.string().max(800_000, "The logo is too large. Use a file under 500 KB."),
+        filename: z.string().max(200).optional(),
+      })
+      .optional()
+      .nullable(),
     assistant_name: optionalText("Assistant name", 40),
     accept_terms: z.literal(true, { errorMap: () => ({ message: "Please accept the terms of service." }) }),
     accept_privacy: z.literal(true, { errorMap: () => ({ message: "Please accept the privacy policy." }) }),
@@ -242,8 +311,18 @@ export const signupSchema = z
   .superRefine((v, ctx) => {
     regionCheck(v.country, v.province_state, ctx);
     minSeatsCheck(v.plan, v.seats, ctx);
-  });
+    addressCheck(v, ctx, true);
+  })
+  .transform((v) => withAddress(v));
 export type SignupInput = z.infer<typeof signupSchema>;
+
+/** Normalises the postal code and writes mailing_address from the parts when the parts were given. */
+export function withAddress<T extends AddressParts & { mailing_address?: string | null }>(v: T): T {
+  if (!hasAddressParts(v as Record<string, unknown>)) return v;
+  const postal = normalizePostal(v.country === "US" ? "US" : "CA", v.postal_code) ?? v.postal_code ?? null;
+  const out = { ...v, postal_code: postal };
+  return { ...out, mailing_address: composeMailingAddress(out) };
+}
 
 /**
  * zod skips an object's cross-field checks when any single field is wrong. These run on the raw body as well, so the
@@ -262,6 +341,7 @@ export function crossFieldErrors(raw: Record<string, unknown>): Record<string, s
     },
   } as unknown as z.RefinementCtx;
   if (region) regionCheck(country, region, ctx);
+  if (hasAddressParts(raw)) addressCheck({ ...raw, country }, ctx, false);
   if (Number.isInteger(seats) && (PLANS as readonly string[]).includes(plan)) minSeatsCheck(plan, seats, ctx);
   return errors;
 }
@@ -283,12 +363,18 @@ export const staffCreateSchema = z
     country: z.enum(["CA", "US"], { errorMap: () => ({ message: "Choose Canada or the United States." }) }).default("CA"),
     province_state: z.preprocess((v) => (v ? String(v).trim().toUpperCase() : undefined), z.string().optional()),
     mailing_address: optionalText("Mailing address", 500),
+    address_line1: optionalText("Street address", 200),
+    address_line2: optionalText("Unit", 120),
+    city: optionalText("City", 120),
+    postal_code: optionalText("Postal or ZIP code", 20),
     website: urlSchema("Website"),
     server_url: appUrlSchema("Server address", { serverHosts: true }),
     client_url: appUrlSchema("Client app address"),
     portal_url: appUrlSchema("Staff portal address"),
     logo_url: urlSchema("Logo address"),
     primary_color: colorSchema,
+    accent_color: colorSchema,
+    background_color: colorSchema,
     assistant_name: optionalText("Assistant name", 40),
     status: z.enum(STATUSES).optional(),
     extra_storage_blocks: storageBlocksSchema.optional(),
@@ -297,8 +383,9 @@ export const staffCreateSchema = z
   .superRefine((v, ctx) => {
     regionCheck(v.country, v.province_state, ctx);
     minSeatsCheck(v.plan, v.seats, ctx);
+    addressCheck(v, ctx, false);
   })
-  .transform(({ billing, billing_interval, ...rest }) => ({
+  .transform(({ billing, billing_interval, ...rest }) => withAddress({
     ...rest,
     billing_interval: billing_interval ?? billing ?? "monthly",
   }));
@@ -321,6 +408,10 @@ export const staffPatchSchema = z
     country: z.enum(["CA", "US"]),
     province_state: z.preprocess((v) => (v ? String(v).trim().toUpperCase() : null), z.string().nullable()),
     mailing_address: z.string().trim().max(500).nullable(),
+    address_line1: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(200).nullable()),
+    address_line2: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(120).nullable()),
+    city: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(120).nullable()),
+    postal_code: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(20).nullable()),
     website: nullableUrl("Website"),
     status: z.enum(STATUSES, { errorMap: () => ({ message: "Unknown status." }) }),
     plan: planSchema,
@@ -335,6 +426,8 @@ export const staffPatchSchema = z
     portal_url: nullableAppUrl("Staff portal address"),
     logo_url: nullableUrl("Logo address"),
     primary_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
+    accent_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
+    background_color: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), colorSchema])),
     assistant_name: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(40).nullable()),
     onboarding_fee_paid: z.boolean(),
     // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.

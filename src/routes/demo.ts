@@ -1,11 +1,15 @@
 // The self-serve sales demo.
 // Public (the website's "Try it yourself" page and the demo portal; CORS: PUBLIC_SITE_URL + KS_DEMO_PORTAL_URL):
 //   POST /api/public/demo/signup { name, email, company, phone?, website_url (honeypot, must be empty), turnstile_token? }
-//        (phone: a Canadian/US mobile; the link is texted to it as well as emailed when Twilio is set up, see lib/sms.ts)
+//        (phone: a Canadian/US mobile, kept so sales can call; the link is texted to it only when DEMO_SMS_ENABLED=true
+//        and Twilio is set up, see lib/sms.ts - off by default, the link is always emailed)
 //        -> 201 { ok, message, open_url } (KS_OPS_v11_LIVE_DEMO: the website opens open_url straight away; the same link
 //           is texted and emailed so they can come back) | 400 { errors } | 429 { error, message } | 503 { error, message }
 //   POST /api/public/demo/open { demo_id, token }   (the magic link: {KS_DEMO_PORTAL_URL}/demo#d=<id>&t=<token>)
-//        -> 200 { server_url, staff_token, client_url, expires_at, name, company } | 404 | 410 (expired) | 503
+//        -> 200 { server_url, staff_token, client_url, expires_at, name, company, signup_url } | 404 | 410 (expired) | 503
+//        signup_url: the website's sign-up page with this demo's prefill key in the #fragment (no personal data in it)
+//   POST /api/public/demo/prefill { demo_id, key }   (key: the prefill key from signup_url / the demo emails, or the
+//        magic-link token) -> 200 { name, email, company, phone } for the website's sign-up and contact forms | 404
 // From the demo server (X-KS-Ops-Key = KS_DEMO_OPS_KEY):
 //   POST /api/demo/sessions/:id/events   { events: [{ type, step?, at, data? }] } -> 202
 //   POST /api/demo/sessions/:id/complete { summary, package_pdf_base64, package_filename, lender_email? } -> 202 (emails go out)
@@ -25,6 +29,8 @@ import {
 } from "../demo/config.js";
 import { magicLinkMail, magicLinkSms, magicLinkUrl, type LenderEmail } from "../demo/emails.js";
 import { normalizeNaPhone, prettyNaPhone, sendSms } from "../lib/sms.js";
+import { demoSmsEnabled } from "../config.js";
+import { prefillKeyMatches, signupLinkFor } from "../demo/prefill.js";
 import * as repo from "../demo/repo.js";
 import { openServerSession } from "../demo/server.js";
 import { sendCompletionMails } from "../demo/jobs.js";
@@ -36,6 +42,8 @@ export const DEMO_RESENT_MESSAGE = "Welcome back - we've emailed you a fresh lin
 export const DEMO_NOT_CONFIGURED = { error: "demo_not_configured", message: "The demo is not available right now. Please contact us and we will show you around." };
 
 const MAX_LINK_SENDS = 6;
+/** A demo's details pre-fill the website's forms for this long after the demo was asked for. */
+export const PREFILL_DAYS = 90;
 
 const text = (max: number) => z.preprocess((v) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim() : v), z.string().min(1, "Required").max(max, `At most ${max} characters`));
 
@@ -50,15 +58,22 @@ export const demoSignupSchema = z.object({
 
 const NAME_OK = /\p{L}/u;
 
-/** Texts the link when a phone was given (and SMS is set up), and always emails it. Returns what to tell the person. */
+/**
+ * Always emails the link. Texts it as well only when DEMO_SMS_ENABLED=true (off by default) and a phone was given
+ * and Twilio is set up. Returns what to tell the person.
+ */
 async function deliverLink(deps: Deps, s: Parameters<typeof magicLinkMail>[0], url: string, phone: string | null, resent: boolean): Promise<string> {
   let texted = false;
+  if (!demoSmsEnabled()) {
+    await sendQuietly(deps.mailer, magicLinkMail(s, url, demoSessionDays(), signupLinkFor(s.id)), resent ? "demo link (resent)" : "demo link");
+    return resent ? DEMO_RESENT_MESSAGE : DEMO_SENT_MESSAGE;
+  }
   if (phone) {
     const r = await sendSms(deps.fetch, phone, magicLinkSms(s, url));
     texted = r.ok;
     if (!r.ok && r.error !== "sms_not_configured") console.warn(`[demo] link text failed: ${r.error}`);
   }
-  await sendQuietly(deps.mailer, magicLinkMail(s, url, demoSessionDays()), resent ? "demo link (resent)" : "demo link");
+  await sendQuietly(deps.mailer, magicLinkMail(s, url, demoSessionDays(), signupLinkFor(s.id)), resent ? "demo link (resent)" : "demo link");
   const where = phone ? prettyNaPhone(phone) : "";
   if (texted) {
     return resent
@@ -171,7 +186,26 @@ export function demoPublicRouter(deps: Deps): Router {
         expires_at: opened.session.expires_at,
         name: s.name,
         company: s.company,
+        signup_url: signupLinkFor(s.id),
       });
+    }),
+  );
+
+  // KS_OPS_v13_PREFILL - the website pre-fills its sign-up and contact forms from the person's demo. The key travels in
+  // the URL #fragment (never a query string), and only the details they typed themselves come back.
+  router.post(
+    "/prefill",
+    limiter(30, 15 * 60_000),
+    h(async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      const id = String(req.body?.demo_id ?? "");
+      const key = req.body?.key;
+      const s = UUID_RE.test(id) ? await repo.getSignup(deps.db, id) : null;
+      const tooOld = s && deps.now().getTime() - new Date(s.created_at).getTime() > PREFILL_DAYS * 86_400_000;
+      if (!s || tooOld || !(prefillKeyMatches(id, key) || matchesHash(key, s.token_hash))) {
+        return res.status(404).json({ error: "not_found", message: "We couldn't find that demo." });
+      }
+      return res.json({ name: s.name, email: s.email, company: s.company, phone: s.phone ? prettyNaPhone(s.phone) : "" });
     }),
   );
 

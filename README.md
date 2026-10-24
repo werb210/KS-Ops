@@ -52,7 +52,9 @@ again after a price changes.
 | `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default: the sales inbox) |
 | `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_SEND_AS` | no | email through Microsoft Graph |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
-| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` | no | texts the demo link (`KS_SMS_FROM` is the sending number in +1 format; `TWILIO_MESSAGING_SERVICE_SID` can replace it) |
+| `DEMO_SMS_ENABLED` | no | `true` texts the demo link as well as emailing it. Off by default (the link is emailed only; the mobile number is still kept) |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` | no | with `DEMO_SMS_ENABLED=true`, texts the demo link (`KS_SMS_FROM` is the sending number in +1 format; `TWILIO_MESSAGING_SERVICE_SID` can replace it) |
+| `KS_OPS_PUBLIC_URL` | recommended | this server's public https address, used for uploaded-logo links (falls back to Azure's `WEBSITE_HOSTNAME`, then the request's host) |
 | `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` |
 | `BF_CRM_KEY` | for the CRM | the same value as `KS_OPS_CRM_KEY` on BF-Server (sent as `X-KS-Ops-Key`). Unset: nothing is pushed (logged once at startup). Pushes wait in `crm_outbox` and are retried after 1 min, 5 min, 30 min, 2 h, 12 h, then daily until BF-Server accepts them |
 | `KS_QBO_CLIENT_ID`, `KS_QBO_CLIENT_SECRET`, `KS_QBO_TOKEN_ENCRYPTION_KEY` | for Keystone's QuickBooks | Keystone's own QuickBooks Online (Stripe invoices, payments, refunds and fees posted there). The key is 32 bytes (64 hex characters). Unset: off. See `docs/QUICKBOOKS.md` |
@@ -102,6 +104,15 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
 - `POST /api/public/signup` — rate limited (10 an hour per address), honeypot `website_url`, Turnstile when set.
   201 `{ licensee_id, signup_token, checkout_url, message? }`, 400 `{ errors }`, 409 `{ errors: { company_code: "taken" } }`
 - `GET /api/public/signup/:licensee_id/status?token=` — `{ status, company_name }`
+- Sign-up v13 fields: the address as `address_line1`, `address_line2` (optional), `city`, `postal_code` (Canadian postal
+  code or US ZIP, checked against `country`); `mailing_address` is still accepted from older clients and is always
+  written as one line made from the parts. `accent_color` and `background_color` (optional, `#RRGGBB`) next to
+  `primary_color`. `logo_file: { content_type, data_base64, filename? }` - PNG, JPG or SVG up to 500 KB (checked by its
+  bytes; SVGs with scripts or links are refused), stored in `licensee_logos` and linked from `logo_url`
+- `GET /api/public/logos/:key` — an uploaded logo (image only, `Content-Security-Policy: default-src 'none'`)
+- `POST /api/public/demo/prefill { demo_id, key }` — the name, email, company and phone a prospect gave for their demo,
+  for the website's sign-up and contact forms. The key comes from `{site}/signup#demo=<id>&k=<key>` links (in the demo
+  emails and the demo's `open` answer as `signup_url`); it is an HMAC of the id, and travels in the #fragment only
 - `POST /api/public/signup/:licensee_id/checkout?token=` — a new Stripe Checkout link for a sign-up still in
   `pending_payment` (10 per 15 minutes per address): 200 `{ checkout_url }`, 404 wrong id/token, 409
   `not_pending_payment`, 503 `billing_not_configured`, 502 `checkout_failed`
@@ -159,13 +170,21 @@ live licensees (`trial`, `active`, `past_due`) with a server address are returne
   `POST /api/ops/tickets/:id/messages`
 - `GET /api/ops/requests`, `PATCH /api/ops/requests/:id`
 - `GET /api/ops/dashboard` — licensees, seats, MRR, active trials, overdue invoices, open tickets and requests
+- Free trial (staff only, no payment up front): `POST /api/ops/trials { licensee_id }` or `{ licensee: {...new
+  prospect...} }`, `GET /api/ops/trials`; page `GET /ops/trials`. Days 1-14 free with every Pro feature; days 15-28
+  billed at the Starter monthly price (a Stripe subscription with `trial_end` = day 15 and `collection_method:
+  send_invoice`, so no card or bank account is needed to start), still with Pro features (the plan pushed to the
+  licensee's server is `pro`); then Starter unless a plan was chosen (`PATCH /api/ops/licensees/:id { plan }`). Who
+  started it is kept on the licensee (`admin_trial_*`) and in `staff_audit`; the contact is emailed the dates, and again
+  when it ends. One per licensee; refused for a licensee with a live subscription
 
 `GET /api/health` reports whether the database answers.
 
 ## Background jobs
 
 - Every minute: post queued Stripe invoices, payments, fees and refunds to Keystone's QuickBooks (`qbo_outbox`).
-- Every 5 minutes: push plans that are waiting (`pending_sync`) to licensees' servers.
+- Every 5 minutes: end staff free trials whose 28 days are up, then push plans that are waiting (`pending_sync`) to
+  licensees' servers.
 - Daily: pull usage reports from servers that did not send them, bill overage for finished months (once per licensee
   and month; progress is kept in `overage_billing`, and Stripe is searched by metadata before anything is created, so
   a rerun days later never charges twice), remind past-due licensees every 3 days, cancel website sign-ups unpaid

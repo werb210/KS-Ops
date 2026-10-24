@@ -21,14 +21,18 @@ const DEMO_HIGHLIGHTS: Array<[string, string]> = [
   ["Take the call and send it", "Your client rings on iPhone and Apple Watch with their file on screen, AI writes the call note, and you send the file to a lender."],
 ]
 
-export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
+/** The intro line: it takes about ten minutes to go through (not "wait ten minutes"). */
+export const DEMO_INTRO = "It takes about ten minutes: you'll see a real deal from both sides.";
+
+export function magicLinkMail(s: SignupLike, url: string, days: number, signupUrl = ""): Mail {
   const first = firstName(s.name);
   const text = [
     `Hi ${first},`,
-    `Your private Keystone demo for ${s.company} is ready. In about ten minutes you will see a real deal from both sides:`,
+    `Your private Keystone demo for ${s.company} is ready. ${DEMO_INTRO}`,
     DEMO_HIGHLIGHTS.map(([h, b]) => `- ${h}: ${b}`).join("\n"),
     `Start your demo: ${url}`,
     `It works best on a computer or tablet. Nothing to download or type. Your link works for ${days} days. Everything in it is sample data.`,
+    ...(signupUrl ? [`Ready for your own? Sign up (your details are filled in for you): ${signupUrl}`] : []),
     "Questions? Just reply - a real person reads every email.",
     "The Keystone team",
     "You are getting this because someone asked for a Keystone demo with this email address. If that was not you, ignore it and nothing else will be sent.",
@@ -41,7 +45,7 @@ export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
     `<div style="max-width:560px;margin:0 auto;background:#FFFFFF;border-radius:12px;padding:32px 28px">` +
     `<p style="margin:0 0 24px;font-size:20px;font-weight:bold;color:${ink}">Keystone</p>` +
     p(`Hi ${esc(first)},`) +
-    p(`Your private Keystone demo for <strong>${esc(s.company)}</strong> is ready. In about ten minutes you will see a real deal from both sides:`) +
+    p(`Your private Keystone demo for <strong>${esc(s.company)}</strong> is ready. ${esc(DEMO_INTRO)}`) +
     `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;width:100%">` +
     DEMO_HIGHLIGHTS.map(
       ([h, b], i) =>
@@ -51,6 +55,7 @@ export function magicLinkMail(s: SignupLike, url: string, days: number): Mail {
     `</table>` +
     `<p style="margin:0 0 24px;text-align:center"><a href="${esc(url)}" style="display:inline-block;background:#1F5C46;color:#FFFFFF;text-decoration:none;font-weight:bold;font-size:17px;padding:14px 32px;border-radius:8px">Start my demo</a></p>` +
     p(`It works best on a computer or tablet. Nothing to download or type. Your link works for ${days} days. Everything in it is sample data.`, `color:${muted};font-size:15px`) +
+    (signupUrl ? p(`Ready for your own? <a href="${esc(signupUrl)}" style="color:#1F5C46;font-weight:bold">Sign up</a> - your details are filled in for you.`) : "") +
     p("Questions? Just reply - a real person reads every email.") +
     p("The Keystone team", "margin-bottom:24px") +
     `<p style="margin:0;font-size:13px;line-height:1.5;color:${muted}">If the button does not work, copy this link into your browser:<br/><a href="${esc(url)}" style="color:#1F5C46;word-break:break-all">${esc(url)}</a></p>` +
@@ -73,16 +78,19 @@ export const DEMO_BANNER = "Keystone demo - this is exactly what your lender wou
  * The prospect's copy of their lender submission: with the real lender email, exactly that email (subject, body,
  * signature, attachments) under a one-line demo banner; from an older demo server, the short note with the PDF.
  */
-export function prospectPackageMail(s: SignupLike, pdfBase64: string | null, filename: string, lender: LenderEmail | null = null): Mail {
+export function prospectPackageMail(s: SignupLike, pdfBase64: string | null, filename: string, lender: LenderEmail | null = null, signupUrl = ""): Mail {
   if (lender) {
+    const signupHtml = signupUrl
+      ? ` <a href="${esc(signupUrl)}" style="color:#5C3B00;font-weight:bold;text-decoration:underline">Sign up for your own</a> - your details are filled in for you.`
+      : "";
     return {
       to: [s.email],
       subject: lender.subject,
       attachments: lender.attachments,
       html:
-        `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.4;background:#FFF7E6;border:1px solid #F0C36D;color:#5C3B00;padding:8px 12px;margin:0 0 16px;border-radius:4px;max-width:576px">${esc(DEMO_BANNER)}</div>` +
+        `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.4;background:#FFF7E6;border:1px solid #F0C36D;color:#5C3B00;padding:8px 12px;margin:0 0 16px;border-radius:4px;max-width:576px">${esc(DEMO_BANNER)}${signupHtml}</div>` +
         lender.html,
-      text: `${DEMO_BANNER}\n\n${lender.text}`,
+      text: `${DEMO_BANNER}${signupUrl ? `\nSign up for your own (your details are filled in for you): ${signupUrl}` : ""}\n\n${lender.text}`,
     };
   }
   return {
@@ -94,6 +102,7 @@ export function prospectPackageMail(s: SignupLike, pdfBase64: string | null, fil
       "Nice work - you just took a file from the borrower's phone to lenders. Attached is the lender submission package Keystone built from what you did: the credit summary, the call note, every document with its fraud-check result, and the documents you accepted.",
       "Everything in it is sample data (the business, the bank and the lenders are fictional).",
       "Want to see it with your own team and lenders? Reply to this email and we will set up a call.",
+      ...(signupUrl ? [`Ready for your own? Sign up here - your details are filled in for you: ${signupUrl}`] : []),
     ]),
   };
 }

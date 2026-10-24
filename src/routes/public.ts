@@ -1,6 +1,7 @@
 // The public website (KS-Website): plans, company-code check, sign-up and sign-up status.
 import { Router, type Request } from "express";
-import { isProduction, salesEmail, signupTurnstileOptional } from "../config.js";
+import { isProduction, opsPublicUrl, salesEmail, signupTurnstileOptional } from "../config.js";
+import { checkLogo, logoByKey, logoPath, saveLogo, type CheckedLogo } from "../lib/logo.js";
 import type { Deps } from "../deps.js";
 import { BillingNotConfigured } from "../billing/stripeClient.js";
 import { createCheckout } from "../billing/billing.js";
@@ -88,6 +89,13 @@ export function publicRouter(deps: Deps): Router {
       const parsed = parseBody(signupSchema, body, crossFieldErrors);
       if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
       const input = parsed.data;
+      // KS_OPS_v13_LOGO - an uploaded logo is checked before anything is saved.
+      let logo: CheckedLogo | null = null;
+      if (input.logo_file) {
+        const checked = checkLogo(input.logo_file);
+        if (!checked.ok) return res.status(400).json({ errors: { logo_file: checked.error } });
+        logo = checked.logo;
+      }
       if (await codeTaken(deps.db, input.company_code)) {
         return res.status(409).json({ errors: { company_code: "taken" } });
       }
@@ -109,6 +117,10 @@ export function publicRouter(deps: Deps): Router {
           country: input.country,
           province_state: input.province_state,
           mailing_address: input.mailing_address,
+          address_line1: input.address_line1,
+          address_line2: input.address_line2,
+          city: input.city,
+          postal_code: input.postal_code,
           website: input.website,
           status: "pending_payment",
           plan: input.plan,
@@ -118,6 +130,8 @@ export function publicRouter(deps: Deps): Router {
           extra_storage_blocks: input.extra_storage_blocks,
           payment_method: input.payment_method,
           primary_color: input.primary_color,
+          accent_color: input.accent_color,
+          background_color: input.background_color,
           logo_url: input.logo_url,
           assistant_name: input.assistant_name,
           ...signupTokenColumns(token),
@@ -129,9 +143,16 @@ export function publicRouter(deps: Deps): Router {
         if (isUniqueViolation(err)) return res.status(409).json({ errors: { company_code: "taken" } });
         throw err;
       }
+      if (logo) {
+        const key = await saveLogo(deps.db, l.id, logo);
+        const base = opsPublicUrl(`${req.protocol}://${req.get("host") ?? ""}`);
+        const url = `${base}${logoPath(key)}`;
+        await deps.db.query("UPDATE licensees SET logo_url = $2, updated_at = now() WHERE id = $1", [l.id, url]);
+        l = { ...l, logo_url: url };
+      }
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
-        payment_method: l.payment_method, ip: clientIp(req),
+        payment_method: l.payment_method, logo_uploaded: Boolean(logo), ip: clientIp(req),
       });
       await crmLicenseeCreated(deps, l);
 
@@ -153,6 +174,22 @@ export function publicRouter(deps: Deps): Router {
         await sendQuietly(deps.mailer, salesSignupMail(l, "Online payment was not available: please send them a payment link."), "sales signup notice");
       }
       return res.status(201).json({ licensee_id: l.id, signup_token: token, checkout_url: checkoutUrl, ...(message ? { message } : {}) });
+    }),
+  );
+
+  // KS_OPS_v13_LOGO - an uploaded logo. Public (it is shown in the apps); served as an image only, never as a page.
+  router.get(
+    "/logos/:key",
+    limited(300, 60_000),
+    h(async (req, res) => {
+      const logo = await logoByKey(deps.db, String(req.params.key));
+      if (!logo) return res.status(404).json({ error: "not_found" });
+      res.setHeader("Content-Type", logo.content_type);
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      return res.send(Buffer.from(logo.data));
     }),
   );
 
