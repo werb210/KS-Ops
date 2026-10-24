@@ -6,6 +6,7 @@ import type { Deps } from "./deps.js";
 import { requireStaff } from "./auth/staff.js";
 import { BillingNotConfigured } from "./billing/stripeClient.js";
 import { directoryRouter } from "./routes/directory.js";
+import { staffDirectoryRouter } from "./routes/staffDirectory.js";
 import { licenseeApiRouter } from "./routes/licenseeApi.js";
 import { opsAuthRouter } from "./routes/opsAuth.js";
 import { opsLicenseesRouter } from "./routes/opsLicensees.js";
@@ -56,6 +57,8 @@ export function createApp(deps: Deps) {
   app.use("/api/demo", demoOpsRouter(deps));
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps));
   app.use("/api/directory", cors({ origin: "*", methods: ["GET"] }), directoryRouter(deps));
+  // KS_STAFF_DIRECTORY_v1 - the apps find a staff member's brokerage from their email or mobile number.
+  app.use("/api/staff-directory", cors({ origin: "*", methods: ["POST"], allowedHeaders: ["Content-Type"] }), staffDirectoryRouter(deps));
   app.use("/api/licensees", licenseeApiRouter(deps));
   app.use("/api/ops", corsFor("OPS_ALLOWED_ORIGINS"));
   app.use("/api/ops/auth", opsAuthRouter(deps));

@@ -9,6 +9,7 @@ import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody } from "../lib/http.js";
 import { dataPurgeOn, markPurged } from "../licensees/repo.js";
 import { futureGeneratedAt, storeUsageReport, usageReportSchema } from "../sync/usage.js";
+import { replaceStaffDirectory, staffDirectorySchema } from "../staffDirectory.js";
 import { checkEntries, checkSchema, optInSchema, replaceReport, reportSchema, setOptIn, withdraw, withdrawSchema } from "../watchlist.js";
 
 const requestSchema = z
@@ -55,6 +56,19 @@ export function licenseeApiRouter(deps: Deps): Router {
       }
       const r = await storeUsageReport(deps.db, req.licensee!.id, parsed.data, "push");
       return res.status(200).json({ ok: true, stored: r.stored, period: r.period, ...(r.stored ? {} : { reason: "newer_report_already_stored" }) });
+    }),
+  );
+
+  // KS_STAFF_DIRECTORY_v1 - KS-server sends the full list of its active staff identifiers (hashes only); it replaces the
+  // previous list. Used by POST /api/staff-directory/lookup.
+  router.post(
+    "/:id/staff-directory",
+    auth,
+    h(async (req, res) => {
+      const parsed = parseBody(staffDirectorySchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_staff_directory", errors: parsed.errors });
+      const stored = await replaceStaffDirectory(deps.db, req.licensee!.id, parsed.data.entries, deps.now());
+      return res.json({ ok: true, stored });
     }),
   );
 
