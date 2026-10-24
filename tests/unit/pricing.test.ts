@@ -68,7 +68,8 @@ describe("publicPlans", () => {
     // Seat limits the sign-up form uses: the plan minimum and the most the sign-up accepts.
     expect(p.plans.map((x) => [x.min_seats, x.max_seats])).toEqual([[1, 1000], [1, 1000], [2, 1000]]);
     expect(p.overage).toEqual({ minute: 0.04, text: 0.03 });
-    expect(p.trial).toEqual({ days: 14, plan: "pro", for: "starter", bonus_minutes_per_seat: 100, bonus_texts_per_seat: 100 });
+    // KS_OPS_v14_TRIAL_RULES - the in-app Pro trial is offered on Starter and Growth; the allowance is unchanged.
+    expect(p.trial).toEqual({ days: 14, plan: "pro", for: ["starter", "growth"], allowance_from: "starter", bonus_minutes_per_seat: 100, bonus_texts_per_seat: 100 });
   });
 });
 

@@ -82,7 +82,17 @@ export const SUPPORT: Record<SupportLevel, SupportDef> = {
 
 export const STORAGE_BLOCK = { gb: 50, price_cents: 1000 };
 export const OVERAGE_CENTS = { minute: 4, text: 3 };
-export const TRIAL = { days: 14, plan: "pro" as Plan, for: "starter" as Plan, bonus_minutes_per_seat: 100, bonus_texts_per_seat: 100 };
+// KS_OPS_v14_TRIAL_RULES - the in-app Pro trial is offered on Starter AND Growth (Todd, Oct 24; was Starter only).
+// allowance_from: the trial's call and text allowance is still Starter's plus the bonus (unchanged), and never less
+// than the brokerage's own plan gives.
+export const TRIAL = {
+  days: 14,
+  plan: "pro" as Plan,
+  for: ["starter", "growth"] as Plan[],
+  allowance_from: "starter" as Plan,
+  bonus_minutes_per_seat: 100,
+  bonus_texts_per_seat: 100,
+};
 
 /** Features per plan; each plan includes the ones before it. Mirrors KS-server src/plans/catalogue.ts. */
 export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }> = [
@@ -248,7 +258,7 @@ export function publicPlans() {
     }),
     extra_storage: { block_gb: STORAGE_BLOCK.gb, price: dollars(STORAGE_BLOCK.price_cents), max_blocks: MAX_STORAGE_BLOCKS },
     overage: { minute: dollars(OVERAGE_CENTS.minute), text: dollars(OVERAGE_CENTS.text) },
-    trial: { ...TRIAL },
+    trial: { ...TRIAL, for: [...TRIAL.for] },
     currency: CURRENCY,
   };
 }
@@ -376,7 +386,7 @@ export function trialOverlapsPeriod(trial: TrialInfo, period: string): boolean {
 
 /**
  * Pooled minute and text allowances KS-Ops bills against: the plan's per-seat allowance times the billable seats.
- * During a trial the licensee gets at least the trial allowance (TRIAL.for's minutes/texts plus the per-seat bonus).
+ * During a trial the licensee gets at least the trial allowance (TRIAL.allowance_from's minutes/texts plus the per-seat bonus).
  */
 export function billingAllowance(plan: Plan, seats: number, trial: boolean): { minutes: number; texts: number } {
   const n = billableSeats(plan, seats);
@@ -384,7 +394,7 @@ export function billingAllowance(plan: Plan, seats: number, trial: boolean): { m
   let minutes = base.minutes_per_seat * n;
   let texts = base.texts_per_seat * n;
   if (trial) {
-    const t = ALLOWANCES[TRIAL.for];
+    const t = ALLOWANCES[TRIAL.allowance_from];
     minutes = Math.max(minutes, (t.minutes_per_seat + TRIAL.bonus_minutes_per_seat) * n);
     texts = Math.max(texts, (t.texts_per_seat + TRIAL.bonus_texts_per_seat) * n);
   }
