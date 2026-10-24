@@ -62,3 +62,19 @@ export function limiter(limit: number, windowMs: number, message: Options["messa
     keyGenerator: rateLimitKey,
   });
 }
+
+/**
+ * KS_STAFF_DIRECTORY_v1 - a second limit keyed on something other than the caller's address (e.g. the identifier being
+ * looked up), so one target cannot be probed from many addresses. `key` returns null to skip the limit.
+ */
+export function limiterBy(limit: number, windowMs: number, key: (req: Request) => string | null, message: Options["message"] = DEFAULT_MESSAGE) {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: "draft-7",
+    legacyHeaders: false,
+    message,
+    skip: (req) => key(req) === null,
+    keyGenerator: (req) => `by:${key(req) ?? ""}`,
+  });
+}

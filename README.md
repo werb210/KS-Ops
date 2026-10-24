@@ -62,6 +62,7 @@ again after a price changes.
 | `TRUST_PROXY_HOPS` | no | proxies in front of the app (default 1, Azure App Service) |
 | `BI_SERVER_URL` | for PGI referrals | the insurance partner's server (Boreal Insurance BI-Server), e.g. `https://bi-server-<id>.canadacentral-01.azurewebsites.net`. Every live licensee is made a PGI referral source there (20% referral fee) and its credentials are pushed to the licensee's server (`PUT /api/pgi/link`) |
 | `BI_KEYSTONE_OPS_KEY` | for PGI referrals | the same value as `BI_KEYSTONE_OPS_KEY` on BI-Server (sent as `X-BI-Keystone-Key`). Without these two the PGI link worker does nothing |
+| `KS_STAFF_DIRECTORY_PEPPER` | recommended | keys every staff-directory hash once more before it is stored. Set it once and never change it (stored hashes would stop matching until every KS-server pushes again, within six hours) |
 | `KS_WATCHLIST_OPS_PEPPER` | recommended | keys every shared-watchlist hash once more before it is stored, so a copy of this database alone is useless. Set it once and never change it (stored hashes would stop matching) |
 
 Stripe webhook events to send: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
@@ -106,13 +107,22 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
   `not_pending_payment`, 503 `billing_not_configured`, 502 `checkout_failed`
 
 **Directory (Keystone apps)** — `GET /api/directory/:code`, 30 a minute per address. Resolves only licensees that are
-`trial`, `active` or `past_due` and have a server address; otherwise 404 `{ error: "unknown_company" }`.
+`trial`, `active` or `past_due` and have a server address; otherwise 404 `{ error: "unknown_company" }`. Since
+KS_STAFF_DIRECTORY_v1 the apps only use it behind "Enter company code instead".
+
+**Staff directory (Keystone apps)** — `POST /api/staff-directory/lookup { identifier }` (a work email or a North
+American mobile number). Always 200 `{ matches: [{ name, server_url }] }` (empty when nothing matches or the
+identifier is unusable), held to at least 400 ms, 10 per 15 minutes per address and 6 an hour per identifier. Only
+live licensees (`trial`, `active`, `past_due`) with a server address are returned. KS-server pushes its staff list
+(hashes only, see `src/staffDirectory.ts`) to `POST /api/licensees/:id/staff-directory`.
 
 **From a licensee's KS-server** — header `X-KS-Ops-Key`
 - `POST /api/licensees/:id/usage-reports` — one report per month; a report replaces the stored one only if it was
   generated at the same time or later
 - `POST /api/licensees/:id/requests` — upgrade or storage request
 - `POST /api/licensees/:id/tickets` — support ticket from a licensee admin
+- `POST /api/licensees/:id/staff-directory` — `{ entries: [{ kind: "email" | "phone", hash }] }`, the full list of the
+  licensee's active staff; replaces the previous list
 - `POST /api/licensees/:id/watchlist/opt-in` `{ opt_in }` — shared fraud watchlist on/off; off deletes everything the
   licensee shared
 - `POST /api/licensees/:id/watchlist/report` `{ application_ref, entries: [{ kind, hash }] }` — replace one confirmed-fraud
