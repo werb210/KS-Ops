@@ -14,7 +14,8 @@
     "test:ci": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "stripe:setup": "tsx scripts/stripe-setup.ts"
+    "stripe:setup": "tsx scripts/stripe-setup.ts",
+    "provision:plan": "tsx scripts/provision-plan.ts"
   },
   "engines": {
     "node": ">=20"

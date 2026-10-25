@@ -1,0 +1,129 @@
+name: Provision licensee
+
+# KS_OPS_AUTO_PROVISION_v1 - started by KS-Ops through the GitHub API (POST .../actions/workflows/provision-licensee.yml/dispatches),
+# never by hand in normal use. It does the Azure and GitHub steps and reports each one back to KS-Ops with the run's
+# one-off callback token. See docs/AUTO_PROVISIONING.md.
+#
+# Credentials (GitHub environment "ks-ops-provisioning" of this repository - nothing is stored in KS-Ops):
+#   variables AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   the provisioning app registration; its federated
+#             credential trusts repo:werb210/KS-Ops:environment:ks-ops-provisioning, so no Azure secret exists anywhere
+#   variable  KS_PROVISION_APP_ID + secret KS_PROVISION_APP_PRIVATE_KEY  GitHub App for the four app repositories
+#             (or secret KS_PROVISION_GH_TOKEN, a fine-grained token)
+#   secret    OPENAI_API_KEY                                          written to the licensee's KS-server and KS-Agent
+# Anything missing is reported to KS-Ops ("waiting for manual setup") and nothing is changed.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: KS-Ops provisioning run id
+        required: true
+        type: string
+      code:
+        description: The licensee's company code
+        required: true
+        type: string
+      steps:
+        description: Comma-separated steps to run
+        required: true
+        type: string
+      ks_ops_url:
+        description: KS-Ops address to report to
+        required: true
+        type: string
+      callback_token:
+        description: One-off token for this run (masked in the log)
+        required: true
+        type: string
+      dry_run:
+        description: Print the plan only
+        required: false
+        default: 'false'
+        type: string
+
+run-name: Provision ${{ inputs.code }}${{ inputs.dry_run == 'true' && ' (dry run)' || '' }}
+
+concurrency:
+  group: ks-provision-${{ inputs.code }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  provision:
+    runs-on: ubuntu-24.04
+    environment: ks-ops-provisioning
+    timeout-minutes: 330
+    steps:
+      - name: Hide the callback token
+        env:
+          CALLBACK_TOKEN: ${{ inputs.callback_token }}
+        run: echo "::add-mask::$CALLBACK_TOKEN"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Use Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: GitHub App token for the app repositories
+        id: app
+        if: vars.KS_PROVISION_APP_ID != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.KS_PROVISION_APP_ID }}
+          private-key: ${{ secrets.KS_PROVISION_APP_PRIVATE_KEY }}
+          owner: werb210
+          repositories: KS-server,KS-Agent,KS-Portal,KS-Client
+
+      - name: Azure sign-in (federated credential)
+        id: azure
+        if: inputs.dry_run != 'true' && vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != ''
+        continue-on-error: true
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - id: runner
+        name: Provision (Azure resources, secrets, GitHub environments, registry, deploys)
+        env:
+          MODE: provision
+          RUN_ID: ${{ inputs.run_id }}
+          STEPS: ${{ inputs.steps }}
+          KS_OPS_URL: ${{ inputs.ks_ops_url }}
+          CALLBACK_TOKEN: ${{ inputs.callback_token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GH_OWNER: werb210
+          GH_TOKEN: ${{ steps.app.outputs.token || secrets.KS_PROVISION_GH_TOKEN }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_LOGIN_OUTCOME: ${{ steps.azure.outcome || 'skipped' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: npx tsx src/provisioning/runner/main.ts
+
+      # Something failed before the runner could start (checkout, npm ci): tell KS-Ops so it does not wait for hours.
+      - name: Report a failure before the runner started
+        if: failure() && steps.runner.outcome == 'skipped'
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          STEPS: ${{ inputs.steps }}
+          KS_OPS_URL: ${{ inputs.ks_ops_url }}
+          CALLBACK_TOKEN: ${{ inputs.callback_token }}
+          LOG_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          step="${STEPS%%,*}"
+          curl -fsS -X POST "$KS_OPS_URL/api/provisioning/callback/$RUN_ID" \
+            -H "Authorization: Bearer $CALLBACK_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"step\":\"$step\",\"status\":\"failed\",\"message\":\"The workflow failed before it started: $LOG_URL\"}" || true

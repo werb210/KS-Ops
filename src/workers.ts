@@ -15,6 +15,8 @@ import { getLicensee } from "./licensees/repo.js";
 import { crmLicenseeStatus } from "./crm/triggers.js";
 import { flushCrmOutbox } from "./crm/outbox.js";
 import { flushQboOutbox } from "./qbo/outbox.js";
+import { advanceDueRuns } from "./provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
+import { machineDeps } from "./provisioning/index.js";
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -222,7 +224,23 @@ export function startWorkers(deps: Deps): () => void {
       qboBusy = false;
     }
   };
+  // KS_OPS_AUTO_PROVISION_v1 - automatic provisioning and teardown runs that are due, every 30 seconds.
+  let provBusy = false;
+  const prov = async () => {
+    if (provBusy) return;
+    provBusy = true;
+    try {
+      const r = await advanceDueRuns(machineDeps(deps));
+      if (r.tried) console.log(`[workers] provisioning: ${r.tried} run(s) advanced`);
+    } catch (err) {
+      console.error("[workers] provisioning failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      provBusy = false;
+    }
+  };
   const timers = [
+    setInterval(prov, 30_000),
+    setTimeout(prov, 15_000),
     setInterval(qbo, 60_000),
     setTimeout(qbo, 45_000),
     setInterval(crm, 30_000),

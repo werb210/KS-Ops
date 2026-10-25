@@ -1,5 +1,7 @@
 // Staff API: licensees, their ops key, usage, invoices and billing. Mounted under /api/ops behind requireStaff.
 import { Router } from "express";
+import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
+import { machineDeps } from "../provisioning/index.js";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
 import { actorOf } from "../auth/staff.js";
@@ -285,6 +287,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
       if (r === "not_due") {
         return res.status(409).json({ error: r, message: `The data is held until ${staffView(l).data_purge_on}; it cannot be marked purged before then.` });
       }
+      // KS_OPS_AUTO_PROVISION_v1 - teardown follows, gated by the retention rules (see provisioning/machine.ts).
+      if (r === "purged") await requestTeardownAfterPurge(machineDeps(deps), l.id, actorOf(req));
       const fresh = (await getLicensee(deps.db, l.id))!;
       return res.json({ result: r, licensee: staffView(fresh) });
     }),
