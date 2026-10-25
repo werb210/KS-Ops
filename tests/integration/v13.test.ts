@@ -81,7 +81,9 @@ describe("staff free trial (real database)", () => {
     const res = await request(app).post("/api/ops/trials").set("Authorization", `Bearer ${staffToken()}`).send({ licensee_id: id });
     expect(res.status).toBe(201);
     const l = (await getLicensee(pool, id))!;
-    expect(l).toMatchObject({ plan: "starter", billing_interval: "monthly", status: "trial", admin_trial_started_by: "admin@example.test", stripe_subscription_id: "sub_it" });
+    // KS_OPS_v14_TRIAL_RULES - billed on the plan and interval of the sign-up (Growth, annual), not Starter monthly.
+    expect((create.mock.calls[0] as unknown as [{ items: Array<{ price: string }> }])[0].items.map((i) => i.price)).toEqual(["price_seat:growth:annual", "price_support:priority:annual"]);
+    expect(l).toMatchObject({ plan: "growth", billing_interval: "annual", status: "trial", admin_trial_started_by: "admin@example.test", stripe_subscription_id: "sub_it" });
     expect(new Date(l.admin_trial_billing_starts_at!).toISOString()).toBe("2026-11-07T18:00:00.000Z");
     expect(planPushBody(l, new Date("2026-11-10T00:00:00Z")).plan).toBe("pro");
     const audited = await pool.query("SELECT actor FROM staff_audit WHERE licensee_id = $1 AND action = 'licensee.admin_trial_started'", [id]);
@@ -93,8 +95,8 @@ describe("staff free trial (real database)", () => {
     expect(await endAdminTrials({ db: pool, mailer, now: () => new Date("2026-11-20T00:00:00Z") })).toBe(0);
     expect(await endAdminTrials({ db: pool, mailer, now: () => new Date("2026-11-22T00:00:00Z") })).toBe(1);
     const ended = (await getLicensee(pool, id))!;
-    expect(ended).toMatchObject({ status: "active", plan: "starter", admin_trial_end_reason: "ended", plan_sync_status: "pending_sync" });
-    expect(planPushBody(ended, new Date("2026-11-22T00:00:00Z")).plan).toBe("starter");
+    expect(ended).toMatchObject({ status: "active", plan: "growth", admin_trial_end_reason: "ended", plan_sync_status: "pending_sync" });
+    expect(planPushBody(ended, new Date("2026-11-22T00:00:00Z")).plan).toBe("growth");
     expect(await endAdminTrials({ db: pool, mailer, now: () => new Date("2026-11-23T00:00:00Z") })).toBe(0);
   });
 
