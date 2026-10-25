@@ -49,7 +49,7 @@ export function magicLinkMail(s: SignupLike, url: string, days: number, signupUr
     `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 24px;width:100%">` +
     DEMO_HIGHLIGHTS.map(
       ([h, b], i) =>
-        `<tr><td style="vertical-align:top;padding:0 12px 14px 0;width:28px"><div style="width:26px;height:26px;border-radius:13px;background:#E7F0EC;color:#1F5C46;font-weight:bold;font-size:14px;line-height:26px;text-align:center">${i + 1}</div></td>` +
+        `<tr><td style="vertical-align:top;padding:0 12px 14px 0;width:28px"><div style="width:26px;height:26px;border-radius:13px;background:#E7F0EC;color:#1F5C46;font-weight:bold;font-size:15px;line-height:26px;text-align:center">${i + 1}</div></td>` +
         `<td style="padding:0 0 14px;font-size:15px;line-height:1.5;color:${ink}"><strong>${esc(h)}.</strong> ${esc(b)}</td></tr>`,
     ).join("") +
     `</table>` +
@@ -58,8 +58,8 @@ export function magicLinkMail(s: SignupLike, url: string, days: number, signupUr
     (signupUrl ? p(`Ready for your own? <a href="${esc(signupUrl)}" style="color:#1F5C46;font-weight:bold">Sign up</a> - your details are filled in for you.`) : "") +
     p("Questions? Just reply - a real person reads every email.") +
     p("The Keystone team", "margin-bottom:24px") +
-    `<p style="margin:0;font-size:13px;line-height:1.5;color:${muted}">If the button does not work, copy this link into your browser:<br/><a href="${esc(url)}" style="color:#1F5C46;word-break:break-all">${esc(url)}</a></p>` +
-    `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:${muted}">You are getting this because someone asked for a Keystone demo with this email address. If that was not you, ignore it and nothing else will be sent.</p>` +
+    `<p style="margin:0;font-size:15px;line-height:1.5;color:${muted}">If the button does not work, copy this link into your browser:<br/><a href="${esc(url)}" style="color:#1F5C46;word-break:break-all">${esc(url)}</a></p>` +
+    `<p style="margin:16px 0 0;font-size:15px;line-height:1.5;color:${muted}">You are getting this because someone asked for a Keystone demo with this email address. If that was not you, ignore it and nothing else will be sent.</p>` +
     `</div></div>`;
   return { to: [s.email], subject: `${first}, your Keystone demo is ready`, text, html };
 }
