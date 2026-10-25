@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/app.js";
 import { flushCrmOutbox } from "../../src/crm/outbox.js";
 import {
-  enqueueSupportMessage, noteSupportAvailable, pushSupportToBf, SUPPORT_NOT_AVAILABLE_MS, supportPayload,
+  enqueueSupportMessage, noteSupportAvailable, pushSupportToBf, SUPPORT_NOT_AVAILABLE_MS, SUPPORT_PARKED_AT, supportPayload,
   type SupportIngestPayload,
 } from "../../src/crm/support.js";
 import { crmLicenseeCreated, crmLicenseeUpdated } from "../../src/crm/triggers.js";
@@ -113,10 +113,10 @@ describe("support ingest client", () => {
     expect(JSON.parse(String(init.body))).toEqual(p);
   });
 
-  it("404 and 503 are 'not available yet'; other errors are not", async () => {
-    for (const [status, notAvailable] of [[404, true], [503, true], [500, false], [401, false]] as const) {
+  it("404 and 503 are 'not available yet'; 400 and 422 are rejected", async () => {
+    for (const [status, notAvailable, rejected] of [[404, true, false], [503, true, false], [500, false, false], [401, false, false], [400, false, true], [422, false, true]] as const) {
       const f = vi.fn(async () => jsonResponse({ error: "x" }, status));
-      expect(await pushSupportToBf(f as unknown as typeof fetch, samplePayload())).toMatchObject({ ok: false, status, notAvailable });
+      expect(await pushSupportToBf(f as unknown as typeof fetch, samplePayload())).toMatchObject({ ok: false, status, notAvailable, rejected });
     }
   });
 
@@ -131,26 +131,26 @@ describe("support ingest client", () => {
     expect(o.rows).toHaveLength(0);
   });
 
-  it("builds the payload: stable message_id, ticket ref, channel in_app, company with support level, contact", () => {
+  it("builds the payload: stable message_id, external_id (ticket), channel in_app, licensee with support level, requester", () => {
     expect(samplePayload()).toEqual({
       message_id: "ks-ops:ticket-message:44444444-4444-4444-8444-444444444444",
-      ticket_ref: `ks-ops:ticket:${TICKET_ID}`,
+      external_id: `ks-ops:ticket:${TICKET_ID}`,
       is_follow_up: false,
       channel: "in_app",
       subject: "Calls drop",
-      body: "Calls drop after 10 minutes.",
+      message: "Calls drop after 10 minutes.",
       priority: "high",
       sent_at: NOW.toISOString(),
-      company: {
+      licensee: {
         licensee_id: "22222222-2222-4222-8222-222222222222", name: "Northwind Capital", company_code: "northwind",
         plan: "growth", support_level: "premium", status: "active", website: "https://northwind.example",
       },
-      contact: { name: "Dee", email: "dee@northwind.example", phone: "+14035550123" },
+      requester: { name: "Dee", email: "dee@northwind.example", phone: "+14035550123" },
     });
     // No requester: the licensee's own contact (with its phone).
     const p = supportPayload(licensee(), { id: TICKET_ID, subject: "S" }, { id: "m", body: "B" }, { isFollowUp: true, now: NOW });
-    expect(p.contact).toEqual({ name: "Nora North", email: "nora@northwind.example", phone: "+14035550199" });
-    expect(p.priority).toBeNull();
+    expect(p.requester).toEqual({ name: "Nora North", email: "nora@northwind.example", phone: "+14035550199" });
+    expect(p).not.toHaveProperty("priority");
   });
 });
 
@@ -205,6 +205,35 @@ describe("support rows in the outbox", () => {
   });
 });
 
+describe("rejected payloads (400/422)", () => {
+  it("logs the details each time and gives up after the normal backoff ladder (6 tries)", async () => {
+    const o = outbox();
+    const db = fakeDb(o.handlers);
+    let now = NOW;
+    await enqueueSupportMessage({ db, now: () => now }, samplePayload());
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const bad = vi.fn(async () => jsonResponse({ error: "invalid_payload", errors: { message: "Required" } }, 400));
+    const waits = [60_000, 5 * 60_000, 30 * 60_000, 120 * 60_000, 12 * 60 * 60_000];
+    for (const wait of waits) {
+      await flushCrmOutbox({ db, fetch: bad as unknown as typeof fetch, now: () => now });
+      expect(o.rows[0]!.next_attempt_at).toEqual(new Date(now.getTime() + wait));
+      now = o.rows[0]!.next_attempt_at;
+    }
+    expect(warn).toHaveBeenCalledTimes(5);
+    expect(String(warn.mock.calls[0]![0])).toContain('{"message":"Required"}');
+    await flushCrmOutbox({ db, fetch: bad as unknown as typeof fetch, now: () => now });
+    expect(o.rows[0]).toMatchObject({ attempts: 6, sent_at: null, next_attempt_at: SUPPORT_PARKED_AT });
+    expect(o.rows[0]!.last_error).toMatch(/^gave_up: bf_support_status_400 invalid_payload/);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]![0])).toContain("giving up");
+    // Parked: never tried again.
+    now = new Date(now.getTime() + 365 * 24 * 3_600_000);
+    expect((await flushCrmOutbox({ db, fetch: bad as unknown as typeof fetch, now: () => now })).tried).toBe(0);
+    expect(bad).toHaveBeenCalledTimes(6);
+  });
+});
+
 describe("licensee ticket routes forward to the support queue", () => {
   function setup() {
     const o = outbox();
@@ -243,14 +272,14 @@ describe("licensee ticket routes forward to the support queue", () => {
     const support = o.rows.filter((r) => r.source === "ks_support");
     expect(support).toHaveLength(2);
     expect(support[0]!.payload).toMatchObject({
-      message_id: `ks-ops:ticket-message:${messages[0]!.id}`, ticket_ref: `ks-ops:ticket:${TICKET_ID}`, is_follow_up: false,
-      channel: "in_app", subject: "Calls drop", body: "Calls drop after 10 minutes.", priority: "urgent",
-      company: { licensee_id: l.id, name: "Northwind Capital", company_code: "northwind", support_level: "priority" },
-      contact: { name: "Dee", email: "dee@northwind.example", phone: "+14035550123" },
+      message_id: `ks-ops:ticket-message:${messages[0]!.id}`, external_id: `ks-ops:ticket:${TICKET_ID}`, is_follow_up: false,
+      channel: "in_app", subject: "Calls drop", message: "Calls drop after 10 minutes.", priority: "urgent",
+      licensee: { licensee_id: l.id, name: "Northwind Capital", company_code: "northwind", support_level: "priority" },
+      requester: { name: "Dee", email: "dee@northwind.example", phone: "+14035550123" },
     });
     expect(support[1]!.payload).toMatchObject({
-      message_id: `ks-ops:ticket-message:${messages[1]!.id}`, ticket_ref: `ks-ops:ticket:${TICKET_ID}`, is_follow_up: true,
-      body: "Still happening today.", priority: "urgent", contact: { name: "Dee", email: "dee@northwind.example" },
+      message_id: `ks-ops:ticket-message:${messages[1]!.id}`, external_id: `ks-ops:ticket:${TICKET_ID}`, is_follow_up: true,
+      message: "Still happening today.", priority: "urgent", requester: { name: "Dee", email: "dee@northwind.example" },
     });
   });
 

@@ -12,12 +12,13 @@
 // - BF_CRM_KEY not set: enqueue does nothing and the worker sends nothing.
 // - KS_OPS_v16_SUPPORT: rows with source "ks_support" are support ticket messages (src/crm/support.ts). They go to
 //   /api/ks/support/ingest instead; 404/503 there means "not deployed yet": wait SUPPORT_NOT_AVAILABLE_MS, logged once.
+//   A 400/422 (payload rejected) is logged with details and parked after SUPPORT_REJECTED_MAX_ATTEMPTS tries.
 import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { bfCrmConfigured, CRM_STAGES, pushToBfCrm, type CrmEvent, type CrmPayload, type CrmStage } from "../lib/bfCrm.js";
 import {
-  noteSupportAvailable, noteSupportNotAvailable, pushSupportToBf, SUPPORT_NOT_AVAILABLE_MS, SUPPORT_SOURCE,
-  type SupportIngestPayload,
+  noteSupportAvailable, noteSupportNotAvailable, pushSupportToBf, SUPPORT_NOT_AVAILABLE_MS, SUPPORT_PARKED_AT,
+  SUPPORT_REJECTED_MAX_ATTEMPTS, SUPPORT_SOURCE, type SupportIngestPayload,
 } from "./support.js";
 
 export const MAX_EVENTS = 50;
@@ -165,16 +166,25 @@ export async function flushCrmOutbox(
     const failures = Number(row.attempts) + 1;
     // The support ingest not deployed yet (404/503): a long wait and a single log line, not one per row per try.
     const notAvailable = isSupport && "notAvailable" in r && r.notAvailable;
-    const next = new Date(deps.now().getTime() + (notAvailable ? SUPPORT_NOT_AVAILABLE_MS : backoffMs(failures)));
+    const rejected = isSupport && "rejected" in r && Boolean(r.rejected);
+    const giveUp = rejected && failures >= SUPPORT_REJECTED_MAX_ATTEMPTS;
+    const next = giveUp
+      ? SUPPORT_PARKED_AT
+      : new Date(deps.now().getTime() + (notAvailable ? SUPPORT_NOT_AVAILABLE_MS : backoffMs(failures)));
     if (notAvailable) noteSupportNotAvailable(r.error);
-    else {
+    else if (giveUp) {
+      console.error(
+        `[support] BF-Server rejected ${row.external_id} ${failures} times; giving up (parked, not retried): ${r.error} ` +
+          `payload keys: ${Object.keys((row.payload ?? {}) as object).join(",")}`,
+      );
+    } else {
       console.warn(
         `[crm] push ${row.source} ${row.external_id} failed (attempt ${failures}, next ${next.toISOString()}): ${r.error}`,
       );
     }
     await deps.db.query(
       `UPDATE crm_outbox SET attempts = attempts + 1, last_error = $2, next_attempt_at = $3, updated_at = now() WHERE id = $1`,
-      [row.id, r.error.slice(0, 1000), next],
+      [row.id, (giveUp ? `gave_up: ${r.error}` : r.error).slice(0, 1000), next],
     );
   }
   return out;
