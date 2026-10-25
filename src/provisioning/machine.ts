@@ -17,7 +17,7 @@ import { bodies, sendQuietly } from "../lib/email.js";
 import { matchesHash, newSecret, sha256Hex } from "../lib/crypto.js";
 import { audit, getLicensee, rotateOpsKey, type LicenseeRow } from "../licensees/repo.js";
 import { allowedServerHostSuffixes } from "../config.js";
-import { callbackBaseUrl, githubTokenConfigured, serviceSetupMissing, teardownEnabled, workflowSetupItems, type SetupItem } from "./config.js";
+import { autoProvisionEnabled, callbackBaseUrl, githubTokenConfigured, serviceSetupMissing, teardownEnabled, workflowSetupItems, type SetupItem } from "./config.js";
 import { SERVICE_EXECUTORS, type Executor, type StepOutcome } from "./executors.js";
 import { describePlan, stepDef, stepsFor, WORKFLOW_FILES, type RunKind } from "./steps.js";
 import type { ProvisioningStore, RunRow, StepRow } from "./store.js";
@@ -74,6 +74,7 @@ export async function startRun(
 export async function startProvisioningQuietly(deps: MachineDeps, l: Pick<LicenseeRow, "id" | "server_url">, trigger: string, by = "ks-ops"): Promise<RunRow | null> {
   try {
     if (l.server_url) return null; // already has a copy
+    if (!autoProvisionEnabled(deps.env)) return null; // KS_AUTO_PROVISION=off: staff start it from /ops/provisioning
     const { run } = await startRun(deps, l.id, "provision", trigger, { by });
     return run;
   } catch (err) {

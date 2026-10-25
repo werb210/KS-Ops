@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { encryptionKey, encryptSecret, sha256Hex } from "../../src/lib/crypto.js";
 import {
-  acceptableUrl, advanceDueRuns, advanceRun, handleCallback, markStepDone, publicStatus, retryStep, runForCallback, startRun,
+  acceptableUrl, advanceDueRuns, advanceRun, startProvisioningQuietly, handleCallback, markStepDone, publicStatus, retryStep, runForCallback, startRun,
   WORKFLOW_TIMEOUT_MS,
 } from "../../src/provisioning/machine.js";
 import { adminUser, health, liveStatusFor, retentionGate, welcomeMail, type ExecCtx, type Executor } from "../../src/provisioning/executors.js";
@@ -229,6 +229,14 @@ describe("provisioning state machine", () => {
     expect(lines.some((l) => l.startsWith("would: azure_resources: scripts/provision-licensee.sh prairie canadacentral"))).toBe(true);
     expect(lines.some((l) => l.startsWith("would: welcome_email:"))).toBe(true);
     expect(m.sent).toHaveLength(0);
+  });
+
+  it("starts by itself after payment unless KS_AUTO_PROVISION=off or the licensee already has a copy", async () => {
+    const off = machine(licensee(), {}, configuredEnv({ KS_AUTO_PROVISION: "off" }));
+    expect(await startProvisioningQuietly(off.deps, licensee(), "checkout")).toBeNull();
+    const on = machine(licensee());
+    expect(await startProvisioningQuietly(on.deps, licensee({ server_url: "https://x.azurewebsites.net" }), "checkout")).toBeNull();
+    expect((await startProvisioningQuietly(on.deps, licensee(), "checkout"))?.trigger).toBe("checkout");
   });
 
   it("the worker advances due runs", async () => {
