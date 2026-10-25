@@ -122,7 +122,8 @@ describe("POST /api/public/signup", () => {
       { price: "price_onboarding:growth", quantity: 1 },
     ]);
     const q = `l=44444444-4444-4444-8444-444444444444&t=${res.body.signup_token}`;
-    expect(params.success_url).toBe(`https://keystone.example.test/signup/success?${q}`);
+    // KS_OPS_AUTO_PROVISION_v1 - p is the opaque setup-progress token for the thank-you page.
+    expect(params.success_url).toMatch(new RegExp(`^https://keystone\\.example\\.test/signup/success\\?${q}&p=[A-Za-z0-9_-]{43}$`));
     expect(params.cancel_url).toBe(`https://keystone.example.test/signup/cancelled?${q}`);
     expect(params.metadata.licensee_id).toBe("44444444-4444-4444-8444-444444444444");
   });

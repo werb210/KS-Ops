@@ -1,6 +1,7 @@
 // Stripe billing: Checkout for new subscriptions, keeping the subscription in step with the licensee's plan and seats,
 // overage invoices for finished months, and an invoice preview worked out from the pricing module.
 import { env, publicSiteUrl } from "../config.js";
+import { statusTokenFor } from "../provisioning/statusToken.js";
 import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { periodOf } from "../lib/http.js";
@@ -62,7 +63,9 @@ export function checkoutUrls(licenseeId: string, token: string): { success_url: 
   const site = publicSiteUrl();
   if (!site) throw new BillingNotConfigured("public_site_url_missing");
   const q = `l=${encodeURIComponent(licenseeId)}&t=${encodeURIComponent(token)}`;
-  return { success_url: `${site}/signup/success?${q}`, cancel_url: `${site}/signup/cancelled?${q}` };
+  // KS_OPS_AUTO_PROVISION_v1 - p: the opaque token for the "We're setting up your system" progress (statusToken.ts).
+  const p = statusTokenFor(licenseeId);
+  return { success_url: `${site}/signup/success?${q}${p ? `&p=${p}` : ""}`, cancel_url: `${site}/signup/cancelled?${q}` };
 }
 
 /**

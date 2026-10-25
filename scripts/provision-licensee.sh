@@ -28,6 +28,14 @@
 #   PG_VERSION         Postgres version (default 17)
 #   SWA_LOCATION       Static Web Apps region (default eastus2; Static Web Apps are not offered in Canadian regions)
 #   CREATE_DEPLOY_SP=1 also create a deploy service principal limited to the resource group (AZURE_CREDENTIALS)
+#   DEPLOY_IDENTITY=1  instead, create the managed identity ks-<code>-deploy (Website Contributor on the resource group)
+#                      with GitHub federated credentials, so the deploy workflows sign in with no stored secret
+#                      (environment variables AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID). Needs
+#                      permission to create role assignments. DEPLOY_IDENTITY_REPOS lists the repositories
+#                      (default werb210/KS-server,werb210/KS-Agent).
+#   OUTPUT_JSON        write the addresses and names (nothing secret) to this file as JSON
+#   KS_NONINTERACTIVE=1  never print secrets (the "COPY THIS NOW" block is left out). Used by KS-Ops automatic
+#                      provisioning (docs/AUTO_PROVISIONING.md), which writes the GitHub settings itself.
 #
 # Postgres only accepts connections from the KS-server and KS-Agent web apps' outbound addresses (one firewall rule
 # per address, from `az webapp show --query possibleOutboundIpAddresses`); "allow all Azure services" is not used, and
@@ -170,6 +178,11 @@ JWT_SECRET="$(setting "$SERVER_APP" JWT_SECRET)"; [[ -n "$JWT_SECRET" ]] || JWT_
 OTP_HASH_SALT="$(setting "$SERVER_APP" OTP_HASH_SALT)"; [[ -n "$OTP_HASH_SALT" ]] || OTP_HASH_SALT="$(secret 32)"
 # QuickBooks Online (KS-server v13): the token key is made once and kept, so connected companies stay connected.
 QBO_TOKEN_ENCRYPTION_KEY="$(setting "$SERVER_APP" QBO_TOKEN_ENCRYPTION_KEY)"; [[ -n "$QBO_TOKEN_ENCRYPTION_KEY" ]] || QBO_TOKEN_ENCRYPTION_KEY="$(secret 32)"
+# KS_OPS_AUTO_PROVISION_v1 - the other keys KS-server needs, also made once and kept: the refresh-token secret, the
+# Google Workspace token key and the Apple Watch push-token key.
+JWT_REFRESH_SECRET="$(setting "$SERVER_APP" JWT_REFRESH_SECRET)"; [[ -n "$JWT_REFRESH_SECRET" ]] || JWT_REFRESH_SECRET="$(secret 32)"
+GOOGLE_TOKEN_ENCRYPTION_KEY="$(setting "$SERVER_APP" GOOGLE_TOKEN_ENCRYPTION_KEY)"; [[ -n "$GOOGLE_TOKEN_ENCRYPTION_KEY" ]] || GOOGLE_TOKEN_ENCRYPTION_KEY="$(secret 32)"
+WATCH_PUSH_ENCRYPTION_KEY="$(setting "$SERVER_APP" WATCH_PUSH_ENCRYPTION_KEY)"; [[ -n "$WATCH_PUSH_ENCRYPTION_KEY" ]] || WATCH_PUSH_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 QBO_ENVIRONMENT="${QBO_ENVIRONMENT:-$(setting "$SERVER_APP" QBO_ENVIRONMENT)}"; QBO_ENVIRONMENT="${QBO_ENVIRONMENT:-sandbox}"
 if [[ "$QBO_ENVIRONMENT" != "sandbox" && "$QBO_ENVIRONMENT" != "production" ]]; then
   echo "QBO_ENVIRONMENT must be sandbox or production (got $QBO_ENVIRONMENT)." >&2
@@ -204,6 +217,9 @@ SERVER_SETTINGS=(
   "DATABASE_URL=$DATABASE_URL"
   "JWT_SECRET=$JWT_SECRET"
   "OTP_HASH_SALT=$OTP_HASH_SALT"
+  "JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET"
+  "GOOGLE_TOKEN_ENCRYPTION_KEY=$GOOGLE_TOKEN_ENCRYPTION_KEY"
+  "WATCH_PUSH_ENCRYPTION_KEY=$WATCH_PUSH_ENCRYPTION_KEY"
   "NODE_ENV=production"
   "SCM_DO_BUILD_DURING_DEPLOYMENT=false"
   "KS_SERVER_URL=$SERVER_URL"
@@ -251,6 +267,50 @@ if [[ "${CREATE_DEPLOY_SP:-}" == "1" ]]; then
   say "Deploy service principal ks-${CODE}-deploy (contributor on $RG only)"
   RG_ID="$(az group show -n "$RG" --query id -o tsv)"
   DEPLOY_CREDS="$(az ad sp create-for-rbac --name "ks-${CODE}-deploy" --role contributor --scopes "$RG_ID" --json-auth --only-show-errors)"
+fi
+
+DEPLOY_CLIENT_ID=""
+if [[ "${DEPLOY_IDENTITY:-}" == "1" ]]; then
+  IDENTITY="ks-${CODE}-deploy"
+  say "Deploy identity $IDENTITY (Website Contributor on $RG, GitHub federated credentials)"
+  if exists az identity show -g "$RG" -n "$IDENTITY"; then echo "exists"; else
+    az identity create -g "$RG" -n "$IDENTITY" -l "$REGION" --only-show-errors -o none
+  fi
+  DEPLOY_CLIENT_ID="$(az identity show -g "$RG" -n "$IDENTITY" --query clientId -o tsv)"
+  PRINCIPAL_ID="$(az identity show -g "$RG" -n "$IDENTITY" --query principalId -o tsv)"
+  RG_ID="$(az group show -n "$RG" --query id -o tsv)"
+  if [[ -z "$(az role assignment list --assignee "$PRINCIPAL_ID" --role "Website Contributor" --scope "$RG_ID" --query "[0].id" -o tsv --only-show-errors)" ]]; then
+    # A new identity can take a minute to reach Entra ID; try a few times.
+    for TRY in 1 2 3 4 5 6; do
+      if az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+        --role "Website Contributor" --scope "$RG_ID" --only-show-errors -o none; then break; fi
+      [[ "$TRY" == 6 ]] && { echo "Could not give $IDENTITY the Website Contributor role on $RG." >&2; exit 1; }
+      sleep 20
+    done
+  fi
+  IFS=',' read -r -a FED_REPOS <<<"${DEPLOY_IDENTITY_REPOS:-werb210/KS-server,werb210/KS-Agent}"
+  for FED_REPO in "${FED_REPOS[@]}"; do
+    FED_NAME="github-${FED_REPO##*/}-${GH_ENV}"
+    FED_NAME="${FED_NAME//[^A-Za-z0-9-]/-}"
+    if exists az identity federated-credential show -g "$RG" --identity-name "$IDENTITY" -n "$FED_NAME"; then echo "federated credential $FED_NAME exists"; else
+      az identity federated-credential create -g "$RG" --identity-name "$IDENTITY" -n "$FED_NAME" \
+        --issuer https://token.actions.githubusercontent.com --subject "repo:${FED_REPO}:environment:${GH_ENV}" \
+        --audiences api://AzureADTokenExchange --only-show-errors -o none
+      echo "federated credential $FED_NAME for $FED_REPO environment $GH_ENV"
+    fi
+  done
+fi
+
+if [[ -n "${OUTPUT_JSON:-}" ]]; then
+  cat >"$OUTPUT_JSON" <<JSON
+{"code":"$CODE","resource_group":"$RG","server_url":"$SERVER_URL","agent_url":"$AGENT_URL","portal_url":"$PORTAL_URL","client_url":"$CLIENT_URL","deploy_client_id":"$DEPLOY_CLIENT_ID","tenant_id":"$(az account show --query tenantId -o tsv)","subscription_id":"$(az account show --query id -o tsv)"}
+JSON
+fi
+
+if [[ "${KS_NONINTERACTIVE:-}" == "1" ]]; then
+  echo
+  echo "Keystone licensee \"$CODE\" is provisioned in resource group $RG (server $SERVER_URL, portal $PORTAL_URL, client $CLIENT_URL)."
+  exit 0
 fi
 
 PORTAL_TOKEN="$(az staticwebapp secrets list -g "$RG" -n "$PORTAL_SWA" --query properties.apiKey -o tsv)"

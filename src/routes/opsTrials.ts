@@ -19,6 +19,8 @@ import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { audit, codeTaken, insertLicensee, isUniqueViolation, staffView, type LicenseeRow } from "../licensees/repo.js";
 import { crossFieldErrors, staffCreateSchema } from "../licensees/validation.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
+import { startProvisioningQuietly } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
+import { machineDeps } from "../provisioning/index.js";
 import { PLAN_NAMES } from "../pricing.js";
 
 function trialView(l: LicenseeRow) {
@@ -109,7 +111,12 @@ export function opsTrialsRouter(deps: Deps): Router {
         });
       }
       if (!r.ok) return res.status(r.status).json({ error: r.error, message: r.message, licensee_id: licenseeId, licensee_created: created });
+      // KS_OPS_AUTO_PROVISION_v1 - no copy yet: set one up automatically (no payment needed for a staff trial).
+      const provisioning = r.licensee.status === "provisioning" && !r.licensee.server_url
+        ? await startProvisioningQuietly(machineDeps(deps), r.licensee, "admin_trial", actor)
+        : null;
       return res.status(201).json({
+        provisioning_run_id: provisioning?.id ?? null,
         licensee: staffView(r.licensee),
         licensee_created: created,
         trial: trialView(r.licensee),

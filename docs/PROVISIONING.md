@@ -1,5 +1,9 @@
 # Provisioning a Keystone licensee
 
+> **Automatic now.** After payment (or a staff free trial) KS-Ops runs all of this by itself: see
+> [AUTO_PROVISIONING.md](AUTO_PROVISIONING.md) and `/ops/provisioning`. This page is the manual path, still used when
+> automatic setup is not configured yet or a step has to be done by hand.
+
 Each licensee (brokerage) gets its own copy of Keystone: KS-server, KS-Agent, KS-Portal and KS-Client, with its own
 Postgres database, all in one Azure resource group named `ks-<company code>`. `scripts/provision-licensee.sh` creates
 it. The script is safe to run again: what exists is kept, and the secrets already saved in the apps are reused.
@@ -149,10 +153,16 @@ in Stripe, open `https://<ks-ops host>/ops/quickbooks`, connect, and fill in the
 
 ## Today's limits
 
-- Creating the four `ks-<code>` GitHub environments, their secrets and variables, and the `deploy/licensees.json`
-  entries is still done by hand (four repositories, same values). The script prints all of it.
+- By hand, creating the four `ks-<code>` GitHub environments, their secrets and variables, and the
+  `deploy/licensees.json` entries is done in the GitHub settings (four repositories, same values); the script prints
+  all of it. Automatic provisioning does it through the GitHub API (AUTO_PROVISIONING.md).
 - `deploy/licensees.json` is kept in each of the four repositories; keep the copies the same.
 - Each licensee's portal and client web app are built once per licensee (their addresses are compiled in), so a push
   to `main` takes longer as licensees are added. KS-server and KS-Agent are built once and the same package is
   deployed to every licensee.
 - Manual deploys run from `main` only.
+- `DEPLOY_IDENTITY=1` (used by automatic provisioning) makes a managed identity with GitHub federated credentials
+  instead of a service principal secret: the `ks-<code>` environments of KS-server and KS-Agent then hold the variables
+  `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` instead of the secret `AZURE_CREDENTIALS`. The
+  script also makes `JWT_REFRESH_SECRET`, `GOOGLE_TOKEN_ENCRYPTION_KEY` and `WATCH_PUSH_ENCRYPTION_KEY` once and keeps
+  them.
