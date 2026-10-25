@@ -7,7 +7,8 @@
 //   did; idle/expired unfinished -> a note only.
 // Licensees (source "website_signup" for website sign-ups, "licensee" for staff-created; external_id = licensees.id):
 //   created -> stage signed_up + event signup; Stripe payment -> paying + event payment; status changes (suspended,
-//   cancelled, past_due, ...) -> event status_change and the company status (cancelled never sets "lost").
+//   cancelled, past_due, ...) -> event status_change and the company status (cancelled never sets "lost"). Every
+//   licensee push carries company.support_level; a support level change alone pushes the company again.
 // Beta programme sign-ups (KS_OPS_BETA_v1; source "website_signup", external_id = beta_signups.id): stage lead (none
 //   when the email is already a licensee contact) + event signup + a note of their interests.
 import type { Deps } from "../deps.js";
@@ -118,6 +119,7 @@ export function licenseeSource(l: Pick<LicenseeRow, "source">): CrmSource {
 type LicenseeLike = Pick<
   LicenseeRow,
   "id" | "source" | "company_name" | "company_code" | "website" | "plan" | "seats" | "status" | "contact_name" | "contact_email" | "contact_phone"
+  | "support_level"
 >;
 
 function licenseeBase(l: LicenseeLike, status = l.status): CrmPayload {
@@ -132,6 +134,7 @@ function licenseeBase(l: LicenseeLike, status = l.status): CrmPayload {
       plan: l.plan,
       seats: Number(l.seats),
       status,
+      support_level: l.support_level ?? null,
     },
   };
 }
@@ -163,7 +166,7 @@ export async function crmLicenseeStatus(deps: CrmDeps, l: LicenseeLike, from: st
   });
 }
 
-/** Company details changed by staff (name, plan, seats, ...): refresh the company, no event. */
+/** Company details changed by staff (name, plan, seats, support level, ...): refresh the company, no event. */
 export async function crmLicenseeUpdated(deps: CrmDeps, l: LicenseeLike): Promise<void> {
   await enqueueCrm(deps, licenseeBase(l));
 }

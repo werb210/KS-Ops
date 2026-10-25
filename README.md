@@ -55,7 +55,7 @@ again after a price changes.
 | `DEMO_SMS_ENABLED` | no | `true` texts the demo link as well as emailing it. Off by default (the link is emailed only; the mobile number is still kept) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` | no | with `DEMO_SMS_ENABLED=true`, texts the demo link (`KS_SMS_FROM` is the sending number in +1 format; `TWILIO_MESSAGING_SERVICE_SID` can replace it) |
 | `KS_OPS_PUBLIC_URL` | recommended | this server's public https address, used for uploaded-logo links (falls back to Azure's `WEBSITE_HOSTNAME`, then the request's host) |
-| `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` |
+| `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` (licensee pushes include `company.support_level`). Licensee support tickets and their follow-ups go to `POST {BF_CRM_URL}/api/ks/support/ingest` through the same outbox (404/503 there = not deployed yet: retried every 6 h, logged once) |
 | `BF_CRM_KEY` | for the CRM | the same value as `KS_OPS_CRM_KEY` on BF-Server (sent as `X-KS-Ops-Key`). Unset: nothing is pushed (logged once at startup). Pushes wait in `crm_outbox` and are retried after 1 min, 5 min, 30 min, 2 h, 12 h, then daily until BF-Server accepts them |
 | `KS_QBO_CLIENT_ID`, `KS_QBO_CLIENT_SECRET`, `KS_QBO_TOKEN_ENCRYPTION_KEY` | for Keystone's QuickBooks | Keystone's own QuickBooks Online (Stripe invoices, payments, refunds and fees posted there). The key is 32 bytes (64 hex characters). Unset: off. See `docs/QUICKBOOKS.md` |
 | `KS_QBO_ENVIRONMENT` | no | `sandbox` (default) or `production` |
@@ -149,6 +149,7 @@ live licensees (`trial`, `active`, `past_due`) with a server address are returne
   generated at the same time or later
 - `POST /api/licensees/:id/requests` — upgrade or storage request
 - `POST /api/licensees/:id/tickets` — support ticket from a licensee admin
+- `POST /api/licensees/:id/tickets/:ticketId/messages` — follow-up on one of the licensee's tickets (reopens a waiting/resolved ticket)
 - `POST /api/licensees/:id/staff-directory` — `{ entries: [{ kind: "email" | "phone", hash }] }`, the full list of the
   licensee's active staff; replaces the previous list
 - `POST /api/licensees/:id/watchlist/opt-in` `{ opt_in }` — shared fraud watchlist on/off; off deletes everything the

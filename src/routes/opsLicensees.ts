@@ -50,6 +50,7 @@ function pricingView(l: LicenseeRow) {
 /** Licensee fields the Keystone CRM shows on the company or its contact. */
 const CRM_FIELDS = [
   "company_name", "company_code", "website", "plan", "seats", "contact_name", "contact_email", "contact_phone",
+  "support_level",
 ] as const;
 
 export function opsLicenseesRouter(deps: Deps): Router {

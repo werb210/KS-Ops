@@ -10,9 +10,15 @@
 // - Failures (including 404/503 while BF-Server does not have the endpoint yet) are retried after 1 min, 5 min,
 //   30 min, 2 h, 12 h, then daily, for ever; every failure is logged. Nothing is dropped.
 // - BF_CRM_KEY not set: enqueue does nothing and the worker sends nothing.
+// - KS_OPS_v16_SUPPORT: rows with source "ks_support" are support ticket messages (src/crm/support.ts). They go to
+//   /api/ks/support/ingest instead; 404/503 there means "not deployed yet": wait SUPPORT_NOT_AVAILABLE_MS, logged once.
 import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { bfCrmConfigured, CRM_STAGES, pushToBfCrm, type CrmEvent, type CrmPayload, type CrmStage } from "../lib/bfCrm.js";
+import {
+  noteSupportAvailable, noteSupportNotAvailable, pushSupportToBf, SUPPORT_NOT_AVAILABLE_MS, SUPPORT_SOURCE,
+  type SupportIngestPayload,
+} from "./support.js";
 
 export const MAX_EVENTS = 50;
 export const MAX_NOTE = 4000;
@@ -137,8 +143,12 @@ export async function flushCrmOutbox(
   );
   for (const row of leased.rows) {
     out.tried++;
-    const r = await pushToBfCrm(deps.fetch, row.payload as CrmPayload, { timeoutMs: opts.timeoutMs });
+    const isSupport = row.source === SUPPORT_SOURCE;
+    const r = isSupport
+      ? await pushSupportToBf(deps.fetch, row.payload as SupportIngestPayload, { timeoutMs: opts.timeoutMs })
+      : await pushToBfCrm(deps.fetch, row.payload as CrmPayload, { timeoutMs: opts.timeoutMs });
     if (r.ok) {
+      if (isSupport) noteSupportAvailable();
       const done = await deps.db.query(
         `UPDATE crm_outbox SET sent_at = $3, attempts = attempts + 1, last_error = NULL, updated_at = now()
           WHERE id = $1 AND version = $2 RETURNING id`,
@@ -153,10 +163,15 @@ export async function flushCrmOutbox(
     }
     out.failed++;
     const failures = Number(row.attempts) + 1;
-    const next = new Date(deps.now().getTime() + backoffMs(failures));
-    console.warn(
-      `[crm] push ${row.source} ${row.external_id} failed (attempt ${failures}, next ${next.toISOString()}): ${r.error}`,
-    );
+    // The support ingest not deployed yet (404/503): a long wait and a single log line, not one per row per try.
+    const notAvailable = isSupport && "notAvailable" in r && r.notAvailable;
+    const next = new Date(deps.now().getTime() + (notAvailable ? SUPPORT_NOT_AVAILABLE_MS : backoffMs(failures)));
+    if (notAvailable) noteSupportNotAvailable(r.error);
+    else {
+      console.warn(
+        `[crm] push ${row.source} ${row.external_id} failed (attempt ${failures}, next ${next.toISOString()}): ${r.error}`,
+      );
+    }
     await deps.db.query(
       `UPDATE crm_outbox SET attempts = attempts + 1, last_error = $2, next_attempt_at = $3, updated_at = now() WHERE id = $1`,
       [row.id, r.error.slice(0, 1000), next],

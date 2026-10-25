@@ -1,12 +1,14 @@
-// Calls from a licensee's KS-server (X-KS-Ops-Key): usage reports, upgrade/storage requests, support tickets and the
-// shared fraud watchlist (opt-in, hashes only - see src/watchlist.ts).
+// Calls from a licensee's KS-server (X-KS-Ops-Key): usage reports, upgrade/storage requests, support tickets (and
+// follow-ups on them) and the shared fraud watchlist (opt-in, hashes only - see src/watchlist.ts). Every ticket message
+// from the licensee is also queued for BF-Server's Keystone support queue (src/crm/support.ts).
 import { Router } from "express";
 import { z } from "zod";
 import { supportEmail } from "../config.js";
 import type { Deps } from "../deps.js";
 import { requireLicenseeKey } from "../auth/licenseeKey.js";
+import { forwardTicketMessage } from "../crm/support.js";
 import { bodies, sendQuietly } from "../lib/email.js";
-import { h, parseBody } from "../lib/http.js";
+import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { dataPurgeOn, markPurged } from "../licensees/repo.js";
 import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
 import { machineDeps } from "../provisioning/index.js";
@@ -33,7 +35,19 @@ const ticketSchema = z
     message: z.string().trim().max(20_000).optional(),
     requester_name: z.string().trim().max(200).optional(),
     requester_email: z.string().trim().max(200).optional(),
+    requester_phone: z.string().trim().max(40).optional(),
     priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
+  })
+  .refine((v) => Boolean(v.body || v.message), { message: "body is required", path: ["body"] });
+
+// KS_OPS_v16_SUPPORT - a follow-up from the licensee on one of its tickets.
+const followUpSchema = z
+  .object({
+    body: z.string().trim().max(20_000).optional(),
+    message: z.string().trim().max(20_000).optional(),
+    requester_name: z.string().trim().max(200).optional(),
+    requester_email: z.string().trim().max(200).optional(),
+    requester_phone: z.string().trim().max(40).optional(),
   })
   .refine((v) => Boolean(v.body || v.message), { message: "body is required", path: ["body"] });
 
@@ -131,11 +145,20 @@ export function licenseeApiRouter(deps: Deps): Router {
       );
       const ticketId = t.rows[0].id as string;
       const text = (v.body ?? v.message)!;
-      await deps.db.query(
+      const m = await deps.db.query(
         `INSERT INTO ticket_messages (ticket_id, author_type, author_name, author_email, body)
-         VALUES ($1, 'licensee', $2, $3, $4)`,
+         VALUES ($1, 'licensee', $2, $3, $4) RETURNING id, created_at`,
         [ticketId, v.requester_name ?? null, v.requester_email ?? null, text],
       );
+      if (m.rows[0]) {
+        await forwardTicketMessage(
+          deps,
+          l,
+          { id: ticketId, subject: v.subject, priority: v.priority ?? "normal", requester_name: v.requester_name, requester_email: v.requester_email },
+          { id: m.rows[0].id, body: text, created_at: m.rows[0].created_at },
+          { isFollowUp: false, requesterPhone: v.requester_phone },
+        );
+      }
       await sendQuietly(
         deps.mailer,
         {
@@ -150,6 +173,55 @@ export function licenseeApiRouter(deps: Deps): Router {
         "ticket notice",
       );
       return res.status(201).json({ ok: true, ticket_id: ticketId });
+    }),
+  );
+
+  // KS_OPS_v16_SUPPORT - a follow-up on one of the licensee's own tickets. A resolved or waiting ticket is reopened
+  // (a closed one stays closed but still gets the message); staff are emailed and BF-Server's support queue gets it.
+  router.post(
+    "/:id/tickets/:ticketId/messages",
+    auth,
+    h(async (req, res) => {
+      const l = req.licensee!;
+      if (!UUID_RE.test(req.params.ticketId)) return res.status(404).json({ error: "not_found" });
+      const parsed = parseBody(followUpSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_message", errors: parsed.errors });
+      const v = parsed.data;
+      const t = await deps.db.query("SELECT * FROM tickets WHERE id = $1 AND licensee_id = $2", [req.params.ticketId, l.id]);
+      const ticket = t.rows[0];
+      if (!ticket) return res.status(404).json({ error: "not_found" });
+      const text = (v.body ?? v.message)!;
+      const name = v.requester_name ?? ticket.requester_name ?? null;
+      const email = v.requester_email ?? ticket.requester_email ?? null;
+      const m = await deps.db.query(
+        `INSERT INTO ticket_messages (ticket_id, author_type, author_name, author_email, body)
+         VALUES ($1, 'licensee', $2, $3, $4) RETURNING id, created_at`,
+        [ticket.id, name, email, text],
+      );
+      await deps.db.query(
+        `UPDATE tickets SET status = CASE WHEN status IN ('waiting','resolved') THEN 'open' ELSE status END, updated_at = now()
+          WHERE id = $1`,
+        [ticket.id],
+      );
+      await sendQuietly(
+        deps.mailer,
+        {
+          to: [supportEmail()],
+          subject: `Re: Support ticket from ${l.company_name}: ${ticket.subject}`,
+          ...bodies([`${name ?? "An admin"}${email ? ` (${email})` : ""} at ${l.company_name} replied on their support ticket.`, text]),
+        },
+        "ticket follow-up notice",
+      );
+      if (m.rows[0]) {
+        await forwardTicketMessage(
+          deps,
+          l,
+          { id: ticket.id, subject: ticket.subject, priority: ticket.priority, requester_name: name, requester_email: email },
+          { id: m.rows[0].id, body: text, created_at: m.rows[0].created_at },
+          { isFollowUp: true, requesterPhone: v.requester_phone },
+        );
+      }
+      return res.status(201).json({ ok: true, ticket_id: ticket.id, message_id: m.rows[0]?.id ?? null });
     }),
   );
 
