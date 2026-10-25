@@ -50,6 +50,17 @@ export function planPushBody(
 }
 
 /**
+ * KS_OPS_v15_BRAND_SYNC - the branding chosen at sign-up (or set by staff here), sent with every push as
+ * { branding: {...} }. The licensee's server applies a field only while its admin has not changed it on their Company
+ * page (KS-server applyOpsBranding): the admin's own edits win. Unset fields go as "" (no choice). Servers that do
+ * not know the field ignore it.
+ */
+export const BRAND_PUSH_FIELDS = ["primary_color", "accent_color", "background_color", "font_family", "logo_url"] as const;
+export function brandingOf(l: Partial<Record<(typeof BRAND_PUSH_FIELDS)[number], string | null>>): Record<(typeof BRAND_PUSH_FIELDS)[number], string> {
+  return Object.fromEntries(BRAND_PUSH_FIELDS.map((f) => [f, String(l[f] ?? "").trim()])) as Record<(typeof BRAND_PUSH_FIELDS)[number], string>;
+}
+
+/**
  * Records a status change and marks the licensee for a push, which the retry worker sends within 5 minutes (used where
  * an immediate call would hold up the caller, like the Stripe webhook). Only service statuses are pushed, and only
  * when the licensee has a server.
@@ -135,7 +146,7 @@ export async function pushPlan(deps: Pick<Deps, "db" | "fetch" | "now">, license
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/plan`, {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120) },
-      body: JSON.stringify({ ...planPushBody(l, deps.now()), ...(beta ? { beta_features: beta } : {}) }),
+      body: JSON.stringify({ ...planPushBody(l, deps.now()), ...(beta ? { beta_features: beta } : {}), branding: brandingOf(l) }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
