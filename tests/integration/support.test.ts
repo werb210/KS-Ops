@@ -22,7 +22,13 @@ const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
   if (headers["X-KS-Ops-Key"] !== CRM_KEY) return new Response("unexpected", { status: 500 });
   if (url === "https://bf.example.test/api/ks/support/ingest") {
     if (ingestStatus !== 200) return jsonResponse({ error: "not_found" }, ingestStatus);
-    ingest.push(JSON.parse(String(init.body)));
+    const body = JSON.parse(String(init.body));
+    // BF-Server's required fields; the old names are refused.
+    const missing = ["external_id", "subject", "message", "message_id", "licensee", "requester"].filter((k) => !body[k]);
+    if (missing.length || "ticket_ref" in body || "body" in body || "company" in body || "contact" in body) {
+      return jsonResponse({ error: "invalid_payload", missing }, 400);
+    }
+    ingest.push(body);
     return jsonResponse({ ok: true }, 201);
   }
   if (url === "https://bf.example.test/api/ks/crm/upsert") {
@@ -109,14 +115,14 @@ describe("support level and support tickets (real Postgres)", () => {
     expect(await flushCrmOutbox(deps)).toMatchObject({ tried: 0 });
     expect(ingest).toHaveLength(2);
     expect(ingest[0]).toMatchObject({
-      ticket_ref: `ks-ops:ticket:${t.body.ticket_id}`, is_follow_up: false, channel: "in_app", subject: "Cannot upload",
-      body: "Uploads fail with a 413.", priority: "high",
-      company: { licensee_id: id, name: "Support Co", company_code: "support-co", support_level: "premium" },
-      contact: { name: "Ria", email: "ria@support.example", phone: null },
+      external_id: `ks-ops:ticket:${t.body.ticket_id}`, is_follow_up: false, channel: "in_app", subject: "Cannot upload",
+      message: "Uploads fail with a 413.", priority: "high",
+      licensee: { licensee_id: id, name: "Support Co", company_code: "support-co", support_level: "premium" },
+      requester: { name: "Ria", email: "ria@support.example", phone: null },
     });
     expect(ingest[1]).toMatchObject({
-      message_id: `ks-ops:ticket-message:${f.body.message_id}`, ticket_ref: `ks-ops:ticket:${t.body.ticket_id}`, is_follow_up: true,
-      body: "Still failing.",
+      message_id: `ks-ops:ticket-message:${f.body.message_id}`, external_id: `ks-ops:ticket:${t.body.ticket_id}`, is_follow_up: true,
+      message: "Still failing.",
     });
     expect(new Set(ingest.map((p) => p.message_id)).size).toBe(2);
     expect(await enqueueSupportMessage(deps, ingest[0]!)).toBe(false);
