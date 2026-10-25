@@ -15,7 +15,7 @@ import {
   composeMailingAddress, crossFieldErrors, normalizePostal, POSTAL_MESSAGES, staffCreateSchema, staffPatchSchema, STATUSES,
 } from "../licensees/validation.js";
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
-import { addonsOf, isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
+import { addonsOf, BRAND_PUSH_FIELDS, isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
 import { crmLicenseeCreated, crmLicenseeStatus, crmLicenseeUpdated } from "../crm/triggers.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 import { biConfig, linkPgi, queuePgiBackfill } from "../sync/pgiLink.js";
@@ -250,6 +250,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
       // Live status changes (suspended, cancelled, or back to trial/active/past_due) go to the licensee's server with
       // the plan, recorded and retried the same way.
       const statusPush = changed.includes("status") && isServiceStatus(next.status);
+      // KS_OPS_v15_BRAND_SYNC - branding (and a newly known server address) also goes to the licensee's server.
+      const brandPush = Boolean(next.server_url) && changed.some((c) => c === "server_url" || (BRAND_PUSH_FIELDS as readonly string[]).includes(c));
       if (changed.includes("plan") || changed.includes("extra_storage_blocks") || statusPush || addonsChanged.length) {
         await recordPlanChange(
           deps,
@@ -257,6 +259,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
           { plan: next.plan, extra_storage_blocks: next.extra_storage_blocks, ...(statusPush ? { status: next.status } : {}) },
           actor,
         );
+        planPush = await pushPlan(deps, l.id, actor);
+      } else if (brandPush) {
         planPush = await pushPlan(deps, l.id, actor);
       }
       let billingSync: string | null = null;

@@ -111,6 +111,10 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
   bytes; SVGs with scripts or links are refused), stored in `licensee_logos` and linked from `logo_url`
 - Sign-up v14: `font_family` (optional) - a font family name only (letters, numbers, spaces, dashes; 60 at most), e.g.
   `Lato`. Stored in `licensees.font_family` next to the colours and returned by the directory like `primary_color`
+- Branding sync (KS_OPS_v15): every plan push (`PUT {server_url}/api/plan`) also carries
+  `branding: { primary_color, accent_color, background_color, font_family, logo_url }` ("" = not set). A staff edit of
+  any of those (or of `server_url`) pushes straight away. The licensee's server applies a field only until their admin
+  changes it on the Company page; after that the admin's value wins
 - `POST /api/public/brand-scan { url }` — "Use my website" on the sign-up branding step (10 per 10 minutes per
   address). Reads the brokerage's home page and up to 3 of its same-site style sheets and returns
   `{ ok, url, site_name, logo: { source_url, content_type, data_base64, filename } | null, logo_candidates, favicon_url,
