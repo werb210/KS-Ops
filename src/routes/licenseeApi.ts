@@ -10,6 +10,8 @@ import { forwardTicketMessage } from "../crm/support.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { dataPurgeOn, markPurged } from "../licensees/repo.js";
+import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
+import { machineDeps } from "../provisioning/index.js";
 import { futureGeneratedAt, storeUsageReport, usageReportSchema } from "../sync/usage.js";
 import { replaceStaffDirectory, staffDirectorySchema } from "../staffDirectory.js";
 import { checkEntries, checkSchema, optInSchema, replaceReport, reportSchema, setOptIn, withdraw, withdrawSchema } from "../watchlist.js";
@@ -95,6 +97,7 @@ export function licenseeApiRouter(deps: Deps): Router {
       const r = await markPurged(deps.db, l.id, deps.now(), `ks-server:${l.company_code}`);
       if (r === "not_cancelled") return res.status(409).json({ error: r });
       if (r === "not_due") return res.status(409).json({ error: r, data_purge_on: dataPurgeOn(l) });
+      if (r === "purged") await requestTeardownAfterPurge(machineDeps(deps), l.id, `ks-server:${l.company_code}`);
       return res.json({ ok: true, result: r });
     }),
   );

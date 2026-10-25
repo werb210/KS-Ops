@@ -21,6 +21,8 @@ import { queueStatusPush } from "../sync/planPush.js";
 import { liveSubscriptionStatus } from "./billing.js";
 import { crmLicenseePaid, crmLicenseeStatus } from "../crm/triggers.js";
 import { queueQboForStripeEvent } from "../qbo/outbox.js";
+import { startProvisioningQuietly } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
+import { machineDeps } from "../provisioning/index.js";
 
 type HookDeps = Pick<Deps, "db" | "mailer"> & Partial<Pick<Deps, "stripe" | "now">>;
 const crmDeps = (deps: HookDeps) => ({ db: deps.db, now: deps.now ?? (() => new Date()) });
@@ -222,16 +224,25 @@ async function checkoutCompleted(deps: HookDeps, s: Obj, paidNow: boolean): Prom
   if (moved) {
     const c = crmDeps(deps);
     await crmLicenseePaid(c, l, "provisioning", c.now(), "Paid through Stripe Checkout; Keystone is being set up.");
+    // KS_OPS_AUTO_PROVISION_v1 - the automatic setup starts now (it waits with a checklist when not configured).
+    const run = await startProvisioningQuietly(
+      machineDeps({ db: deps.db, mailer: deps.mailer, fetch: (deps as { fetch?: typeof fetch }).fetch ?? fetch, now: c.now }),
+      l,
+      "checkout",
+      ACTOR,
+    );
     const sales = bodies([
       `${l.company_name} has paid and is ready to be set up.`,
       licenseeSummary(l),
-      `Next step: run scripts/provision-licensee.sh ${l.company_code} and then set the server, portal and client addresses in Keystone operations.`,
+      run
+        ? "Automatic setup has started. Follow it on /ops/provisioning; you are emailed if a step fails or if setup is waiting for configuration."
+        : `Next step: run scripts/provision-licensee.sh ${l.company_code} and then set the server, portal and client addresses in Keystone operations.`,
     ]);
     await sendQuietly(deps.mailer, { to: [salesEmail()], subject: `New Keystone licensee paid: ${l.company_name}`, ...sales }, "sales signup notice");
     const welcome = bodies([
       `Hi ${l.contact_name},`,
       `Thank you for choosing Keystone. Your payment went through and we have started setting up ${l.company_name}'s copy.`,
-      `We will email you within one business day with your sign-in details. Your company code is "${l.company_code}" - your team will enter it the first time they open the Keystone apps.`,
+      `We will email your sign-in details as soon as your system is ready (usually within the hour, and always within one business day). Your company code is "${l.company_code}" - your team will enter it the first time they open the Keystone apps.`,
       `If you have questions in the meantime, reply to this email or write to ${salesEmail()}.`,
     ]);
     await sendQuietly(deps.mailer, { to: [l.contact_email], subject: "Welcome to Keystone - we are setting things up", ...welcome }, "welcome email");
