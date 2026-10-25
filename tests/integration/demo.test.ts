@@ -279,3 +279,40 @@ describe("demo: unfinished, never opened, caps", () => {
     expect((await pool.query("SELECT status FROM demo_signups WHERE id = $1", [l.id])).rows[0].status).toBe("pending");
   });
 });
+
+// KS_OPS_v17_DEMO_EMAIL_LINK - "Email me the link for my computer" from the demo on a phone.
+describe("demo: email me the link for my computer", () => {
+  it("needs the current link, emails a fresh link to the demo's own address, returns the new token, and is capped", async () => {
+    const r0 = await signUp("pat@phoneco.example", "203.0.113.77");
+    expect(r0.status).toBe(201);
+    const { id, token } = linkFrom(mail.sent[0]!.text);
+    mail.sent.length = 0;
+
+    expect((await request(app()).post("/api/public/demo/email-link").send({ demo_id: id, token: "wrong" })).status).toBe(404);
+    expect((await request(app()).post("/api/public/demo/email-link").send({ demo_id: "not-a-uuid", token })).status).toBe(404);
+    expect(mail.sent).toHaveLength(0);
+
+    const r = await request(app()).post("/api/public/demo/email-link").send({ demo_id: id, token, email: "attacker@evil.example" });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, sent_to: "p***@phoneco.example", message: "Sent to p***@phoneco.example" });
+    expect(mail.sent).toHaveLength(1);
+    expect(mail.sent[0]!.to).toEqual(["pat@phoneco.example"]);
+    const fresh = linkFrom(mail.sent[0]!.text);
+    expect(fresh).toEqual({ id, token: r.body.token });
+    // The old link stops working; the new one opens the same demo.
+    expect((await request(app()).post("/api/public/demo/open").send({ demo_id: id, token })).status).toBe(404);
+    expect((await request(app()).post("/api/public/demo/open").send({ demo_id: id, token: fresh.token })).status).toBe(200);
+
+    // Capped like a repeat sign-up: several sends today -> 429, nothing emailed.
+    await pool.query("UPDATE demo_signups SET link_sends = 6, last_link_sent_at = $2 WHERE id = $1", [id, now]);
+    mail.sent.length = 0;
+    const capped = await request(app()).post("/api/public/demo/email-link").send({ demo_id: id, token: fresh.token });
+    expect(capped.status).toBe(429);
+    expect(capped.body.error).toBe("too_many_links");
+    expect(mail.sent).toHaveLength(0);
+
+    // An ended demo cannot be re-sent.
+    await pool.query("UPDATE demo_signups SET link_sends = 0, expires_at = $2 WHERE id = $1", [id, new Date(now.getTime() - 1000)]);
+    expect((await request(app()).post("/api/public/demo/email-link").send({ demo_id: id, token: fresh.token })).status).toBe(410);
+  });
+});
