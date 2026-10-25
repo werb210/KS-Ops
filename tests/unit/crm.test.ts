@@ -353,7 +353,7 @@ describe("licensee triggers (item 8)", () => {
     expect(o.pendingFor("website_signup", inserted.id)).toEqual({
       source: "website_signup", external_id: inserted.id, stage: "signed_up",
       contact: { name: "Nora North", email: "nora@northwind.example", phone: "+14035550199", title: null },
-      company: { name: "Northwind Capital", website: "https://northwind.example", company_code: "northwind", plan: "growth", seats: 3, status: "pending_payment" },
+      company: { name: "Northwind Capital", website: "https://northwind.example", company_code: "northwind", plan: "growth", seats: 3, status: "pending_payment", support_level: "email" },
       events: [{ type: "signup", at: expect.any(String), summary: expect.stringContaining("Signed up on the Keystone website") }],
     });
   });

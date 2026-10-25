@@ -22,6 +22,8 @@ export type CrmPayload = {
   company?: {
     name?: string | null; website?: string | null; company_code?: string | null; plan?: string | null;
     seats?: number | null; status?: string | null;
+    /** KS_OPS_v16_SUPPORT - the licensee's support level (email | priority | premium | dedicated). */
+    support_level?: string | null;
   };
   note?: string;
   events?: CrmEvent[];
