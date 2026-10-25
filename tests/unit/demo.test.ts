@@ -4,7 +4,7 @@ import { createApp } from "../../src/app.js";
 import { digestEvents, minutes, type DemoEvent } from "../../src/demo/digest.js";
 import { DEMO_BANNER, magicLinkMail, magicLinkUrl, prospectPackageMail, salesCompletedMail, salesUnfinishedMail } from "../../src/demo/emails.js";
 import { demoConfigured } from "../../src/demo/config.js";
-import { demoSignupSchema, parseLenderEmail } from "../../src/routes/demo.js";
+import { demoSignupSchema, maskEmail, parseLenderEmail } from "../../src/routes/demo.js";
 import { makeDeps } from "../helpers.js";
 
 const signup = {
@@ -181,5 +181,22 @@ describe("demo sign-up and server endpoints without a database", () => {
     expect(portal.headers["access-control-allow-origin"]).toBe("https://portal.example");
     const other = await request(app).options("/api/public/demo/open").set("Origin", "https://evil.example").set("Access-Control-Request-Method", "POST");
     expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
+describe("KS_OPS_v17_DEMO_EMAIL_LINK", () => {
+  it("masks the address it confirms on screen", () => {
+    expect(maskEmail("todd@example.com")).toBe("t***@example.com");
+    expect(maskEmail("a@b.co")).toBe("a***@b.co");
+    expect(maskEmail("nonsense")).toBe("your email");
+  });
+
+  it("answers 503 when the demo is not set up", async () => {
+    const saved = process.env.KS_DEMO_OPS_KEY;
+    delete process.env.KS_DEMO_OPS_KEY;
+    const r = await request(createApp(makeDeps())).post("/api/public/demo/email-link").send({ demo_id: signup.id, token: "t" });
+    expect(r.status).toBe(503);
+    expect(r.body.error).toBe("demo_not_configured");
+    if (saved !== undefined) process.env.KS_DEMO_OPS_KEY = saved;
   });
 });

@@ -8,6 +8,11 @@
 //   POST /api/public/demo/open { demo_id, token }   (the magic link: {KS_DEMO_PORTAL_URL}/demo#d=<id>&t=<token>)
 //        -> 200 { server_url, staff_token, client_url, expires_at, name, company, signup_url } | 404 | 410 (expired) | 503
 //        signup_url: the website's sign-up page with this demo's prefill key in the #fragment (no personal data in it)
+//   POST /api/public/demo/email-link { demo_id, token }   (KS_OPS_v17_DEMO_EMAIL_LINK - "Email me the link for my
+//        computer" on a phone: the demo's magic link proves who is asking; a fresh link is emailed to the address the demo
+//        was asked for, the same email and link rotation as a repeat sign-up, capped like it)
+//        -> 200 { ok, sent_to: "t***@example.com", token, message } (token: the new link's token, so the phone keeps a
+//           working link) | 404 | 410 | 429 | 503
 //   POST /api/public/demo/prefill { demo_id, key }   (key: the prefill key from signup_url / the demo emails, or the
 //        magic-link token) -> 200 { name, email, company, phone } for the website's sign-up and contact forms | 404
 // From the demo server (X-KS-Ops-Key = KS_DEMO_OPS_KEY):
@@ -57,6 +62,13 @@ export const demoSignupSchema = z.object({
 });
 
 const NAME_OK = /\p{L}/u;
+
+/** KS_OPS_v17_DEMO_EMAIL_LINK - "t***@example.com": enough for the person to recognise their address, no more. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return "your email";
+  return `${email[0]}***${email.slice(at)}`;
+}
 
 /**
  * Always emails the link. Texts it as well only when DEMO_SMS_ENABLED=true (off by default) and a phone was given
@@ -188,6 +200,41 @@ export function demoPublicRouter(deps: Deps): Router {
         company: s.company,
         signup_url: signupLinkFor(s.id),
       });
+    }),
+  );
+
+  // KS_OPS_v17_DEMO_EMAIL_LINK - on a phone the demo offers "Email me the link for my computer". The current magic link
+  // proves who is asking; the link is re-sent the way a repeat sign-up re-sends it (a fresh token, the same email), only
+  // ever to the address the demo was asked for, and capped like it (per address per day, and per caller address).
+  router.post(
+    "/email-link",
+    limiter(5, 60 * 60_000, { error: "too_many_requests", message: "We've sent your link a few times already. Please check your inbox (and junk folder)." }),
+    h(async (req, res) => {
+      res.setHeader("Cache-Control", "no-store");
+      if (!demoConfigured()) return res.status(503).json(DEMO_NOT_CONFIGURED);
+      const id = String(req.body?.demo_id ?? "");
+      const s = UUID_RE.test(id) ? await repo.getSignup(deps.db, id) : null;
+      if (!s || !matchesHash(req.body?.token, s.token_hash)) {
+        return res.status(404).json({ error: "demo_link_invalid", message: "This demo link is not valid. Ask for a new one on the website." });
+      }
+      const now = deps.now();
+      if (s.status === "wiped" || new Date(s.expires_at).getTime() <= now.getTime()) {
+        return res.status(410).json({ error: "demo_expired", message: "This demo has ended. You can start a new one on the website." });
+      }
+      const resentToday = s.last_link_sent_at && now.getTime() - new Date(s.last_link_sent_at).getTime() < 86_400_000;
+      if (s.link_sends >= MAX_LINK_SENDS && resentToday) {
+        return res.status(429).json({ error: "too_many_links", message: "We've already sent your demo link several times today. Please check your inbox (and junk folder)." });
+      }
+      const token = newSecret(24);
+      const updated = (await repo.replaceToken(deps.db, s.id, sha256Hex(token), now)) ?? s;
+      const url = magicLinkUrl(demoPortalUrl(), s.id, token);
+      const sentTo = maskEmail(updated.email);
+      const sent = await sendQuietly(deps.mailer, magicLinkMail(updated, url, demoSessionDays(), signupLinkFor(s.id)), "demo link (for a computer)");
+      if (!sent) {
+        // The link was rotated all the same: the phone gets the new token so it keeps a working link.
+        return res.status(503).json({ error: "email_failed", message: "We couldn't send the email just now. Please try again in a minute.", token });
+      }
+      return res.json({ ok: true, sent_to: sentTo, token, message: `Sent to ${sentTo}` });
     }),
   );
 
