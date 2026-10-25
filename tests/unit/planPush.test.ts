@@ -24,9 +24,20 @@ describe("plan push", () => {
     expect(url).toBe("https://ks-northwind.example/api/plan");
     expect(init.method).toBe("PUT");
     expect((init.headers as Record<string, string>)["X-KS-Ops-Key"]).toBe("ksops_abc");
-    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false }, beta_features: [] });
+    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false }, beta_features: [],
+      branding: { primary_color: "", accent_color: "", background_color: "", font_family: "", logo_url: "" } });
     expect(d.calls.some((c) => /plan_sync_status = 'synced'/.test(c.sql))).toBe(true);
     expect(d.calls.some((c) => /UPDATE plan_changes SET status = 'pushed'/.test(c.sql))).toBe(true);
+  });
+
+  it("sends the sign-up branding with the plan (KS_OPS_v15_BRAND_SYNC)", async () => {
+    const row = keyed({ primary_color: "#7A1F3D", accent_color: "#0E6655", background_color: null, font_family: "Lato", logo_url: "https://ops.example/api/public/logos/abcdefghijklmnop" });
+    const f = vi.fn(async () => jsonResponse({}));
+    await pushPlan({ db: db(row), fetch: f as unknown as typeof fetch, now: () => NOW }, row.id);
+    const [, init] = (f.mock.calls[0] as unknown) as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).branding).toEqual({
+      primary_color: "#7A1F3D", accent_color: "#0E6655", background_color: "", font_family: "Lato", logo_url: "https://ops.example/api/public/logos/abcdefghijklmnop",
+    });
   });
 
   it("on failure marks pending_sync and schedules a retry in 5 minutes", async () => {

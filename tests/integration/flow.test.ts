@@ -146,7 +146,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
   it("PATCH plan pushes to the licensee and records the change; failures retry", async () => {
     const ok = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "growth", extra_storage_blocks: 1 });
     expect(ok.body.plan_push).toEqual({ ok: true });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [] });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [], branding: expect.any(Object) });
 
     remote.up = false;
     const fail = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "pro" });
@@ -159,7 +159,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     now = new Date(now.getTime() + 6 * 60_000);
     // Northwind (from the sign-up tests) is also waiting: its status changes are queued but it has no ops key yet.
     expect(await retryPendingPlanPushes(deps)).toEqual({ tried: 2, pushed: 1 });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [] });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [], branding: expect.any(Object) });
     const changes = (await pool.query("SELECT status FROM plan_changes WHERE licensee_id = $1", [id])).rows;
     expect(changes.map((c) => c.status)).toEqual(["pushed", "pushed"]);
   });
@@ -524,5 +524,26 @@ describe("bank_connect add-on", () => {
     expect(off.body.plan_push).toEqual({ ok: true });
     expect(remote.puts.at(-1)!.body.addons).toEqual({ bank_connect: false });
     expect((await pool.query("SELECT addons FROM licensees WHERE id = $1", [id])).rows[0].addons).toEqual({ bank_connect: false });
+  });
+});
+
+// KS_OPS_v15_BRAND_SYNC - the branding chosen at sign-up (or changed here by staff) goes to the licensee's server.
+describe("branding push", () => {
+  it("sends colours, font and logo with every push, and pushes when only branding changes", async () => {
+    const res = await request(app()).post("/api/ops/licensees").set(staff()).send({
+      company_name: "Brand Test", legal_name: "Brand Test Inc.", company_code: "brand-test", contact_name: "Bea",
+      contact_email: "bea@brand.example", contact_phone: "403-555-0178", plan: "starter", seats: 1,
+      server_url: "https://ks-brand.azurewebsites.net", status: "active", primary_color: "#7A1F3D", font_family: "Lato",
+    });
+    expect(res.status).toBe(201);
+    const id = res.body.licensee.id;
+    const patch = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ background_color: "#FFFAF0" });
+    expect(patch.body.plan_push).toEqual({ ok: true });
+    expect(remote.puts.at(-1)).toMatchObject({
+      url: "https://ks-brand.azurewebsites.net/api/plan",
+      body: { plan: "starter", branding: { primary_color: "#7A1F3D", accent_color: "", background_color: "#FFFAF0", font_family: "Lato", logo_url: "" } },
+    });
+    const other = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ contact_name: "Bea B" });
+    expect(other.body.plan_push).toBeNull();
   });
 });
