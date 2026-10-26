@@ -67,17 +67,17 @@ const httpsUrl = z
   .transform((v) => (v === "" ? null : v));
 
 const plansField = z
-  .array(z.enum(PLANS, { errorMap: () => ({ message: `Plans must be from: ${PLANS.join(", ")}.` }) }))
+  .array(z.enum(PLANS, { error: `Plans must be from: ${PLANS.join(", ")}.` }))
   .max(PLANS.length)
   .transform((v) => [...new Set(v)]);
 
 export const betaCreateSchema = z.object({
   key: z
-    .string({ required_error: "Enter a key." })
+    .string({ error: (iss) => (iss.input === undefined ? "Enter a key." : undefined) })
     .trim()
     .toLowerCase()
     .regex(BETA_KEY_RE, "2 to 63 lowercase letters, numbers and underscores, starting with a letter."),
-  name: z.string({ required_error: "Enter a name." }).trim().min(1, "Enter a name.").max(120),
+  name: z.string({ error: (iss) => (iss.input === undefined ? "Enter a name." : undefined) }).trim().min(1, "Enter a name.").max(120),
   description: z.string().trim().max(2000).default(""),
   status: z.enum(BETA_STATUSES).default("private_beta"),
   plans: plansField.default([]),
@@ -96,7 +96,7 @@ export const betaUpdateSchema = betaCreateSchema.omit({ key: true }).partial().e
 
 export const betaFeedbackSchema = z.object({
   feature_key: z.string().trim().toLowerCase().regex(BETA_KEY_RE, "Unknown feature."),
-  message: z.string({ required_error: "Write your feedback." }).trim().min(1, "Write your feedback.").max(5000),
+  message: z.string({ error: (iss) => (iss.input === undefined ? "Write your feedback." : undefined) }).trim().min(1, "Write your feedback.").max(5000),
   rating: z.coerce.number().int().min(1).max(5).optional().nullable(),
   author_name: z.string().trim().max(200).optional().nullable(),
   author_email: z.string().trim().max(200).optional().nullable(),

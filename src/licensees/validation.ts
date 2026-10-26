@@ -97,7 +97,7 @@ function addressCheck(v: Record<string, unknown>, ctx: z.RefinementCtx, legacyRe
 
 const text = (label: string, min: number, max: number) =>
   z
-    .string({ required_error: `${label} is required.`, invalid_type_error: `${label} is required.` })
+    .string({ error: (iss) => (iss.input === undefined ? `${label} is required.` : `${label} is required.`) })
     .trim()
     .min(min, min <= 1 ? `${label} is required.` : `${label} must be at least ${min} characters.`)
     .max(max, `${label} must be ${max} characters or fewer.`);
@@ -109,7 +109,7 @@ const optionalText = (label: string, max: number) =>
   );
 
 export const phoneSchema = z
-  .string({ required_error: "Phone number is required.", invalid_type_error: "Phone number is required." })
+  .string({ error: (iss) => (iss.input === undefined ? "Phone number is required." : "Phone number is required.") })
   .trim()
   .refine((v) => {
     const digits = v.replace(/\D/g, "");
@@ -117,7 +117,7 @@ export const phoneSchema = z
   }, "Enter a phone number with area code, for example (403) 555-0123.");
 
 const emailSchema = z
-  .string({ required_error: "Email is required.", invalid_type_error: "Email is required." })
+  .string({ error: (iss) => (iss.input === undefined ? "Email is required." : "Email is required.") })
   .trim()
   .toLowerCase()
   .email("Enter a valid email address.")
@@ -214,31 +214,31 @@ const colorSchema = z.preprocess(
 );
 
 const codeSchema = z
-  .string({ required_error: "Company code is required.", invalid_type_error: "Company code is required." })
+  .string({ error: (iss) => (iss.input === undefined ? "Company code is required." : "Company code is required.") })
   .transform(normalizeCode)
   .superRefine((code, ctx) => {
     const p = codeProblem(code);
     if (p) ctx.addIssue({ code: z.ZodIssueCode.custom, message: CODE_MESSAGES[p] });
   });
 
-const planSchema = z.enum(PLANS, { errorMap: () => ({ message: "Choose Starter, Growth or Pro." }) });
-const intervalSchema = z.enum(BILLING_INTERVALS, { errorMap: () => ({ message: "Choose annual or monthly billing." }) });
+const planSchema = z.enum(PLANS, { error: "Choose Starter, Growth or Pro." });
+const intervalSchema = z.enum(BILLING_INTERVALS, { error: "Choose annual or monthly billing." });
 const supportSchema = z.enum(SUPPORT_LEVELS, {
-  errorMap: () => ({ message: "Choose Email, Priority, Premium or Dedicated support." }),
+  error: "Choose Email, Priority, Premium or Dedicated support.",
 });
 const paymentMethodSchema = z.enum(PAYMENT_METHODS, {
-  errorMap: () => ({ message: "Choose bank debit or credit card." }),
+  error: "Choose bank debit or credit card.",
 });
 
 const seatsSchema = z.coerce
-  .number({ invalid_type_error: "Seats must be a whole number." })
+  .number({ error: (iss) => (iss.input === undefined ? undefined : "Seats must be a whole number.") })
   .int("Seats must be a whole number.")
   .min(1, "You need at least 1 seat.")
   .max(MAX_SEATS, `For more than ${MAX_SEATS.toLocaleString("en-CA")} seats, please contact us.`);
 
 /** Extra 50 GB storage blocks; optional on sign-up (none when left out). */
 const storageBlocksSchema = z.coerce
-  .number({ invalid_type_error: "Extra storage must be a whole number of 50 GB blocks." })
+  .number({ error: (iss) => (iss.input === undefined ? undefined : "Extra storage must be a whole number of 50 GB blocks.") })
   .int("Extra storage must be a whole number of 50 GB blocks.")
   .min(0, "Extra storage cannot be negative.")
   .max(MAX_STORAGE_BLOCKS, `Extra storage is limited to ${MAX_STORAGE_BLOCKS.toLocaleString("en-CA")} blocks.`);
@@ -269,7 +269,7 @@ function minSeatsCheck(plan: string | undefined, seats: number | undefined, ctx:
 
 const region = z.preprocess(
   (v) => (v === null || v === undefined ? v : String(v).trim().toUpperCase()),
-  z.string({ required_error: "Province or state is required.", invalid_type_error: "Province or state is required." })
+  z.string({ error: (iss) => (iss.input === undefined ? "Province or state is required." : "Province or state is required.") })
     .min(2, "Province or state is required."),
 );
 
@@ -278,7 +278,7 @@ export const signupSchema = z
     company_name: text("Company name", 2, 120),
     legal_name: text("Legal name", 2, 160),
     company_code: codeSchema,
-    country: z.enum(["CA", "US"], { errorMap: () => ({ message: "Choose Canada or the United States." }) }),
+    country: z.enum(["CA", "US"], { error: "Choose Canada or the United States." }),
     province_state: region,
     // Either the address in parts (address_line1, city, postal_code required) or, from older clients, mailing_address.
     mailing_address: optionalText("Mailing address", 500),
@@ -311,8 +311,8 @@ export const signupSchema = z
       .optional()
       .nullable(),
     assistant_name: optionalText("Assistant name", 40),
-    accept_terms: z.literal(true, { errorMap: () => ({ message: "Please accept the terms of service." }) }),
-    accept_privacy: z.literal(true, { errorMap: () => ({ message: "Please accept the privacy policy." }) }),
+    accept_terms: z.literal(true, { error: "Please accept the terms of service." }),
+    accept_privacy: z.literal(true, { error: "Please accept the privacy policy." }),
     turnstile_token: z.string().optional(),
     website_url: z.any().optional(),
   })
@@ -368,7 +368,7 @@ export const staffCreateSchema = z
     billing_interval: intervalSchema.optional(),
     support_level: supportSchema.default("email"),
     seats: seatsSchema,
-    country: z.enum(["CA", "US"], { errorMap: () => ({ message: "Choose Canada or the United States." }) }).default("CA"),
+    country: z.enum(["CA", "US"], { error: "Choose Canada or the United States." }).default("CA"),
     province_state: z.preprocess((v) => (v ? String(v).trim().toUpperCase() : undefined), z.string().optional()),
     mailing_address: optionalText("Mailing address", 500),
     address_line1: optionalText("Street address", 200),
@@ -422,7 +422,7 @@ export const staffPatchSchema = z
     city: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(120).nullable()),
     postal_code: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(20).nullable()),
     website: nullableUrl("Website"),
-    status: z.enum(STATUSES, { errorMap: () => ({ message: "Unknown status." }) }),
+    status: z.enum(STATUSES, { error: "Unknown status." }),
     plan: planSchema,
     billing_interval: intervalSchema,
     billing: intervalSchema,
@@ -442,7 +442,7 @@ export const staffPatchSchema = z
     onboarding_fee_paid: z.boolean(),
     // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.
     addons: z
-      .object({ bank_connect: z.boolean({ invalid_type_error: "bank_connect must be true or false." }) })
+      .object({ bank_connect: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "bank_connect must be true or false.") }) })
       .partial()
       .strict(),
   })
