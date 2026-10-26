@@ -14,6 +14,11 @@ import { configuredEnv, licensee, LICENSEE_ID, machine } from "./provisioningFak
 
 const WORKFLOW_STEPS = PROVISION_STEPS.filter((s) => s.where === "workflow").map((s) => s.key);
 const okExecutors = (): Record<string, Executor> => ({
+  twilio_account: vi.fn(async () => ({ kind: "done" as const })), // KS_OPS_TWILIO_AUTO_v1
+  twilio_address: vi.fn(async () => ({ kind: "done" as const })),
+  twilio_voice: vi.fn(async () => ({ kind: "done" as const })),
+  twilio_bundle: vi.fn(async () => ({ kind: "done" as const })),
+  texting_registration: vi.fn(async () => ({ kind: "done" as const })),
   health: vi.fn(async () => ({ kind: "done" as const })),
   configure: vi.fn(async () => ({ kind: "done" as const })),
   admin_user: vi.fn(async () => ({ kind: "done" as const, output: { created: true } })),
@@ -57,7 +62,8 @@ describe("status token", () => {
 describe("dry-run plan", () => {
   it("lists every provisioning change with the script's names, in Canada Central", () => {
     const plan = describePlan("provision", "northwind");
-    expect(plan[0]).toContain("scripts/provision-licensee.sh northwind canadacentral");
+    expect(plan[0]).toMatch(/^twilio_account: .*Keystone - <company> \(northwind\)/); // KS_OPS_TWILIO_AUTO_v1
+    expect(plan.find((l) => l.startsWith("azure_resources:"))).toContain("scripts/provision-licensee.sh northwind canadacentral");
     expect(plan.join("\n")).toContain("ks-northwind-pg");
     expect(plan.join("\n")).toContain("ks-northwind-deploy");
     expect(plan.join("\n")).toContain(JSON.stringify(registryEntry("northwind")));
@@ -74,7 +80,7 @@ describe("dry-run plan", () => {
 describe("setup checklist", () => {
   it("lists what KS-Ops lacks and is empty once configured", () => {
     const missing = serviceSetupMissing("provision", { NODE_ENV: "test" });
-    expect(missing.map((m) => m.key)).toEqual(["KS_PROVISION_GITHUB_TOKEN", "OPS_ENCRYPTION_KEY", "KS_OPS_PUBLIC_URL"]);
+    expect(missing.map((m) => m.key)).toEqual(["KS_PROVISION_GITHUB_TOKEN", "OPS_ENCRYPTION_KEY", "KS_OPS_PUBLIC_URL", "KS_TWILIO_ACCOUNT_SID"]);
     expect(serviceSetupMissing("provision", configuredEnv())).toEqual([]);
     expect(serviceSetupMissing("teardown", configuredEnv()).map((m) => m.key)).toEqual(["KS_TEARDOWN_ENABLED"]);
     expect(serviceSetupMissing("teardown", configuredEnv({ KS_TEARDOWN_ENABLED: "true" }))).toEqual([]);
@@ -184,6 +190,7 @@ describe("provisioning state machine", () => {
     await advanceRun(m.deps, run.id);
     const r1 = (await m.store.getRun(run.id))!;
     await handleCallback(m.deps, r1, { step: "azure_resources", status: "done", output: {} });
+    await handleCallback(m.deps, r1, { step: "twilio_settings", status: "done" });
     await handleCallback(m.deps, r1, { step: "secrets", status: "done" });
     await handleCallback(m.deps, r1, { step: "github_environments", status: "failed", message: "GitHub create environment: 403" });
     expect((await m.store.getRun(run.id))!.status).toBe("failed");
@@ -254,7 +261,9 @@ describe("provisioning state machine", () => {
     const during = await publicStatus(m.deps, LICENSEE_ID);
     expect(during.state).toBe("setting_up");
     expect(JSON.stringify(during)).not.toMatch(/azure|github|token/i);
-    expect((during as { steps: Array<{ label: string; status: string }> }).steps[0]).toEqual({ label: "Creating your servers and database", status: "in_progress" });
+    const steps = (during as { steps: Array<{ label: string; status: string }> }).steps;
+    expect(steps[0]).toEqual({ label: "Setting up your phone system", status: "done" }); // KS_OPS_TWILIO_AUTO_v1
+    expect(steps[1]).toEqual({ label: "Creating your servers and database", status: "in_progress" });
     await workflowReportsAllDone(m, run.id);
     m.state.l = { ...m.state.l, status: "active" };
     await advanceRun(m.deps, run.id);

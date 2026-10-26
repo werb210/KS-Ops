@@ -213,6 +213,52 @@ const colorSchema = z.preprocess(
   z.string().regex(/^#[0-9a-fA-F]{6}$/, "Colour must look like #1A2B3C.").optional(),
 );
 
+// KS_OPS_TWILIO_AUTO_v1 - what texting registration (toll-free verification, US A2P 10DLC) needs from the business.
+export const BUSINESS_TYPES = ["corporation", "llc", "partnership", "sole_proprietor", "non_profit", "cooperative"] as const;
+export type BusinessType = (typeof BUSINESS_TYPES)[number];
+export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
+  corporation: "Corporation",
+  llc: "Limited liability company (LLC)",
+  partnership: "Partnership",
+  sole_proprietor: "Sole proprietorship",
+  non_profit: "Non-profit",
+  cooperative: "Co-operative",
+};
+
+/** A Canadian business number (9 digits, optionally with its program account, e.g. 123456789RC0001) or a US EIN
+ *  (12-3456789), in its usual form; null when it does not fit the country. */
+export function normalizeBusinessNumber(country: string | undefined, raw: unknown): string | null {
+  const v = String(raw ?? "").toUpperCase().replace(/[\s-]/g, "");
+  if (country === "US") return /^\d{9}$/.test(v) ? `${v.slice(0, 2)}-${v.slice(2)}` : null;
+  return /^\d{9}([A-Z]{2}\d{4})?$/.test(v) ? v : null;
+}
+
+export const BUSINESS_NUMBER_MESSAGES = {
+  CA: "Enter your 9-digit CRA business number, for example 123456789 or 123456789RC0001.",
+  US: "Enter your 9-digit EIN, for example 12-3456789.",
+} as const;
+
+const businessNumberText = optionalText("Business number", 30);
+const businessTypeSchema = z.preprocess(
+  (v) => (v === null || v === undefined || String(v).trim() === "" ? undefined : String(v).trim().toLowerCase()),
+  z.enum(BUSINESS_TYPES, { error: "Choose the kind of business." }).optional(),
+);
+const contactTitleSchema = optionalText("Job title", 80);
+
+function businessNumberCheck(v: Record<string, unknown>, ctx: z.RefinementCtx) {
+  if (v.business_number === undefined || v.business_number === null || String(v.business_number).trim() === "") return;
+  const country = String(v.country ?? "CA").toUpperCase() === "US" ? "US" : "CA";
+  if (!normalizeBusinessNumber(country, v.business_number)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["business_number"], message: BUSINESS_NUMBER_MESSAGES[country] });
+  }
+}
+
+/** Writes the business number in its usual form for the country. */
+function withBusinessNumber<T extends { country?: string | null; business_number?: string | null }>(v: T): T {
+  if (!v.business_number) return v;
+  return { ...v, business_number: normalizeBusinessNumber(v.country === "US" ? "US" : "CA", v.business_number) ?? v.business_number };
+}
+
 const codeSchema = z
   .string({ error: (iss) => (iss.input === undefined ? "Company code is required." : "Company code is required.") })
   .transform(normalizeCode)
@@ -287,6 +333,9 @@ export const signupSchema = z
     city: optionalText("City", 120),
     postal_code: optionalText("Postal or ZIP code", 20),
     website: urlSchema("Website"),
+    business_number: businessNumberText, // KS_OPS_TWILIO_AUTO_v1
+    business_type: businessTypeSchema,
+    contact_title: contactTitleSchema,
     contact_name: text("Contact name", 2, 120),
     contact_email: emailSchema,
     contact_phone: phoneSchema,
@@ -320,8 +369,9 @@ export const signupSchema = z
     regionCheck(v.country, v.province_state, ctx);
     minSeatsCheck(v.plan, v.seats, ctx);
     addressCheck(v, ctx, true);
+    businessNumberCheck(v, ctx);
   })
-  .transform((v) => withAddress(v));
+  .transform((v) => withBusinessNumber(withAddress(v)));
 export type SignupInput = z.infer<typeof signupSchema>;
 
 /** Normalises the postal code and writes mailing_address from the parts when the parts were given. */
@@ -350,6 +400,7 @@ export function crossFieldErrors(raw: Record<string, unknown>): Record<string, s
   } as unknown as z.RefinementCtx;
   if (region) regionCheck(country, region, ctx);
   if (hasAddressParts(raw)) addressCheck({ ...raw, country }, ctx, false);
+  businessNumberCheck({ ...raw, country }, ctx);
   if (Number.isInteger(seats) && (PLANS as readonly string[]).includes(plan)) minSeatsCheck(plan, seats, ctx);
   return errors;
 }
@@ -376,6 +427,9 @@ export const staffCreateSchema = z
     city: optionalText("City", 120),
     postal_code: optionalText("Postal or ZIP code", 20),
     website: urlSchema("Website"),
+    business_number: businessNumberText, // KS_OPS_TWILIO_AUTO_v1
+    business_type: businessTypeSchema,
+    contact_title: contactTitleSchema,
     server_url: appUrlSchema("Server address", { serverHosts: true }),
     client_url: appUrlSchema("Client app address"),
     portal_url: appUrlSchema("Staff portal address"),
@@ -393,11 +447,12 @@ export const staffCreateSchema = z
     regionCheck(v.country, v.province_state, ctx);
     minSeatsCheck(v.plan, v.seats, ctx);
     addressCheck(v, ctx, false);
+    businessNumberCheck(v, ctx);
   })
-  .transform(({ billing, billing_interval, ...rest }) => withAddress({
+  .transform(({ billing, billing_interval, ...rest }) => withBusinessNumber(withAddress({
     ...rest,
     billing_interval: billing_interval ?? billing ?? "monthly",
-  }));
+  })));
 export type StaffCreateInput = z.infer<typeof staffCreateSchema>;
 
 const nullableUrl = (label: string) =>
@@ -422,6 +477,10 @@ export const staffPatchSchema = z
     city: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(120).nullable()),
     postal_code: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(20).nullable()),
     website: nullableUrl("Website"),
+    // KS_OPS_TWILIO_AUTO_v1 - checked against the country in the PATCH handler (the country may not be in the body).
+    business_number: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(30).nullable()),
+    business_type: z.preprocess((v) => (v === "" ? null : typeof v === "string" ? v.trim().toLowerCase() : v), z.enum(BUSINESS_TYPES, { error: "Choose the kind of business." }).nullable()),
+    contact_title: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(80).nullable()),
     status: z.enum(STATUSES, { error: "Unknown status." }),
     plan: planSchema,
     billing_interval: intervalSchema,

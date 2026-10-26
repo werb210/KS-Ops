@@ -25,6 +25,7 @@ import { publicBetaRouter } from "./routes/publicBeta.js";
 import { opsProvisioningRouter } from "./routes/opsProvisioning.js"; // KS_OPS_AUTO_PROVISION_v1
 import { provisioningPageRouter } from "./routes/opsProvisioningPage.js";
 import { provisioningCallbackRouter, publicProvisioningRouter } from "./routes/provisioningCallback.js";
+import { textingOptInRouter } from "./routes/textingOptIn.js"; // KS_OPS_TWILIO_AUTO_v1
 
 /** CORS for a list of allowed origins read from env vars at request time. */
 function corsFor(...envNames: string[]) {
@@ -67,6 +68,7 @@ export function createApp(deps: Deps) {
   app.use("/api/public/demo/presenter", corsFor("KS_DEMO_PORTAL_URL"), presenterPublicRouter());
   app.use("/api/public/demo", corsFor("PUBLIC_SITE_URL", "KS_DEMO_PORTAL_URL"), demoPublicRouter(deps));
   app.use("/api/demo", demoOpsRouter(deps));
+  app.use("/api/public/texting-opt-in", textingOptInRouter(deps));
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps), publicBetaRouter(deps), publicProvisioningRouter(deps));
   // KS_OPS_AUTO_PROVISION_v1 - the provisioning workflow in GitHub Actions reports back with its run's one-off token.
   app.use("/api/provisioning/callback", provisioningCallbackRouter(deps));

@@ -21,12 +21,16 @@ import { autoProvisionEnabled, callbackBaseUrl, githubTokenConfigured, serviceSe
 import { SERVICE_EXECUTORS, type Executor, type StepOutcome } from "./executors.js";
 import { describePlan, stepDef, stepsFor, WORKFLOW_FILES, type RunKind } from "./steps.js";
 import type { ProvisioningStore, RunRow, StepRow } from "./store.js";
+import type { TwilioStore } from "../twilio/store.js";
+import type { TwilioHttp } from "../twilio/http.js";
+import { serverSettings } from "../twilio/account.js";
+import { twilioSummary } from "../twilio/view.js";
 
 export const WORKFLOW_TIMEOUT_MS = 4 * 60 * 60_000;
 export const CALLBACK_TOKEN_TTL_MS = WORKFLOW_TIMEOUT_MS + 30 * 60_000;
 const SETUP_RECHECK_MS = 30 * 60_000;
 const WORKFLOW_SETUP_RECHECK_MS = 6 * 60 * 60_000;
-const MAX_STEPS_PER_PASS = 12;
+const MAX_STEPS_PER_PASS = 24;
 
 export type MachineDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now"> & {
   store: ProvisioningStore;
@@ -34,6 +38,8 @@ export type MachineDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now"> & {
   dispatch: (file: string, inputs: Record<string, string>) => Promise<void>;
   env?: NodeJS.ProcessEnv;
   executors?: Record<string, Executor>;
+  twilioStore?: TwilioStore; // KS_OPS_TWILIO_AUTO_v1 - tests replace them
+  twilioHttp?: TwilioHttp;
 };
 
 const isFinished = (s: StepRow) => s.status === "done" || s.status === "manual";
@@ -504,6 +510,21 @@ export async function opsKeyForWorkflow(deps: MachineDeps, run: RunRow): Promise
   return { ok: true, ops_key: key };
 }
 
+/** KS_OPS_TWILIO_AUTO_v1 - the licensee's Twilio settings for its KS-server, handed only to the workflow while its
+ *  twilio_settings step runs (like the ops key). The workflow writes them to the App Service and masks them. */
+export async function twilioSettingsForWorkflow(deps: MachineDeps, run: RunRow): Promise<{ ok: true; settings: Record<string, string> } | { ok: false; status: number; error: string }> {
+  if (run.dry_run) return { ok: false, status: 409, error: "dry_run" };
+  const step = (await deps.store.steps(run.id)).find((s) => s.step === "twilio_settings");
+  if (!step || step.status !== "running") return { ok: false, status: 409, error: "not_now" };
+  const l = await getLicensee(deps.db, run.licensee_id);
+  if (!l) return { ok: false, status: 404, error: "not_found" };
+  const r = await serverSettings(deps, l);
+  if (!r.ok) return { ok: false, status: 409, error: r.error };
+  await audit(deps.db, "ks-ops provisioning", "licensee.twilio_settings_handed_over", run.licensee_id, { run_id: run.id, names: Object.keys(r.settings) });
+  await deps.store.log(run.id, "twilio_settings", "info", `Twilio settings handed to the workflow: ${Object.keys(r.settings).join(", ")}`);
+  return r;
+}
+
 /** What the workflow needs to know about the licensee (nothing secret). */
 export async function workflowContext(deps: MachineDeps, run: RunRow) {
   const l = await getLicensee(deps.db, run.licensee_id);
@@ -561,7 +582,7 @@ export async function publicStatus(deps: Pick<MachineDeps, "db" | "store">, lice
   return { ...base, state: (attention ? "needs_attention" : "setting_up") as PublicState, steps: labels };
 }
 
-export async function runView(deps: Pick<MachineDeps, "db" | "store">, run: RunRow, logLimit = 200) {
+export async function runView(deps: Pick<MachineDeps, "db" | "store" | "fetch" | "env" | "twilioStore" | "twilioHttp">, run: RunRow, logLimit = 200) {
   const [steps, logs, l] = await Promise.all([deps.store.steps(run.id), deps.store.logs(run.id, logLimit), getLicensee(deps.db, run.licensee_id)]);
   const { callback_token_hash, ...rest } = run;
   return {
@@ -570,6 +591,8 @@ export async function runView(deps: Pick<MachineDeps, "db" | "store">, run: RunR
     licensee: l ? { id: l.id, company_name: l.company_name, company_code: l.company_code, status: l.status, server_url: l.server_url, portal_url: l.portal_url, client_url: l.client_url } : null,
     steps: steps.map((s) => ({ ...s, label: stepDef(run.kind, s.step)?.label ?? s.step, where: stepDef(run.kind, s.step)?.where ?? "service" })),
     logs,
+    // KS_OPS_TWILIO_AUTO_v1 - the sub-account and texting registration, in plain words.
+    twilio: run.kind === "provision" && !run.dry_run ? await twilioSummary(deps as MachineDeps, run.licensee_id) : null,
   };
 }
 

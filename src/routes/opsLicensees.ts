@@ -12,7 +12,7 @@ import {
   staffView, type LicenseeRow,
 } from "../licensees/repo.js";
 import {
-  composeMailingAddress, crossFieldErrors, normalizePostal, POSTAL_MESSAGES, staffCreateSchema, staffPatchSchema, STATUSES,
+  BUSINESS_NUMBER_MESSAGES, composeMailingAddress, crossFieldErrors, normalizeBusinessNumber, normalizePostal, POSTAL_MESSAGES, staffCreateSchema, staffPatchSchema, STATUSES,
 } from "../licensees/validation.js";
 import { MIN_SEATS, PLAN_NAMES, dollars, monthlyCharge, onboardingFeeCents } from "../pricing.js";
 import { addonsOf, BRAND_PUSH_FIELDS, isServiceStatus, pushPlan, recordPlanChange } from "../sync/planPush.js";
@@ -29,6 +29,7 @@ const PATCH_COLUMNS = [
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
   "onboarding_fee_paid", "payment_method",
   "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
+  "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
 ] as const;
 
 const ADDRESS_PARTS = ["address_line1", "address_line2", "city", "postal_code", "province_state", "country"] as const;
@@ -208,6 +209,13 @@ export function opsLicenseesRouter(deps: Deps): Router {
           merged.postal_code = postal;
         }
         if (v.mailing_address === undefined) v.mailing_address = composeMailingAddress(merged);
+      }
+      // KS_OPS_TWILIO_AUTO_v1 - the business number is checked against the (possibly new) country and stored in its usual form.
+      if (typeof v.business_number === "string") {
+        const country = String(v.country ?? l.country ?? "CA").toUpperCase() === "US" ? "US" : "CA";
+        const bn = normalizeBusinessNumber(country, v.business_number);
+        if (!bn) return res.status(400).json({ errors: { business_number: BUSINESS_NUMBER_MESSAGES[country] } });
+        v.business_number = bn;
       }
       const changed = PATCH_COLUMNS.filter((c) => v[c] !== undefined && v[c] !== (l as Record<string, unknown>)[c]);
       // KS_OPS_BANK_CONNECT_ADDON - add-ons are merged into the stored set; only real changes count.

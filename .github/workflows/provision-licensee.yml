@@ -10,6 +10,8 @@ name: Provision licensee
 #   variable  KS_PROVISION_APP_ID + secret KS_PROVISION_APP_PRIVATE_KEY  GitHub App for the four app repositories
 #             (or secret KS_PROVISION_GH_TOKEN, a fine-grained token)
 #   secret    OPENAI_API_KEY                                          written to the licensee's KS-server and KS-Agent
+# The licensee's Twilio settings are not stored here: the twilio_settings step fetches them from KS-Ops with the run's
+# one-off token, masks them, and writes them to the licensee's KS-server (KS_OPS_TWILIO_AUTO_v1).
 # Anything missing is reported to KS-Ops ("waiting for manual setup") and nothing is changed.
 on:
   workflow_dispatch:
@@ -96,7 +98,7 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - id: runner
-        name: Provision (Azure resources, secrets, GitHub environments, registry, deploys)
+        name: Provision (Azure resources, Twilio settings, secrets, GitHub environments, registry, deploys)
         env:
           MODE: provision
           RUN_ID: ${{ inputs.run_id }}

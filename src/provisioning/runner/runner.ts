@@ -199,6 +199,21 @@ export async function azureResources(deps: RunnerDeps, cfg: RunnerConfig, ctx: C
   return output;
 }
 
+/** KS_OPS_TWILIO_AUTO_v1 - writes the licensee's Twilio settings (from KS-Ops, masked here) to its KS-server app. */
+export async function twilioSettings(deps: RunnerDeps, cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
+  const n = resourceNames(ctx.code);
+  const r = await ops(deps, cfg, "POST", "/twilio-settings");
+  const settings = (r?.settings ?? {}) as Record<string, string>;
+  const names = Object.keys(settings).filter((k) => /^(TWILIO_[A-Z_]+|KS_SERVER_URL)$/.test(k) && settings[k]);
+  for (const k of ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_API_KEY", "TWILIO_API_SECRET", "TWILIO_VOICE_APP_SID", "TWILIO_VERIFY_SERVICE_SID"]) {
+    if (!settings[k]) throw new StepError(`KS-Ops did not hand over ${k}`);
+  }
+  for (const k of names) if (/TOKEN|SECRET/.test(k)) mask(deps, settings[k]);
+  await az(deps, ["webapp", "config", "appsettings", "set", "-g", n.resourceGroup, "-n", n.serverApp, "--settings", ...names.map((k) => `${k}=${settings[k]}`), "-o", "none"]);
+  deps.log(`${n.serverApp}: Twilio settings written (${names.join(", ")})`);
+  return {};
+}
+
 export async function secrets(deps: RunnerDeps, _cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
   const n = resourceNames(ctx.code);
   const names = async (app: string) =>
@@ -403,6 +418,7 @@ type StepFn = (deps: RunnerDeps, cfg: RunnerConfig, ctx: Context) => Promise<Rec
 export const RUNNER_STEPS: Record<RunKind, Record<string, StepFn>> = {
   provision: {
     azure_resources: azureResources,
+    twilio_settings: twilioSettings, // KS_OPS_TWILIO_AUTO_v1
     secrets,
     github_environments: githubEnvironments,
     deploy_registry: (d, c, x) => deployRegistry(d, c, x, true),
