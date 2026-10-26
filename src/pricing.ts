@@ -100,22 +100,30 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "pipeline", label: "Pipeline", plan: "starter" },
   { key: "client_portal", label: "Branded client portal and application wizard", plan: "starter" },
   { key: "iphone_dialler", label: "iPhone dialler", plan: "starter" },
-  { key: "office_sync", label: "Office 365 / Google sync", plan: "starter" },
+  // KS_OPS_PLAN_FIXES (Todd, Oct 26) - the iPad staff portal app on every plan; the Apple Watch app growth and up.
+  { key: "ipad_app", label: "iPad staff portal app", plan: "starter" },
+  // Inbox sync reads Outlook (Microsoft 365) only for now; Gmail sends only.
+  { key: "office_sync", label: "Email sync: Outlook (Microsoft 365) inbox sync; Gmail sends only for now", plan: "starter" },
   { key: "ai_assistant", label: "AI assistant", plan: "starter" },
-  { key: "lender_portal", label: "Lender portal (lenders can send you deals they can't place)", plan: "starter" },
+  // Lender packages go to each lender by email or API; lenders do not review files in the portal.
+  { key: "lender_portal", label: "Lender portal (lenders keep their details and products current and send you deals they can't place)", plan: "starter" },
   // PGI referrals to the insurance partner on every plan (20% referral fee on bound policies); same key as KS-server.
   { key: "pgi_referrals", label: "Personal Guarantee Insurance referrals (20% referral fee)", plan: "starter" },
-  { key: "call_recording", label: "Call recording", plan: "growth" },
+  // Calls are recorded on every plan; playback is growth and up.
+  { key: "call_recording", label: "Call recording on every plan (playback on Growth and Pro)", plan: "starter" },
+  { key: "call_recording_playback", label: "Call recording playback", plan: "growth" },
   { key: "call_summaries", label: "AI call summaries", plan: "growth" },
   { key: "voicemail_transcription", label: "Voicemail transcription", plan: "growth" },
-  { key: "watch_ipad_apps", label: "Apple Watch and iPad apps", plan: "growth" },
-  { key: "templates", label: "Message templates", plan: "growth" },
+  { key: "watch_app", label: "Apple Watch app", plan: "growth" },
+  // Templates and snippets (one store) and automations are growth and up.
+  { key: "templates", label: "Message templates and snippets", plan: "growth" },
+  { key: "automations", label: "Automations (workflows)", plan: "growth" },
   { key: "referrer_portal", label: "Referrer portal", plan: "growth" },
   { key: "broker_portal", label: "Broker portal", plan: "growth" },
   { key: "full_reports", label: "Reports", plan: "growth" },
   { key: "visitor_tracking", label: "Website visitor tracking", plan: "growth" },
   { key: "toll_free_number", label: "Toll-free number", plan: "growth" },
-  { key: "multiple_lines", label: "Multiple business lines", plan: "pro" },
+  { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Ad attribution", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
   { key: "sso", label: "Single sign-on", plan: "pro" },

@@ -15,7 +15,7 @@ import { freshPool } from "./db.js";
 
 let pool: pg.Pool;
 const dispatches: Array<{ url: string; inputs: Record<string, string> }> = [];
-const server = { planPuts: 0, admins: [] as any[] };
+const server = { planPuts: 0, admins: [] as any[], phone: [] as any[] };
 
 const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
   if (url.startsWith("https://api.github.com/") && url.endsWith("/dispatches")) {
@@ -32,6 +32,10 @@ const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
   if (url === "https://ks-acme-server.azurewebsites.net/api/provision/admin") {
     server.admins.push(JSON.parse(String(init.body)));
     return jsonResponse({ ok: true, created: true, user_id: "u1" }, 201);
+  }
+  if (url === "https://ks-acme-server.azurewebsites.net/api/provision/phone-numbers") { // KS_OPS_PHONE_PROVISIONING
+    server.phone.push(JSON.parse(String(init.body)));
+    return jsonResponse({ ok: true, results: [{ kind: "main", status: "bought", number: "+14035550111" }, { kind: "toll_free", status: "not_in_plan" }] });
   }
   return new Response("unexpected", { status: 500 });
 });
@@ -78,7 +82,7 @@ describe("automatic provisioning", () => {
     const res = await request(app()).post("/api/ops/provisioning").set(staff()).send({ licensee_id: l.id });
     expect(res.status).toBe(201);
     runId = res.body.run.id;
-    expect(res.body.run.steps.map((s: any) => s.step)).toEqual(["azure_resources", "secrets", "github_environments", "deploy_registry", "deploy", "health", "configure", "admin_user", "welcome_email"]);
+    expect(res.body.run.steps.map((s: any) => s.step)).toEqual(["azure_resources", "secrets", "github_environments", "deploy_registry", "deploy", "health", "configure", "admin_user", "welcome_email", "phone_numbers"]);
     await until(async () => dispatches.length > 0, "the dispatch");
     expect(dispatches[0].url).toBe("https://api.github.com/repos/werb210/KS-Ops/actions/workflows/provision-licensee.yml/dispatches");
     expect(dispatches[0].inputs).toMatchObject({ run_id: runId, code: "acme", steps: "azure_resources,secrets,github_environments,deploy_registry,deploy" });
@@ -127,6 +131,7 @@ describe("automatic provisioning", () => {
     expect(run.status).toBe("done");
     expect(server.planPuts).toBeGreaterThan(0);
     expect(server.admins).toEqual([{ name: "Ana Acme", email: "ana@acme.example", phone: "+14035550123" }]);
+    expect(server.phone).toEqual([expect.objectContaining({ area_code: "403", country: "CA" })]); // KS_OPS_PHONE_PROVISIONING
     expect(mail.sent.find((m) => /your Keystone system is ready/.test(m.subject))?.to).toEqual(["ana@acme.example"]);
     const l = (await pool.query("SELECT status FROM licensees WHERE id = $1", [licenseeId])).rows[0];
     expect(l.status).toBe("active");

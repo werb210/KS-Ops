@@ -29,6 +29,7 @@ Staff "Start" on /ops/provisioning ┘          │
                    configure            status provisioning -> active (or trial), plan + branding + flags pushed
                    admin_user           POST /api/provision/admin on the new KS-server
                    welcome_email        sign-in link emailed to the contact
+                   phone_numbers        POST /api/provision/phone-numbers: business line (+ toll-free on Growth/Pro) via Twilio
 ```
 
 Why this design:
@@ -183,7 +184,16 @@ Also make sure `OPS_ALLOWED_SERVER_HOST_SUFFIXES` covers the licensee hosts (the
   Service, and the addresses are updated on the licensee and in the `ks-<code>` environment variables.
 - **App store builds per licensee** (branded iPhone, iPad and Android apps): KS-Client's "Build licensee apps" workflow
   and its own environment (`docs/LICENSEE_APPS.md` in KS-Client), plus the store listings.
-- **Twilio numbers** (and the A2P/toll-free registration): bought for the licensee and entered on their Company page.
+- **Twilio account for the licensee** (KS_OPS_PHONE_PROVISIONING): create a Twilio subaccount for the licensee and set
+  `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (and the voice-app keys) on `ks-<code>-server`. The last step,
+  `phone_numbers`, then has the licensee's KS-server buy a local business line (area code from the contact's phone,
+  else the province or state) and, on Growth and Pro, a toll-free line, with the voice and SMS webhooks pointed at it.
+  Until Twilio is connected that step is **blocked** (checked every 6 hours; press Retry step once it is set). If Twilio
+  needs a registered address or regulatory bundle, the step fails with that reason: add the address in Twilio, set
+  `TWILIO_ADDRESS_SID` (and `TWILIO_BUNDLE_SID` if asked) on the KS-server, then Retry step. The licensee's admins buy
+  direct lines (Pro) and more lines themselves in Settings > Phone lines.
+- **Texting registration**: Twilio toll-free verification (texts from the toll-free line) and A2P 10DLC (texts to US
+  numbers from a local line) are submitted by hand in Twilio.
 - **The licensee's own Microsoft 365 / Google Workspace and QuickBooks apps** (`VITE_MSAL_*`, `QBO_*`): off until set.
 - **Email sending from their domain** and any SPF/DKIM records.
 - A step that keeps failing: read the log, fix the cause, then **Retry step**, or do it by hand and **Mark done

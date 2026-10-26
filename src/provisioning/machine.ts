@@ -536,7 +536,12 @@ export async function publicStatus(deps: Pick<MachineDeps, "db" | "store">, lice
   const run = await deps.store.latestRun(l.id, "provision");
   const base = { company_name: l.company_name, company_code: l.company_code };
   if (l.status === "pending_payment") return { ...base, state: "waiting_payment" as PublicState, steps: [] };
-  const ready = Boolean(l.portal_url) && (!run || run.status === "done") && l.status !== "provisioning";
+  // KS_OPS_PHONE_PROVISIONING - the copy is ready to use once the sign-in email went out; the phone lines step after it
+  // (often waiting for Twilio to be connected) does not keep the licensee on the "setting up" page.
+  const signInSent = run && run.status !== "done"
+    ? (await deps.store.steps(run.id)).some((s) => s.step === "welcome_email" && isFinished(s))
+    : false;
+  const ready = Boolean(l.portal_url) && (!run || run.status === "done" || signInSent) && l.status !== "provisioning";
   if (ready) {
     return { ...base, state: "ready" as PublicState, portal_url: l.portal_url, email_sent: run ? true : null, steps: [] };
   }
