@@ -6,7 +6,7 @@ import {
   acceptableUrl, advanceDueRuns, advanceRun, startProvisioningQuietly, handleCallback, markStepDone, publicStatus, retryStep, runForCallback, startRun,
   WORKFLOW_TIMEOUT_MS,
 } from "../../src/provisioning/machine.js";
-import { adminUser, health, liveStatusFor, retentionGate, welcomeMail, type ExecCtx, type Executor } from "../../src/provisioning/executors.js";
+import { adminUser, health, liveStatusFor, phoneNumbers, phoneRequest, retentionGate, welcomeMail, type ExecCtx, type Executor } from "../../src/provisioning/executors.js";
 import { serviceSetupMissing } from "../../src/provisioning/config.js";
 import { describePlan, PROVISION_STEPS, registryEntry } from "../../src/provisioning/steps.js";
 import { licenseeIdFromStatusToken, statusTokenFor } from "../../src/provisioning/statusToken.js";
@@ -18,6 +18,7 @@ const okExecutors = (): Record<string, Executor> => ({
   configure: vi.fn(async () => ({ kind: "done" as const })),
   admin_user: vi.fn(async () => ({ kind: "done" as const, output: { created: true } })),
   welcome_email: vi.fn(async () => ({ kind: "done" as const })),
+  phone_numbers: vi.fn(async () => ({ kind: "done" as const })), // KS_OPS_PHONE_PROVISIONING
 });
 
 /** Plays the workflow: reports every step it was given as done (with the addresses for azure_resources). */
@@ -281,6 +282,20 @@ const live = licensee({
   client_url: "https://ks-prairie-client.azurestaticapps.net",
 });
 
+describe("status page while the phone lines wait", () => {
+  it("is ready once the sign-in email is out, even if the phone step is blocked", async () => {
+    const ex = { ...okExecutors(), phone_numbers: vi.fn(async () => ({ kind: "blocked" as const, retryMs: 60_000, message: "Connect Twilio" })) };
+    const m = machine(licensee(), { executors: ex });
+    const { run } = await startRun(m.deps, LICENSEE_ID, "provision", "checkout");
+    await advanceRun(m.deps, run.id);
+    await workflowReportsAllDone(m, run.id);
+    m.state.l = { ...m.state.l, status: "active" };
+    const after = (await advanceRun(m.deps, run.id))!;
+    expect(after.status).toBe("blocked");
+    expect(await publicStatus(m.deps, LICENSEE_ID)).toMatchObject({ state: "ready" });
+  });
+});
+
 describe("service steps", () => {
   it("health waits for Azure's placeholder page to become the real app", async () => {
     let deployed = false;
@@ -315,6 +330,41 @@ describe("service steps", () => {
     expect(mail.text).toContain("https://ks-prairie-portal.azurestaticapps.net");
     expect(mail.text).toContain('"prairie"');
     expect(mail.text).toMatch(/one-time code/);
+  });
+
+  // KS_OPS_PHONE_PROVISIONING
+  it("phone numbers: area code from the contact's phone, province from the address", () => {
+    expect(phoneRequest({ contact_phone: "+1 (403) 555-0100", province_state: "ab", country: "CA" })).toEqual({ area_code: "403", region: "AB", country: "CA" });
+    expect(phoneRequest({ contact_phone: "1-888-555-0100", province_state: null, country: "US" })).toEqual({ area_code: undefined, region: undefined, country: "US" });
+  });
+
+  it("phone numbers: the licensee's server buys them; the results are logged", async () => {
+    const enc = encryptSecret("ksops_test-key", encryptionKey()!);
+    const calls: Array<{ url: string; body: unknown; key: unknown }> = [];
+    const logs: string[] = [];
+    const c = ctx({ ...live, ops_key_encrypted: enc, contact_phone: "+14035550100", province_state: "AB", country: "CA" }, { log: async (m) => { logs.push(m); } }, (url, init) => {
+      calls.push({ url, body: JSON.parse(String(init?.body)), key: (init?.headers as Record<string, string>)["X-KS-Ops-Key"] });
+      return new Response(JSON.stringify({ ok: true, results: [{ kind: "main", status: "bought", number: "+14035550111" }, { kind: "toll_free", status: "not_in_plan" }] }));
+    });
+    expect(await phoneNumbers(c)).toMatchObject({ kind: "done", output: { results: [{ kind: "main", status: "bought" }, { kind: "toll_free" }] } });
+    expect(calls).toEqual([{ url: "https://ks-prairie-server.azurewebsites.net/api/provision/phone-numbers", body: { area_code: "403", region: "AB", country: "CA" }, key: "ksops_test-key" }]);
+    expect(logs).toContain("phone numbers: main: bought +14035550111");
+  });
+
+  it("phone numbers: Twilio not connected blocks with what to do; an address requirement fails with the reason", async () => {
+    const enc = encryptSecret("ksops_test-key", encryptionKey()!);
+    const l = { ...live, ops_key_encrypted: enc };
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const notSet = ctx(l, {}, () => new Response(JSON.stringify({ ok: false, error: "twilio_not_configured", message: "Twilio is not connected" }), { status: 503 }));
+    expect(await phoneNumbers(notSet)).toMatchObject({ kind: "blocked", message: expect.stringMatching(/TWILIO_ACCOUNT_SID/) });
+    const regulatory = ctx(l, {}, () => new Response(JSON.stringify({ ok: true, results: [{ kind: "main", status: "failed", error: "regulatory_requirement", message: "Twilio needs a registered business address" }] })));
+    expect(await phoneNumbers(regulatory)).toMatchObject({ kind: "failed", error: expect.stringMatching(/registered business address/) });
+    const old = ctx(l, {}, () => new Response("not found", { status: 404 }));
+    expect(await phoneNumbers(old)).toMatchObject({ kind: "failed", error: expect.stringMatching(/newer KS-server/) });
+    const flaky = ctx(l, {}, () => new Response(JSON.stringify({ ok: true, results: [{ kind: "main", status: "failed", error: "twilio_error", message: "Twilio down" }] })));
+    expect(await phoneNumbers(flaky)).toMatchObject({ kind: "wait" });
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
   });
 
   it("teardown is refused until the licensee is cancelled and purged", async () => {

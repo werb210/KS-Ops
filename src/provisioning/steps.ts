@@ -18,6 +18,8 @@ export const PROVISION_STEPS: readonly StepDef[] = [
   { key: "configure", where: "service", label: "Push the plan, branding and feature flags, and set the status", publicLabel: "Applying your plan and branding" },
   { key: "admin_user", where: "service", label: "Create the licensee's admin user on their KS-server", publicLabel: "Creating your admin account" },
   { key: "welcome_email", where: "service", label: "Email the admin their sign-in link", publicLabel: "Sending your sign-in details" },
+  // KS_OPS_PHONE_PROVISIONING - last, so a number that cannot be bought yet never holds up the sign-in email.
+  { key: "phone_numbers", where: "service", label: "Buy the business line (and the toll-free line on Growth and Pro) in the licensee's Twilio account, pointed at their KS-server", publicLabel: "Setting up your phone lines" },
 ];
 
 export const TEARDOWN_STEPS: readonly StepDef[] = [
@@ -123,5 +125,6 @@ export function describePlan(kind: RunKind, code: string, region = DEFAULT_REGIO
     "configure: status provisioning -> trial (staff free trial) or active, then PUT /api/plan (plan, branding, add-ons, beta flags)",
     "admin_user: POST /api/provision/admin on the new KS-server (the contact's email and mobile, role Admin)",
     "welcome_email: email the contact the staff portal link, the company code and how to sign in",
+    "phone_numbers: POST /api/provision/phone-numbers on the new KS-server (area code from the contact's phone, province or state from the address): a local business line on every plan and a toll-free line on Growth and Pro, bought into the licensee's Twilio account with its voice and SMS webhooks set",
   ];
 }

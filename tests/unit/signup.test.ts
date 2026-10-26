@@ -213,7 +213,24 @@ describe("POST /api/public/signup", () => {
     expect(keys("starter")).not.toContain("referrer_portal");
     expect(keys("growth")).toEqual(expect.arrayContaining(["referrer_portal", "broker_portal"]));
     const lender = res.body.plans[0].features.find((f: { key: string }) => f.key === "lender_portal");
-    expect(lender.label).toBe("Lender portal (lenders can send you deals they can't place)");
+    expect(lender.label).toBe("Lender portal (lenders keep their details and products current and send you deals they can't place)");
+  });
+
+  // KS_OPS_PLAN_FIXES (Todd, Oct 26)
+  it("templates, snippets and automations from growth; recording on every plan with playback from growth; iPad on every plan", async () => {
+    const res = await request(createApp(makeDeps())).get("/api/public/plans");
+    const keys = (plan: string) => res.body.plans.find((p: { key: string }) => p.key === plan).features.map((f: { key: string }) => f.key);
+    expect(keys("starter")).toEqual(expect.arrayContaining(["ipad_app", "call_recording", "office_sync"]));
+    expect(keys("starter")).not.toEqual(expect.arrayContaining(["templates"]));
+    for (const k of ["templates", "automations", "call_recording_playback", "watch_app"]) {
+      expect(keys("starter")).not.toContain(k);
+      expect(keys("growth")).toContain(k);
+    }
+    expect(keys("starter").filter((k: string) => /^fraud_/.test(k))).toEqual(["fraud_1", "fraud_2", "fraud_4", "fraud_5"]);
+    expect(keys("pro").filter((k: string) => /^fraud_/.test(k))).toHaveLength(15);
+    const label = (k: string) => res.body.plans[2].features.find((f: { key: string }) => f.key === k).label;
+    expect(label("office_sync")).toMatch(/Outlook \(Microsoft 365\) inbox sync; Gmail sends only/);
+    expect(label("call_recording")).toBe("Call recording on every plan (playback on Growth and Pro)");
   });
 
   // KS_OPS_BANK_CONNECT_ADDON - bank connect is a hidden per-licensee add-on: never on a public plan.

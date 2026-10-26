@@ -164,6 +164,63 @@ export const welcomeEmail: Executor = async (ctx) => {
   return waitOrFail(ctx, SERVER_CALL_TIMEOUT_MS, 5 * MIN, `email not sent: ${r.error ?? "unknown error"}`);
 };
 
+/** KS_OPS_PHONE_PROVISIONING - what the licensee's server is asked for: the area code of the contact's phone (North
+ *  American numbers only), the province or state, and the country. */
+export function phoneRequest(l: Pick<LicenseeRow, "contact_phone" | "province_state" | "country">) {
+  const digits = String(l.contact_phone ?? "").replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  const areaCode = ten.length === 10 && /^[2-9]/.test(ten) && !/^8(00|33|44|55|66|77|88)/.test(ten) ? ten.slice(0, 3) : "";
+  const region = /^[A-Z]{2}$/.test(String(l.province_state ?? "").trim().toUpperCase()) ? String(l.province_state).trim().toUpperCase() : "";
+  return { area_code: areaCode || undefined, region: region || undefined, country: String(l.country ?? "").toUpperCase() === "US" ? "US" : "CA" };
+}
+
+const PHONE_TWILIO_SETUP = "Connect Twilio on the licensee's KS-server first: set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN (a Keystone subaccount for this licensee) and KS_SERVER_URL in its App Service settings, then press Retry step. Checked again every 6 hours.";
+
+/**
+ * KS_OPS_PHONE_PROVISIONING - asks the licensee's KS-server to buy its business line (every plan) and toll-free line
+ * (Growth and Pro) through its own Twilio account. The server does the Twilio calls (it owns the account whose token
+ * signs the webhooks) and is safe to ask again. Twilio not connected there yet: blocked with what to do, retried every
+ * 6 hours. A Twilio address / bundle requirement: failed with the explanation (emailed to sales). Other errors: retried.
+ */
+export const phoneNumbers: Executor = async (ctx) => {
+  const l = ctx.licensee;
+  const key = opsKeyOf(l);
+  if (!l.server_url || !key) return { kind: "failed", error: "No server address or ops key on the licensee." };
+  const body = phoneRequest(l);
+  let r: Response;
+  try {
+    r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/phone-numbers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[provisioning] phone numbers request failed", { licensee: l.id, message });
+    return waitOrFail(ctx, SERVER_CALL_TIMEOUT_MS, 5 * MIN, `phone numbers: ${message}`);
+  }
+  const json = (await r.json().catch(() => ({}))) as { error?: string; message?: string; results?: Array<Record<string, unknown>> };
+  if (r.status === 404) return { kind: "failed", error: "The licensee's KS-server has no /api/provision/phone-numbers (deploy a newer KS-server)." };
+  if (r.status === 503 && (json.error === "twilio_not_configured" || json.error === "server_url_not_set")) {
+    await ctx.log(`phone numbers: ${json.message ?? json.error}`, "warn");
+    return { kind: "blocked", retryMs: 6 * 60 * MIN, message: PHONE_TWILIO_SETUP };
+  }
+  if (!r.ok) {
+    console.error("[provisioning] phone numbers refused", { licensee: l.id, status: r.status, error: json.error, message: json.message });
+    return waitOrFail(ctx, SERVER_CALL_TIMEOUT_MS, 5 * MIN, `phone numbers: KS-server answered ${r.status} ${json.error ?? ""}`.trim());
+  }
+  const results = Array.isArray(json.results) ? json.results : [];
+  const lines = results.map((x) => `${String(x.kind)}: ${String(x.status)}${x.number ? ` ${String(x.number)}` : ""}${x.message ? ` - ${String(x.message)}` : ""}`);
+  for (const line of lines) await ctx.log(`phone numbers: ${line}`, /failed/.test(line) ? "warn" : "info");
+  const failed = results.filter((x) => x.status === "failed");
+  if (!failed.length) return { kind: "done", output: { results }, message: lines.join("; ") || "nothing to buy" };
+  console.error("[provisioning] phone numbers not bought", { licensee: l.id, failed });
+  const regulatory = failed.find((x) => x.error === "regulatory_requirement");
+  if (regulatory) return { kind: "failed", error: `Twilio needs a registered address or regulatory bundle before it sells this number: ${String(regulatory.message ?? "")}`.trim() };
+  return waitOrFail(ctx, SERVER_CALL_TIMEOUT_MS, 10 * MIN, `phone numbers not bought: ${failed.map((x) => `${String(x.kind)} (${String(x.message ?? x.error ?? "unknown")})`).join("; ")}`);
+};
+
 /**
  * Teardown is refused unless the licensee is cancelled and its own KS-server confirms nothing must be kept:
  * GET /api/provision/teardown-check answers { deletable, reason, ... } from KS-server v14's retention data (purged,
@@ -203,6 +260,7 @@ export const SERVICE_EXECUTORS: Record<string, Executor> = {
   configure,
   admin_user: adminUser,
   welcome_email: welcomeEmail,
+  phone_numbers: phoneNumbers, // KS_OPS_PHONE_PROVISIONING
   retention_gate: retentionGate,
   finish: finishTeardown,
 };
