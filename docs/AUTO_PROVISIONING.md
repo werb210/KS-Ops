@@ -13,11 +13,14 @@ checklist once, and `scripts/provision-licensee.sh` still works by hand (see `PR
 Stripe checkout.session.completed ─┐
 Staff free trial (/ops/trials)  ───┼─> KS-Ops provisioning run (Postgres: provisioning_runs / _steps / _logs)
 Staff "Start" on /ops/provisioning ┘          │
+                                              │ twilio_account   the licensee's Twilio sub-account (API key, dialler app, Verify service)
+                                              │ twilio_address   its business address in Twilio
                                               │ 1. starts the GitHub Actions workflow in KS-Ops (one API call)
                                               v
                  KS-Ops workflow provision-licensee.yml  (GitHub environment ks-ops-provisioning)
                  Azure sign-in with a federated credential: no Azure secret is stored anywhere
                    azure_resources      scripts/provision-licensee.sh <code> canadacentral, DEPLOY_IDENTITY=1
+                   twilio_settings      Twilio settings from KS-Ops (one-off token, masked) -> the KS-server app settings
                    secrets              checks every generated key is stored on the two web apps
                    github_environments  ks-<code> in KS-server, KS-Agent, KS-Portal, KS-Client (secrets + variables)
                    deploy_registry      pull request to deploy/licensees.json in each, merged when CI passes
@@ -29,7 +32,10 @@ Staff "Start" on /ops/provisioning ┘          │
                    configure            status provisioning -> active (or trial), plan + branding + flags pushed
                    admin_user           POST /api/provision/admin on the new KS-server
                    welcome_email        sign-in link emailed to the contact
+                   twilio_voice         the dialler app's voice URL -> the new server
+                   twilio_bundle        a regulatory bundle only if Twilio's rules ask for one (waits for approval)
                    phone_numbers        POST /api/provision/phone-numbers: business line (+ toll-free on Growth/Pro) via Twilio
+                   texting_registration toll-free verification; US A2P 10DLC for a US line (status followed every 2 h)
 ```
 
 Why this design:
@@ -61,6 +67,27 @@ Stripe's success page now carries `p=<token>`. The thank-you page polls `GET /ap
 "We're setting up your system" with progress, then the sign-in button for the staff portal and "an email is on its way".
 The token is opaque: the licensee id plus a 128-bit MAC made with `OPS_ENCRYPTION_KEY`; it reveals only progress
 labels and, once ready, the public portal address.
+
+### Twilio (KS_OPS_TWILIO_AUTO_v1)
+
+- **Sub-account**: "Keystone - <company> (<code>)" under `KS_TWILIO_ACCOUNT_SID`. Its auth token and API key secret
+  are stored encrypted (`licensee_twilio`, `OPS_ENCRYPTION_KEY`). Found again by name if the row is ever lost.
+- **Settings on the licensee's KS-server** (written by the workflow's `twilio_settings` step, which fetches them from
+  `POST /api/provisioning/callback/<run>/twilio-settings` while that step runs): `TWILIO_ACCOUNT_SID`,
+  `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY`, `TWILIO_API_SECRET`, `TWILIO_VOICE_APP_SID`, `TWILIO_VERIFY_SERVICE_SID`,
+  `TWILIO_ADDRESS_SID`, `KS_SERVER_URL`. The bundle id (when there is one) goes with the phone-numbers request.
+- **Texting**: toll-free verification for the toll-free line (Messaging API); for a US business line, A2P 10DLC through
+  the ISV flow (secondary customer profile and A2P trust product in the sub-account, with Keystone's primary profile
+  `KS_TWILIO_ISV_PROFILE_SID` attached; brand; messaging service; campaign once the brand is approved). Canadian local
+  lines need no registration to text Canadian mobiles. Opt-in proof: `GET /api/public/texting-opt-in/<code>` (the client
+  app's "Text me updates" box and wording). Status (needs_info, pending, approved, rejected with the reason) is kept in
+  `texting_registrations`, checked every 2 hours, shown on `/ops/provisioning` and pushed to the licensee's KS-server
+  (`PUT /api/provision/texting`). Staff: `GET /api/ops/provisioning/twilio/:licenseeId`,
+  `POST /api/ops/provisioning/twilio/:licenseeId/texting/resubmit`.
+- **Lifecycle** (worker, every 30 minutes): suspended licensee -> sub-account suspended; back to trial/active/past_due ->
+  reactivated; cancelled -> kept active 31 days (KS-server releases the numbers after its 30-day grace), then suspended;
+  closed only after the 180-day retention period and 7 days after sales is emailed that it will be. Every change is
+  audited (`licensee.twilio_*`); a failure is logged with Twilio's code and tried again.
 
 ### Teardown
 
@@ -184,16 +211,9 @@ Also make sure `OPS_ALLOWED_SERVER_HOST_SUFFIXES` covers the licensee hosts (the
   Service, and the addresses are updated on the licensee and in the `ks-<code>` environment variables.
 - **App store builds per licensee** (branded iPhone, iPad and Android apps): KS-Client's "Build licensee apps" workflow
   and its own environment (`docs/LICENSEE_APPS.md` in KS-Client), plus the store listings.
-- **Twilio account for the licensee** (KS_OPS_PHONE_PROVISIONING): create a Twilio subaccount for the licensee and set
-  `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` (and the voice-app keys) on `ks-<code>-server`. The last step,
-  `phone_numbers`, then has the licensee's KS-server buy a local business line (area code from the contact's phone,
-  else the province or state) and, on Growth and Pro, a toll-free line, with the voice and SMS webhooks pointed at it.
-  Until Twilio is connected that step is **blocked** (checked every 6 hours; press Retry step once it is set). If Twilio
-  needs a registered address or regulatory bundle, the step fails with that reason: add the address in Twilio, set
-  `TWILIO_ADDRESS_SID` (and `TWILIO_BUNDLE_SID` if asked) on the KS-server, then Retry step. The licensee's admins buy
-  direct lines (Pro) and more lines themselves in Settings > Phone lines.
-- **Texting registration**: Twilio toll-free verification (texts from the toll-free line) and A2P 10DLC (texts to US
-  numbers from a local line) are submitted by hand in Twilio.
+- **Twilio**: nothing per licensee (KS_OPS_TWILIO_AUTO_v1). Todd's one-time Keystone setup (paid master account, its
+  keys on KS-Ops, the ISV profile in Trust Hub) is in `PROVISIONING.md`. The carriers' review of texting registrations
+  takes days; KS-Ops follows it by itself.
 - **The licensee's own Microsoft 365 / Google Workspace and QuickBooks apps** (`VITE_MSAL_*`, `QBO_*`): off until set.
 - **Email sending from their domain** and any SPF/DKIM records.
 - A step that keeps failing: read the log, fix the cause, then **Retry step**, or do it by hand and **Mark done

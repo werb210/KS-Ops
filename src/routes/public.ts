@@ -123,6 +123,9 @@ export function publicRouter(deps: Deps): Router {
           city: input.city,
           postal_code: input.postal_code,
           website: input.website,
+          business_number: input.business_number, // KS_OPS_TWILIO_AUTO_v1
+          business_type: input.business_type,
+          contact_title: input.contact_title,
           status: "pending_payment",
           plan: input.plan,
           billing_interval: input.billing_interval,

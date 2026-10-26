@@ -8,6 +8,7 @@
 import { env, opsPublicUrl } from "../config.js";
 import { encryptionKey } from "../lib/crypto.js";
 import type { RunKind } from "./steps.js";
+import { masterCreds } from "../twilio/config.js";
 
 export type SetupItem = { key: string; label: string };
 
@@ -51,6 +52,13 @@ export function serviceSetupMissing(kind: RunKind, e: NodeJS.ProcessEnv = proces
   }
   if (!callbackBaseUrl(e)) {
     out.push({ key: "KS_OPS_PUBLIC_URL", label: "KS-Ops app setting KS_OPS_PUBLIC_URL (https address of KS-Ops) so the workflow can report back" });
+  }
+  // KS_OPS_TWILIO_AUTO_v1 - each licensee's KS-server needs its own Twilio sub-account before it can start.
+  if (kind === "provision" && !masterCreds(e)) {
+    out.push({
+      key: "KS_TWILIO_ACCOUNT_SID",
+      label: "KS-Ops app settings KS_TWILIO_ACCOUNT_SID and KS_TWILIO_AUTH_TOKEN (Keystone's master Twilio account, a paid account): every licensee gets its own sub-account under it",
+    });
   }
   if (kind === "teardown" && !teardownEnabled(e)) {
     out.push({ key: "KS_TEARDOWN_ENABLED", label: "KS-Ops app setting KS_TEARDOWN_ENABLED=true (teardown deletes the licensee's Azure resources)" });

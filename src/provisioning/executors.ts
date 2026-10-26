@@ -7,6 +7,10 @@ import { audit, getLicensee, opsKeyOf, type LicenseeRow } from "../licensees/rep
 import { pushPlan, queueStatusPush } from "../sync/planPush.js";
 import { crmLicenseeStatus } from "../crm/triggers.js";
 import type { RunRow, StepRow } from "./store.js";
+import { ensureAddress, ensureBundle, ensureSubaccount, pointVoiceApp, twilioOf, type TwilioOutcome } from "../twilio/account.js"; // KS_OPS_TWILIO_AUTO_v1
+import { linesFrom, plainStatus, submitTexting, pushTexting } from "../twilio/texting.js";
+import type { TwilioStore } from "../twilio/store.js";
+import type { TwilioHttp } from "../twilio/http.js";
 
 export type StepOutcome =
   | { kind: "done"; output?: Record<string, unknown>; message?: string }
@@ -14,7 +18,7 @@ export type StepOutcome =
   | { kind: "blocked"; retryMs: number; message: string }
   | { kind: "failed"; error: string };
 
-export type ExecDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now">;
+export type ExecDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now"> & { env?: NodeJS.ProcessEnv; twilioStore?: TwilioStore; twilioHttp?: TwilioHttp };
 export type ExecCtx = {
   deps: ExecDeps;
   run: RunRow;
@@ -186,7 +190,17 @@ export const phoneNumbers: Executor = async (ctx) => {
   const l = ctx.licensee;
   const key = opsKeyOf(l);
   if (!l.server_url || !key) return { kind: "failed", error: "No server address or ops key on the licensee." };
-  const body = phoneRequest(l);
+  // KS_OPS_TWILIO_AUTO_v1 - the address and (approved) bundle made in the licensee's sub-account go with the request;
+  // KS-server keeps them for every later purchase too.
+  const tw = await twilioOf(ctx.deps).store.get(l.id).catch((err) => {
+    console.error("[provisioning] twilio row not read", { licensee: l.id, message: err instanceof Error ? err.message : String(err) });
+    return null;
+  });
+  const body = {
+    ...phoneRequest(l),
+    ...(tw?.address_sid ? { address_sid: tw.address_sid } : {}),
+    ...(tw?.bundle_sid && /approved/.test(String(tw.bundle_status)) ? { bundle_sid: tw.bundle_sid } : {}),
+  };
   let r: Response;
   try {
     r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/phone-numbers`, {
@@ -219,6 +233,36 @@ export const phoneNumbers: Executor = async (ctx) => {
   const regulatory = failed.find((x) => x.error === "regulatory_requirement");
   if (regulatory) return { kind: "failed", error: `Twilio needs a registered address or regulatory bundle before it sells this number: ${String(regulatory.message ?? "")}`.trim() };
   return waitOrFail(ctx, SERVER_CALL_TIMEOUT_MS, 10 * MIN, `phone numbers not bought: ${failed.map((x) => `${String(x.kind)} (${String(x.message ?? x.error ?? "unknown")})`).join("; ")}`);
+};
+
+// KS_OPS_TWILIO_AUTO_v1 - the Twilio steps. A missing Keystone-level setting blocks (checked every 6 hours) with what to
+// do; Twilio's own hiccups are retried; anything that needs a person fails with a plain sentence (emailed to sales).
+function fromTwilio(ctx: ExecCtx, o: TwilioOutcome, limitMs = SERVER_CALL_TIMEOUT_MS): StepOutcome {
+  if (o.kind === "done") return { kind: "done", message: o.message, output: o.output };
+  if (o.kind === "blocked") return { kind: "blocked", retryMs: 6 * 60 * MIN, message: o.message };
+  if (o.kind === "failed") return { kind: "failed", error: o.message };
+  return waitOrFail(ctx, limitMs, o.retryMs, o.message);
+}
+const twilioLog = (ctx: ExecCtx) => (m: string) => ctx.log(m);
+
+export const twilioAccount: Executor = async (ctx) => fromTwilio(ctx, await ensureSubaccount(ctx.deps, ctx.licensee, twilioLog(ctx)));
+export const twilioAddress: Executor = async (ctx) => fromTwilio(ctx, await ensureAddress(ctx.deps, ctx.licensee, twilioLog(ctx)));
+export const twilioVoice: Executor = async (ctx) => fromTwilio(ctx, await pointVoiceApp(ctx.deps, ctx.licensee));
+export const twilioBundle: Executor = async (ctx) => {
+  const started = ctx.step.started_at ? new Date(ctx.step.started_at) : null;
+  // The bundle waits up to 14 days for Twilio; ensureBundle decides when to give up.
+  return fromTwilio(ctx, await ensureBundle(ctx.deps, ctx.licensee, started, twilioLog(ctx)), 15 * DAY);
+};
+
+/** Submits texting registration and pushes the status to the licensee's server. Done once submitted: approval by the
+ *  carriers takes days and is followed by the worker, never holding the run. */
+export const textingRegistration: Executor = async (ctx) => {
+  const lines = linesFrom(ctx.outputs.phone_numbers?.results);
+  const rows = await submitTexting(ctx.deps, ctx.licensee, lines, (m) => ctx.log(m));
+  for (const r of rows) await ctx.log(`texting: ${plainStatus(r)}`, r.status === "needs_info" || r.status === "rejected" ? "warn" : "info");
+  const pushed = await pushTexting(ctx.deps, ctx.licensee);
+  if (!pushed.ok) await ctx.log(`texting status not pushed to the server yet (${pushed.error}); the worker tries again`, "warn");
+  return { kind: "done", output: { texting: rows.map((r) => ({ kind: r.kind, status: r.status })) }, message: rows.map((r) => `${r.kind}: ${r.status}`).join("; ") };
 };
 
 /**
@@ -261,6 +305,11 @@ export const SERVICE_EXECUTORS: Record<string, Executor> = {
   admin_user: adminUser,
   welcome_email: welcomeEmail,
   phone_numbers: phoneNumbers, // KS_OPS_PHONE_PROVISIONING
+  twilio_account: twilioAccount, // KS_OPS_TWILIO_AUTO_v1
+  twilio_address: twilioAddress,
+  twilio_voice: twilioVoice,
+  twilio_bundle: twilioBundle,
+  texting_registration: textingRegistration,
   retention_gate: retentionGate,
   finish: finishTeardown,
 };

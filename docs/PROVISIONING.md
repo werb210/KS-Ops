@@ -135,6 +135,33 @@ answer cannot be read, the script stops with an error rather than continuing wit
 3. KS-Ops pushes the licensee's plan to the new server within 5 minutes of it answering.
 4. Set the licensee's status to `trial` or `active`. From then on the company code resolves in the apps' directory.
 
+## Twilio: what Todd sets up once (not per licensee)
+
+Everything Twilio for each licensee is automatic (KS_OPS_TWILIO_AUTO_v1): its own sub-account, the voice and sign-in
+settings on its server, its business address, a regulatory bundle when Twilio asks for one, its phone numbers, and its
+texting registration. Only these Keystone-level things need a person, once:
+
+1. **Upgrade Keystone's Twilio account to a paid account** (sub-accounts, numbers and registrations do not work on a
+   trial account). Twilio console > Admin > Account billing.
+2. **Give KS-Ops the master account's keys.** Twilio console > Account info: copy the Account SID (starts with `AC`) and
+   Auth Token. In Azure, on the `ks-ops` App Service > Settings > Environment variables, add `KS_TWILIO_ACCOUNT_SID` and
+   `KS_TWILIO_AUTH_TOKEN`. Until they are there, new set-ups wait in "Waiting for manual setup" and nothing is made.
+3. **Register Keystone as an ISV in Trust Hub** (only needed for licensees with a US business line). Twilio console >
+   Trust Hub > Customer profiles > create the **Primary Business Profile** for Boreal / Keystone (business type "ISV
+   Reseller or Partner"), with the business number, address and an authorized contact, and submit it. Twilio reviews it
+   (usually a few business days). When it shows **Twilio Approved**, copy its id (starts with `BU`) into the `ks-ops`
+   setting `KS_TWILIO_ISV_PROFILE_SID`. Until then, US texting registrations wait as "needs info" and say why.
+4. **Optional:** `KS_TWILIO_NOTIFICATION_EMAIL`, where Twilio sends registration notices (default: the sales inbox).
+
+What still takes time, and why: Twilio and the phone carriers review texting registrations themselves. Toll-free
+verification and US A2P 10DLC approval usually take 3 to 10 business days, and a regulatory bundle (if Twilio ever asks
+for one) 1 to 3. KS-Ops checks every 2 hours, shows the status in plain words on `/ops/provisioning` and on the
+brokerage's Settings > Phone lines page, and emails sales if something is turned down or missing. Calls work straight
+away; until texting is approved, texts to US mobiles wait and Canadian mobiles get texts from the business line.
+
+If a registration is turned down: read the reason on `/ops/provisioning`, correct the licensee's details in KS-Ops
+(business number, website, address, contact's job title), then press **Resubmit texting**.
+
 ## Keystone's own KS-Ops settings (once, not per licensee)
 
 Keystone invoicing its licensees: Stripe collects (bank debit by default, card as the alternative) and every Stripe

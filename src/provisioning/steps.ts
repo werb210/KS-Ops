@@ -9,7 +9,12 @@ export type StepWhere = "workflow" | "service";
 export type StepDef = { key: string; where: StepWhere; label: string; publicLabel: string };
 
 export const PROVISION_STEPS: readonly StepDef[] = [
+  // KS_OPS_TWILIO_AUTO_v1 - first, so the server is started with its Twilio settings (it refuses to start in production
+  // without a Verify service, and sign-in codes need it). Bundles and texting come after the sign-in email.
+  { key: "twilio_account", where: "service", label: "Create the licensee's Twilio sub-account (API key, dialler app, sign-in code service)", publicLabel: "Setting up your phone system" },
+  { key: "twilio_address", where: "service", label: "Register the business address in the Twilio sub-account", publicLabel: "Setting up your phone system" },
   { key: "azure_resources", where: "workflow", label: "Create the Azure resources (resource group, Postgres, App Service, Static Web Apps, deploy identity)", publicLabel: "Creating your servers and database" },
+  { key: "twilio_settings", where: "workflow", label: "Write the Twilio settings (sub-account, API key, dialler app, sign-in codes, address) to the licensee's KS-server", publicLabel: "Securing your system" },
   { key: "secrets", where: "workflow", label: "Generate the secrets (JWT, encryption and token keys) and check they are stored on the apps", publicLabel: "Securing your system" },
   { key: "github_environments", where: "workflow", label: "Create the GitHub environment ks-<code> in KS-server, KS-Agent, KS-Portal and KS-Client", publicLabel: "Preparing your apps" },
   { key: "deploy_registry", where: "workflow", label: "Add the licensee to deploy/licensees.json in the four app repositories (pull request, merged when CI passes)", publicLabel: "Preparing your apps" },
@@ -19,7 +24,10 @@ export const PROVISION_STEPS: readonly StepDef[] = [
   { key: "admin_user", where: "service", label: "Create the licensee's admin user on their KS-server", publicLabel: "Creating your admin account" },
   { key: "welcome_email", where: "service", label: "Email the admin their sign-in link", publicLabel: "Sending your sign-in details" },
   // KS_OPS_PHONE_PROVISIONING - last, so a number that cannot be bought yet never holds up the sign-in email.
+  { key: "twilio_voice", where: "service", label: "Point the dialler's Twilio app at the licensee's KS-server", publicLabel: "Setting up your phone lines" },
+  { key: "twilio_bundle", where: "service", label: "Regulatory bundle for buying numbers, when Twilio's rules ask for one (waits for Twilio's approval)", publicLabel: "Setting up your phone lines" },
   { key: "phone_numbers", where: "service", label: "Buy the business line (and the toll-free line on Growth and Pro) in the licensee's Twilio account, pointed at their KS-server", publicLabel: "Setting up your phone lines" },
+  { key: "texting_registration", where: "service", label: "Submit texting registration: toll-free verification, and US A2P 10DLC for a US business line (carriers approve later)", publicLabel: "Setting up your phone lines" },
 ];
 
 export const TEARDOWN_STEPS: readonly StepDef[] = [
@@ -111,10 +119,13 @@ export function describePlan(kind: RunKind, code: string, region = DEFAULT_REGIO
     ];
   }
   return [
+    "twilio_account: create (or find) the Twilio sub-account \"Keystone - <company> (" + code + ")\" under KS_TWILIO_ACCOUNT_SID, with an API key, the TwiML app \"Keystone dialler\" and a Verify service; credentials stored encrypted in licensee_twilio",
+    "twilio_address: register the business address (legal name, street, city, province or state, postal code) in the sub-account (Addresses API)",
     `azure_resources: scripts/provision-licensee.sh ${code} ${region} with DEPLOY_IDENTITY=1 - resource group ${n.resourceGroup} (${region}), ` +
       `Postgres flexible server ${n.postgres} database ${n.database}, App Service plan ${n.plan}, web apps ${n.serverApp} and ${n.agentApp}, ` +
       `Static Web Apps ${n.portalSwa} and ${n.clientSwa}, Postgres firewall for the apps' outbound addresses, ` +
       `managed identity ${n.deployIdentity} (Website Contributor on ${n.resourceGroup}) with federated credentials for the ${n.environment} environments of KS-server and KS-Agent`,
+    `twilio_settings: write TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_VOICE_APP_SID, TWILIO_VERIFY_SERVICE_SID, TWILIO_ADDRESS_SID and KS_SERVER_URL to ${n.serverApp}`,
     `secrets: generated once and kept on ${n.serverApp}: ${GENERATED_SERVER_SECRETS.join(", ")}; on ${n.agentApp}: ${GENERATED_AGENT_SECRETS.join(", ")} (the ops key comes from KS-Ops)`,
     ...Object.entries(ENVIRONMENT_SETTINGS).map(
       ([repo, s]) => `github_environments: ${repo} - environment ${n.environment}; secrets: ${s.secrets.join(", ") || "none"}; variables: ${s.variables.join(", ")}`,
@@ -125,6 +136,9 @@ export function describePlan(kind: RunKind, code: string, region = DEFAULT_REGIO
     "configure: status provisioning -> trial (staff free trial) or active, then PUT /api/plan (plan, branding, add-ons, beta flags)",
     "admin_user: POST /api/provision/admin on the new KS-server (the contact's email and mobile, role Admin)",
     "welcome_email: email the contact the staff portal link, the company code and how to sign in",
+    "twilio_voice: set the TwiML app's voice URL to <server>/api/webhooks/twilio/voice/twiml",
+    "twilio_bundle: read Twilio's rules (Regulations API) for the licensee's country and number types; make and submit a regulatory bundle only when one is required, then wait for approval",
     "phone_numbers: POST /api/provision/phone-numbers on the new KS-server (area code from the contact's phone, province or state from the address): a local business line on every plan and a toll-free line on Growth and Pro, bought into the licensee's Twilio account with its voice and SMS webhooks set",
+    "texting_registration: toll-free verification for the toll-free line; US A2P 10DLC (secondary customer profile, A2P trust product, brand, messaging service, campaign once the brand is approved) for a US business line; status checked every 2 hours and pushed to PUT /api/provision/texting",
   ];
 }

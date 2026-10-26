@@ -144,6 +144,8 @@ export function configuredEnv(extra: Record<string, string> = {}): NodeJS.Proces
     KS_PROVISION_GITHUB_TOKEN: "github_pat_test",
     KS_OPS_PUBLIC_URL: "https://ks-ops.example.test",
     OPS_ENCRYPTION_KEY: "a".repeat(64),
+    KS_TWILIO_ACCOUNT_SID: `AC${"0".repeat(32)}`, // KS_OPS_TWILIO_AUTO_v1 - Keystone's master account (faked)
+    KS_TWILIO_AUTH_TOKEN: "master-token",
     ...extra,
   };
 }

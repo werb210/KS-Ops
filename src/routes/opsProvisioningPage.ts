@@ -35,7 +35,9 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   .s-failed { background:var(--badbg); color:var(--bad); }
   .s-blocked, .s-waiting_for_setup { background:var(--warnbg); color:var(--warn); }
   .s-running { background:var(--infobg); color:var(--info); }
-  .s-pending, .s-cancelled { background:#eef0f3; color:var(--ink); }
+  .s-pending, .s-cancelled, .s-not_needed { background:#eef0f3; color:var(--ink); }
+  .s-approved { background:var(--okbg); color:var(--ok); } .s-rejected { background:var(--badbg); color:var(--bad); }
+  .s-needs_info { background:var(--warnbg); color:var(--warn); } .s-submitted { background:var(--infobg); color:var(--info); }
   pre.log { background:#f1f3f5; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:.6rem; max-height:22rem; overflow:auto; white-space:pre-wrap; font-size:.85rem; }
   ul.check { margin:.25rem 0 0; padding-left:1.3rem; }
   .run { border-top:1px solid var(--line); padding-top:.75rem; margin-top:.75rem; }
@@ -137,6 +139,34 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   function act1(method, path, body) {
     api(method, path, body).then(function () { return load(); }).catch(function (e) { if (e.message !== "unauthorized") alert(e.message); });
   }
+  // KS_OPS_TWILIO_AUTO_v1 - the licensee's Twilio sub-account and texting registration, in plain words.
+  function renderTwilio(run) {
+    var tw = run.twilio, d = el("div");
+    d.appendChild(el("h3", null, "Phone and texting"));
+    if (!tw.account) d.appendChild(el("p", { "class": "hint" }, "No Twilio sub-account yet: the first step makes it."));
+    else {
+      var a = tw.account, ul = el("ul", { "class": "check" });
+      ul.appendChild(el("li", null, "Twilio sub-account " + a.subaccount_sid + ": " + a.status_text));
+      ul.appendChild(el("li", null, "Voice tokens, dialler app and sign-in codes: " + (a.api_key && a.dialler_app && a.sign_in_codes ? "ready" : "not finished") + (a.dialler_app_points_at_server ? "" : " (dialler app not pointed at the server yet)")));
+      ul.appendChild(el("li", null, "Business address in Twilio: " + (a.address_sid || "not registered yet")));
+      ul.appendChild(el("li", null, "Regulatory bundle: " + a.bundle));
+      if (a.close_notice_sent_at && !a.closed_at) ul.appendChild(el("li", null, "Closing notice sent " + when(a.close_notice_sent_at) + "; the sub-account will be closed 7 days after it."));
+      d.appendChild(ul);
+    }
+    if (tw.texting && tw.texting.length) {
+      var tl = el("ul", { "class": "check" });
+      tw.texting.forEach(function (r) {
+        var li = el("li"); li.appendChild(el("strong", null, r.label + ": ")); li.appendChild(tag(r.status));
+        li.appendChild(el("span", null, " " + r.message + (r.twilio_status ? " (Twilio: " + words(r.twilio_status) + ")" : "") + (r.on_server ? "" : " Not shown on the licensee's server yet" + (r.push_error ? " (" + r.push_error + ")" : "") + ".")));
+        tl.appendChild(li);
+      });
+      d.appendChild(tl);
+      var again = el("button", { type: "button", "class": "quiet" }, "Resubmit texting");
+      again.onclick = function () { if (confirm("Submit texting registration again with the licensee's current details?")) act1("POST", "/provisioning/twilio/" + run.licensee_id + "/texting/resubmit"); };
+      d.appendChild(again);
+    }
+    return d;
+  }
   function renderRun(run, full) {
     var box = el("div", { "class": "run" });
     var head = el("h3");
@@ -155,6 +185,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     var thead = el("thead"); thead.appendChild(th); t.appendChild(thead);
     var tb = el("tbody"); run.steps.forEach(function (s) { tb.appendChild(stepRow(run, s)); }); t.appendChild(tb);
     wrap.appendChild(t); box.appendChild(wrap);
+    if (run.twilio) box.appendChild(renderTwilio(run));
     var logBtn = el("button", { type: "button", "class": "quiet" }, open[run.id] ? "Hide log" : "Show log");
     logBtn.onclick = function () { open[run.id] = !open[run.id]; load(); };
     box.appendChild(logBtn);

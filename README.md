@@ -54,6 +54,9 @@ again after a price changes.
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
 | `DEMO_SMS_ENABLED` | no | `true` texts the demo link as well as emailing it. Off by default (the link is emailed only; the mobile number is still kept) |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` | no | with `DEMO_SMS_ENABLED=true`, texts the demo link (`KS_SMS_FROM` is the sending number in +1 format; `TWILIO_MESSAGING_SERVICE_SID` can replace it) |
+| `KS_TWILIO_ACCOUNT_SID`, `KS_TWILIO_AUTH_TOKEN` | for provisioning | Keystone's master Twilio account (paid). Each licensee gets its own sub-account under it, made automatically; without these, new set-ups wait in "Waiting for manual setup" (KS_OPS_TWILIO_AUTO_v1, see `docs/PROVISIONING.md`) |
+| `KS_TWILIO_ISV_PROFILE_SID` | for US texting | Keystone's approved ISV primary customer profile in Twilio Trust Hub (`BU...`), attached to each licensee's A2P 10DLC registration. Without it US local-line registrations wait as "needs info" |
+| `KS_TWILIO_NOTIFICATION_EMAIL` | no | where Twilio sends registration notices (default: the sales inbox) |
 | `KS_OPS_PUBLIC_URL` | recommended | this server's public https address, used for uploaded-logo links (falls back to Azure's `WEBSITE_HOSTNAME`, then the request's host) |
 | `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` (licensee pushes include `company.support_level`). Licensee support tickets and their follow-ups go to `POST {BF_CRM_URL}/api/ks/support/ingest` through the same outbox (required: `external_id`, `subject`, `message`, `message_id`, `licensee`, `requester`; 404/503 there = not deployed yet: retried every 6 h, logged once; 400/422 = rejected: logged with details, given up after 6 tries) |
 | `BF_CRM_KEY` | for the CRM | the same value as `KS_OPS_CRM_KEY` on BF-Server (sent as `X-KS-Ops-Key`). Unset: nothing is pushed (logged once at startup). Pushes wait in `crm_outbox` and are retried after 1 min, 5 min, 30 min, 2 h, 12 h, then daily until BF-Server accepts them |
@@ -109,6 +112,10 @@ All routes are under `/api`. Errors are JSON; form errors are `{ errors: { field
   written as one line made from the parts. `accent_color` and `background_color` (optional, `#RRGGBB`) next to
   `primary_color`. `logo_file: { content_type, data_base64, filename? }` - PNG, JPG or SVG up to 500 KB (checked by its
   bytes; SVGs with scripts or links are refused), stored in `licensee_logos` and linked from `logo_url`
+- Sign-up v18 (KS_OPS_TWILIO_AUTO_v1, for texting registration): `business_number` (CRA business number, 9 digits with
+  an optional program account like `123456789RC0001`, or a US EIN `12-3456789`; checked against `country`),
+  `business_type` (`corporation`, `llc`, `partnership`, `sole_proprietor`, `non_profit`, `cooperative`) and
+  `contact_title` (the contact's job title). Optional for older clients; staff can add them with PATCH
 - Sign-up v14: `font_family` (optional) - a font family name only (letters, numbers, spaces, dashes; 60 at most), e.g.
   `Lato`. Stored in `licensees.font_family` next to the colours and returned by the directory like `primary_color`
 - Branding sync (KS_OPS_v15): every plan push (`PUT {server_url}/api/plan`) also carries

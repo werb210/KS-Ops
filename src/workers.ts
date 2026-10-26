@@ -17,6 +17,7 @@ import { flushCrmOutbox } from "./crm/outbox.js";
 import { flushQboOutbox } from "./qbo/outbox.js";
 import { advanceDueRuns } from "./provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
 import { machineDeps } from "./provisioning/index.js";
+import { refreshTexting, syncAccountStatuses } from "./twilio/lifecycle.js"; // KS_OPS_TWILIO_AUTO_v1
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -238,7 +239,26 @@ export function startWorkers(deps: Deps): () => void {
       provBusy = false;
     }
   };
+  // KS_OPS_TWILIO_AUTO_v1 - sub-accounts follow their licensee's status; pending texting registrations are checked and
+  // their status pushed to the licensees' servers. Every 30 minutes.
+  let twilioBusy = false;
+  const twilio = async () => {
+    if (twilioBusy) return;
+    twilioBusy = true;
+    try {
+      const a = await syncAccountStatuses(deps);
+      if (a.changed.length || a.noticed.length || a.failed.length) console.log("[workers] twilio accounts", JSON.stringify(a));
+      const t = await refreshTexting(deps);
+      if (t.checked || t.pushed) console.log(`[workers] texting: ${t.checked} checked, ${t.pushed} pushed`);
+    } catch (err) {
+      console.error("[workers] twilio jobs failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      twilioBusy = false;
+    }
+  };
   const timers = [
+    setInterval(twilio, 30 * 60_000),
+    setTimeout(twilio, 3 * 60_000),
     setInterval(prov, 30_000),
     setTimeout(prov, 15_000),
     setInterval(qbo, 60_000),

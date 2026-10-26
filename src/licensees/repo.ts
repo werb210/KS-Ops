@@ -20,6 +20,10 @@ export type LicenseeRow = {
   city?: string | null;
   postal_code?: string | null;
   website: string | null;
+  /** KS_OPS_TWILIO_AUTO_v1 - for texting registration: CRA business number or US EIN, kind of business, contact's job title. */
+  business_number?: string | null;
+  business_type?: string | null;
+  contact_title?: string | null;
   status: string;
   plan: Plan;
   billing_interval: BillingInterval;
@@ -140,6 +144,7 @@ export const INSERTABLE = [
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
   "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
   "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
+  "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
 ] as const;
 
 export async function insertLicensee(db: Q, fields: Partial<Record<(typeof INSERTABLE)[number], unknown>>): Promise<LicenseeRow> {
