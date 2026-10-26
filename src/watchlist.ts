@@ -22,7 +22,7 @@ export const reportSchema = z.object({
 
 export const withdrawSchema = z.object({ application_ref: reportSchema.shape.application_ref });
 export const checkSchema = z.object({ entries: z.array(entry).min(1, "entries is required").max(MAX_ENTRIES, `at most ${MAX_ENTRIES} entries`) });
-export const optInSchema = z.object({ opt_in: z.boolean({ required_error: "opt_in is required", invalid_type_error: "opt_in must be true or false" }) });
+export const optInSchema = z.object({ opt_in: z.boolean({ error: (iss) => (iss.input === undefined ? "opt_in is required" : "opt_in must be true or false") }) });
 
 /** The hash as stored: keyed once more with KS_WATCHLIST_OPS_PEPPER when it is set. Never change that value once used. */
 export function storedHash(hash: string, env: NodeJS.ProcessEnv = process.env): string {

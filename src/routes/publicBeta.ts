@@ -25,11 +25,11 @@ export const BETA_INTEREST_NAMES: Record<(typeof BETA_INTERESTS)[number], string
   other: "Something else",
 };
 
-const text = (max: number, msg: string) => z.string({ required_error: msg }).trim().min(1, msg).max(max);
+const text = (max: number, msg: string) => z.string({ error: (iss) => (iss.input === undefined ? msg : undefined) }).trim().min(1, msg).max(max);
 
 export const betaSignupSchema = z.object({
   name: text(120, "Enter your name"),
-  email: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.string({ required_error: "Enter a valid email address" }).max(200).email("Enter a valid email address")),
+  email: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.string({ error: (iss) => (iss.input === undefined ? "Enter a valid email address" : undefined) }).max(200).email("Enter a valid email address")),
   brokerage: text(160, "Enter your brokerage's name"),
   interests: z
     .array(z.string())

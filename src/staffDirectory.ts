@@ -27,7 +27,7 @@ export const staffDirectorySchema = z.object({
 });
 
 export const lookupSchema = z.object({
-  identifier: z.string({ required_error: "identifier is required" }).trim().min(3).max(254),
+  identifier: z.string({ error: (iss) => (iss.input === undefined ? "identifier is required" : undefined) }).trim().min(3).max(254),
 });
 
 /** A typed email or phone number as { kind, value }, or null when it is neither. */

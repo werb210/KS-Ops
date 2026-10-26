@@ -30,7 +30,7 @@ const requestSchema = z
 
 const ticketSchema = z
   .object({
-    subject: z.string({ required_error: "subject is required" }).trim().min(1, "subject is required").max(200),
+    subject: z.string({ error: (iss) => (iss.input === undefined ? "subject is required" : undefined) }).trim().min(1, "subject is required").max(200),
     body: z.string().trim().max(20_000).optional(),
     message: z.string().trim().max(20_000).optional(),
     requester_name: z.string().trim().max(200).optional(),

@@ -14,8 +14,8 @@ const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 
 const newTicketSchema = z.object({
   licensee_id: z.string().regex(UUID_RE, "Choose a licensee.").nullable().optional(),
-  subject: z.string({ required_error: "Subject is required." }).trim().min(1, "Subject is required.").max(200),
-  body: z.string({ required_error: "Write the ticket first." }).trim().min(1, "Write the ticket first.").max(20_000),
+  subject: z.string({ error: (iss) => (iss.input === undefined ? "Subject is required." : undefined) }).trim().min(1, "Subject is required.").max(200),
+  body: z.string({ error: (iss) => (iss.input === undefined ? "Write the ticket first." : undefined) }).trim().min(1, "Write the ticket first.").max(20_000),
   priority: z.enum(PRIORITIES).default("normal"),
   requester_name: z.string().trim().max(200).optional(),
   requester_email: z.string().trim().email("Enter a valid email address.").optional(),
@@ -23,8 +23,8 @@ const newTicketSchema = z.object({
 
 const ticketPatchSchema = z
   .object({
-    status: z.enum(TICKET_STATUSES, { errorMap: () => ({ message: "Status must be open, waiting, resolved or closed." }) }),
-    priority: z.enum(PRIORITIES, { errorMap: () => ({ message: "Priority must be low, normal, high or urgent." }) }),
+    status: z.enum(TICKET_STATUSES, { error: "Status must be open, waiting, resolved or closed." }),
+    priority: z.enum(PRIORITIES, { error: "Priority must be low, normal, high or urgent." }),
     assigned_to: z.string().trim().max(200).nullable(),
     subject: z.string().trim().min(1).max(200),
   })
@@ -32,7 +32,7 @@ const ticketPatchSchema = z
   .strict();
 
 const messageSchema = z.object({
-  body: z.string({ required_error: "Write a reply first." }).trim().min(1, "Write a reply first.").max(20_000),
+  body: z.string({ error: (iss) => (iss.input === undefined ? "Write a reply first." : undefined) }).trim().min(1, "Write a reply first.").max(20_000),
   internal: z.boolean().default(false),
   status: z.enum(TICKET_STATUSES).optional(),
 });

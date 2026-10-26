@@ -300,7 +300,7 @@ const eventSchema = z.object({
   type: z.string().regex(/^[a-z_]{1,40}$/),
   step: z.string().max(40).nullish(),
   at: z.string().datetime({ offset: true }),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 });
 
 export function demoOpsRouter(deps: Deps): Router {
