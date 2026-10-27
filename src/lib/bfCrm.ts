@@ -27,7 +27,12 @@ export type CrmPayload = {
   };
   note?: string;
   events?: CrmEvent[];
+  /** KS_OPS_KB_v1 - a follow-up task for sales (the website assistant's hand-offs). BF-Server creates it on the contact
+   *  when it supports tasks on this endpoint; the same follow-up is always written into the note as well. */
+  task?: CrmTask;
 };
+
+export type CrmTask = { title: string; due_at: string; priority?: "normal" | "high"; notes?: string };
 
 export function bfCrmUrl(e: NodeJS.ProcessEnv = process.env): string {
   return (env("BF_CRM_URL", e) || DEFAULT_BF_CRM_URL).replace(/\/+$/, "");

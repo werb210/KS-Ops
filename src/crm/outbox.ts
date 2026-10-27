@@ -62,6 +62,15 @@ export function normalizePayload(p: CrmPayload): CrmPayload {
     }
     out.events = events.slice(-MAX_EVENTS);
   }
+  // KS_OPS_KB_v1 - a sales follow-up task (title 200, notes 2000).
+  if (p.task && p.task.title && p.task.due_at) {
+    out.task = {
+      title: clip(String(p.task.title).trim(), 200),
+      due_at: p.task.due_at,
+      ...(p.task.priority ? { priority: p.task.priority } : {}),
+      ...(p.task.notes ? { notes: clip(String(p.task.notes).trim(), 2000) } : {}),
+    };
+  }
   return out;
 }
 
@@ -76,6 +85,8 @@ export function mergePayload(older: CrmPayload, newer: CrmPayload): CrmPayload {
   if (notes.length) merged.note = notes.length === 2 && notes[0] === notes[1] ? notes[0] : notes.join("\n\n");
   const events = [...(older.events ?? []), ...(newer.events ?? [])];
   if (events.length) merged.events = events;
+  const task = newer.task ?? older.task; // KS_OPS_KB_v1 - the newest follow-up wins
+  if (task) merged.task = task;
   return normalizePayload(merged);
 }
 

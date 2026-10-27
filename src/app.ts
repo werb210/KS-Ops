@@ -27,6 +27,10 @@ import { provisioningPageRouter } from "./routes/opsProvisioningPage.js";
 import { provisioningCallbackRouter, publicProvisioningRouter } from "./routes/provisioningCallback.js";
 import { textingOptInRouter } from "./routes/textingOptIn.js"; // KS_OPS_TWILIO_AUTO_v1
 import { oauthBrokerRouter } from "./routes/oauthBroker.js"; // KS_OPS_WORKSPACE_APPS
+import { opsKbRouter } from "./routes/opsKb.js"; // KS_OPS_KB_v1
+import { kbPageRouter } from "./routes/opsKbPage.js";
+import { publicAssistantRouter, publicKbRouter } from "./routes/publicKb.js";
+import { licenseeKbRouter } from "./routes/licenseeKb.js";
 
 /** CORS for a list of allowed origins read from env vars at request time. */
 function corsFor(...envNames: string[]) {
@@ -62,6 +66,8 @@ export function createApp(deps: Deps) {
 
   // The demo server's completion carries the sample lender package (a small PDF, base64).
   app.use("/api/demo/sessions", express.json({ limit: "16mb" }));
+  // KS_OPS_KB_v1 - article images (PNG or JPG up to 2 MB, sent as base64).
+  app.use("/api/ops/kb/images", express.json({ limit: "4mb" }));
   app.use(express.json({ limit: "1mb" }));
 
   // The self-serve demo: sign-up from the website, the magic link from the demo portal, progress from the demo server.
@@ -70,6 +76,9 @@ export function createApp(deps: Deps) {
   app.use("/api/public/demo", corsFor("PUBLIC_SITE_URL", "KS_DEMO_PORTAL_URL"), demoPublicRouter(deps));
   app.use("/api/demo", demoOpsRouter(deps));
   app.use("/api/public/texting-opt-in", textingOptInRouter(deps));
+  // KS_OPS_KB_v1 - public help articles and Keystone Maya for prospects (the website's assistant).
+  app.use("/api/public/kb", corsFor("PUBLIC_SITE_URL"), publicKbRouter(deps));
+  app.use("/api/public/assistant", corsFor("PUBLIC_SITE_URL"), publicAssistantRouter(deps));
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps), publicBetaRouter(deps), publicProvisioningRouter(deps));
   // KS_OPS_AUTO_PROVISION_v1 - the provisioning workflow in GitHub Actions reports back with its run's one-off token.
   app.use("/api/provisioning/callback", provisioningCallbackRouter(deps));
@@ -78,6 +87,7 @@ export function createApp(deps: Deps) {
   // KS_STAFF_DIRECTORY_v1 - the apps find a staff member's brokerage from their email or mobile number.
   app.use("/api/staff-directory", cors({ origin: "*", methods: ["POST"], allowedHeaders: ["Content-Type"] }), staffDirectoryRouter(deps));
   app.use("/api/licensees", licenseeApiRouter(deps), licenseeBetaRouter(deps));
+  app.use("/api/licensees", licenseeKbRouter(deps)); // KS_OPS_KB_v1 - the portal's Help Center and Ask Maya
   app.use("/api/ops", corsFor("OPS_ALLOWED_ORIGINS"));
   app.use("/api/ops/auth", opsAuthRouter(deps));
   // KS_OPS_v13_PRESENTER - a signed link to the staff presenter-mode demo (the staff portal's "Start sales demo").
@@ -85,11 +95,13 @@ export function createApp(deps: Deps) {
   // Intuit sends the browser back here without a staff token; the single-use OAuth state is the check.
   app.use("/api/ops/quickbooks/oauth/callback", qboCallbackRouter(deps));
   app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps), opsTrialsRouter(deps), opsBetaRouter(deps), opsProvisioningRouter(deps));
+  app.use("/api/ops", requireStaff, opsKbRouter(deps)); // KS_OPS_KB_v1
   // The QuickBooks and free-trial ops pages (they hold no data; their calls need a staff token).
   app.use("/ops/quickbooks", qboPageRouter());
   app.use("/ops/trials", trialsPageRouter());
   app.use("/ops/beta", betaPageRouter()); // KS_OPS_BETA_v1
   app.use("/ops/provisioning", provisioningPageRouter()); // KS_OPS_AUTO_PROVISION_v1
+  app.use("/ops/kb", kbPageRouter()); // KS_OPS_KB_v1
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "not_found" }));
 
