@@ -26,6 +26,7 @@ import { opsProvisioningRouter } from "./routes/opsProvisioning.js"; // KS_OPS_A
 import { provisioningPageRouter } from "./routes/opsProvisioningPage.js";
 import { provisioningCallbackRouter, publicProvisioningRouter } from "./routes/provisioningCallback.js";
 import { textingOptInRouter } from "./routes/textingOptIn.js"; // KS_OPS_TWILIO_AUTO_v1
+import { oauthBrokerRouter } from "./routes/oauthBroker.js"; // KS_OPS_WORKSPACE_APPS
 
 /** CORS for a list of allowed origins read from env vars at request time. */
 function corsFor(...envNames: string[]) {
@@ -72,6 +73,7 @@ export function createApp(deps: Deps) {
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps), publicBetaRouter(deps), publicProvisioningRouter(deps));
   // KS_OPS_AUTO_PROVISION_v1 - the provisioning workflow in GitHub Actions reports back with its run's one-off token.
   app.use("/api/provisioning/callback", provisioningCallbackRouter(deps));
+  app.use("/api/oauth/callback", oauthBrokerRouter(deps)); // KS_OPS_WORKSPACE_APPS - Keystone's one OAuth redirect address
   app.use("/api/directory", cors({ origin: "*", methods: ["GET"] }), directoryRouter(deps));
   // KS_STAFF_DIRECTORY_v1 - the apps find a staff member's brokerage from their email or mobile number.
   app.use("/api/staff-directory", cors({ origin: "*", methods: ["POST"], allowedHeaders: ["Content-Type"] }), staffDirectoryRouter(deps));

@@ -74,7 +74,7 @@ Settings > Environments > New environment, name `ks-<code>` (e.g. `ks-northwind`
 | --- | --- | --- |
 | KS-server | `AZURE_CREDENTIALS` (required); `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_TOKEN_ENCRYPTION_KEY` (optional, QuickBooks) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-server`); `QBO_ENVIRONMENT`, `QBO_REDIRECT_URI` (optional, QuickBooks) |
 | KS-Agent | `AZURE_CREDENTIALS` (required) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-agent`) |
-| KS-Portal | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-portal`'s token) | `VITE_API_BASE_URL`, `VITE_APP_URL`, `VITE_CLIENT_APP_URL` (required, https); `VITE_MSAL_CLIENT_ID`, `VITE_MSAL_TENANT_ID`, `VITE_MSAL_REDIRECT_URI`, `VITE_MSAL_SCOPES` (Microsoft sign-in, off without a client id); `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME`, `VITE_ASSISTANT_NAME` (optional) |
+| KS-Portal | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-portal`'s token) | `VITE_API_BASE_URL`, `VITE_APP_URL`, `VITE_CLIENT_APP_URL` (required, https); `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME`, `VITE_ASSISTANT_NAME` (optional) |
 | KS-Client | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-client`'s token) | `VITE_API_BASE_URL` (required, https); `VITE_LICENSEE` (optional: a folder under KS-Client `licensees/` for the branded build); `VITE_CLIENT_APP_URL`, `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME` (optional) |
 
 - `AZURE_CREDENTIALS` is the JSON of the deploy service principal `ks-<code>-deploy` (contributor on `ks-<code>`
@@ -161,6 +161,147 @@ away; until texting is approved, texts to US mobiles wait and Canadian mobiles g
 
 If a registration is turned down: read the reason on `/ops/provisioning`, correct the licensee's details in KS-Ops
 (business number, website, address, contact's job title), then press **Resubmit texting**.
+
+## Microsoft 365 and Google Workspace: what Todd sets up once (not per licensee)
+
+Keystone has **one** Microsoft app and **one** Google sign-in client for every brokerage (KS_OPS_WORKSPACE_APPS). Nobody
+registers an app per brokerage and Keystone staff type nothing per brokerage:
+
+- During provisioning, the `workspace_apps` step writes Keystone's keys (masked) to the licensee's KS-server:
+  `KS_M365_CLIENT_ID`, `KS_M365_CLIENT_SECRET`, `KS_GOOGLE_OAUTH_CLIENT_ID`, `KS_GOOGLE_OAUTH_CLIENT_SECRET` and
+  `KS_OAUTH_BROKER_URL`.
+- The brokerage's admin opens **Settings > Connections** in their staff portal and clicks **Connect Microsoft 365**.
+  Microsoft asks a Microsoft 365 administrator to approve Keystone once for the whole company. Keystone saves the
+  company's tenant itself. If the person clicking is not a Microsoft 365 administrator, the page gives them a link to
+  send to one.
+- After that, each staff member clicks **Connect Microsoft 365** (or **Connect Google**) in My Profile. One click each.
+
+### Why there is one redirect address (the redirect broker)
+
+Microsoft allows at most 256 redirect URIs on an app, and the limit cannot be raised. Wildcards are discouraged and are
+not available for every account type. Each licensee server needs three: mail connect, the admin's approval, and staff
+sign-in. Google only accepts redirect URIs on domains you have verified, and `*.azurewebsites.net` can never be
+verified. Adding addresses for every new licensee would also be a manual step each time.
+
+So both apps list **one** redirect URI per provider, on KS-Ops:
+
+- `https://<KS-Ops address>/api/oauth/callback/microsoft`
+- `https://<KS-Ops address>/api/oauth/callback/google`
+
+How a sign-in reaches the right licensee:
+
+1. The licensee's server puts its licensee id, an expiry and its own one-time value in the OAuth `state`, signed with
+   its ops key.
+2. KS-Ops checks the signature against that licensee's ops key and checks the expiry.
+3. KS-Ops sends the browser on to the licensee's server address from **KS-Ops's own records**, never from the `state`.
+4. The licensee's server checks everything again and finishes the sign-in. KS-Ops never sees a token.
+
+### Microsoft 365: the Keystone app (checklist)
+
+1. **Create the multi-tenant app in Keystone's own Entra tenant.**
+   1. Go to entra.microsoft.com and sign in to Keystone's tenant, not a brokerage's.
+   2. Go to Identity > Applications > App registrations > **New registration**.
+   3. Name: **Keystone**. Brokerage admins see this name on Microsoft's approval screen.
+   4. Supported account types: **Accounts in any organizational directory (Any Microsoft Entra ID tenant -
+      Multitenant)**.
+   5. Redirect URI: platform **Web**, `https://<KS-Ops address>/api/oauth/callback/microsoft`.
+2. **Redirect URIs** (Authentication > Web). Keep exactly the one above. The development server needs no entry when it
+   uses the broker. If you run it without `KS_OAUTH_BROKER_URL`, also add its own three addresses:
+   - `https://<dev KS-server>/api/o365-oauth/callback`
+   - `https://<dev KS-server>/api/o365-oauth/admin-consent/callback`
+   - `https://<dev KS-server>/api/auth/sso/microsoft/callback`
+
+   Leave "Allow public client flows" set to **No**.
+3. **Client secret.** Go to Certificates & secrets > New client secret, choose 24 months and copy the **Value**. Put a
+   reminder in the calendar about one month before it expires. To renew it, see "Existing licensees and renewing a
+   key" below.
+4. **API permissions.** Go to API permissions > Add a permission > Microsoft Graph and add exactly the permissions
+   below. Do **not** press "Grant admin consent" here: each brokerage's admin grants them in their own company with
+   the Connect button.
+   - **Delegated** (each person's own mail, calendar and files): `User.Read`, `Mail.ReadWrite`,
+     `Mail.ReadWrite.Shared`, `Mail.Send`, `Mail.Send.Shared`, `Calendars.ReadWrite`, `Calendars.Read.Shared`,
+     `Tasks.ReadWrite`, `Contacts.ReadWrite`, `MailboxSettings.ReadWrite`, `Presence.Read`, `Files.ReadWrite`,
+     `offline_access`. Add `openid`, `email` and `profile` too, for staff sign-in with Microsoft.
+   - **Application** (work done without a signed-in person):
+     - `User.Read.All`: find a staff member's or shared mailbox's account.
+     - `Mail.ReadWrite`: read the shared mailboxes (incoming documents, bounced lender email), and build large lender
+       emails.
+     - `Mail.Send`: lender packages and notices from the shared mailbox.
+     - `Calendars.ReadWrite`: client bookings, free/busy and invites.
+     - `OnlineMeetings.ReadWrite.All`: turn on recording for Teams meetings booked from the CRM.
+     - `OnlineMeetingTranscript.Read.All` and `OnlineMeetingRecording.Read.All`: file transcripts and recordings on
+       the contact.
+
+   This is the same list KS-server checks (`src/modules/o365/m365App.ts`). Its Connections page shows any permission
+   that a company has not granted.
+5. **Branding & properties.** Add the logo, home page, terms of service and privacy statement links. Set the
+   **Publisher domain** to Keystone's own verified domain.
+6. **Verify the publisher.** With a verified publisher, brokerage admins see a blue "verified" badge on the approval
+   screen. Many companies block unverified multi-tenant apps.
+   1. Enroll Keystone (Boreal) in the Microsoft AI Cloud Partner Program in Partner Center and finish its business
+      verification. You get a **Partner ID**.
+   2. In the app registration, go to Branding & properties > Publisher verification > **Add Partner ID**. The person
+      doing this needs multi-factor sign-in, must be an admin of the app, and must have an email on the publisher
+      domain.
+   3. Wait for the "Verified" mark to appear on the app.
+7. **Set the keys on KS-Ops** (Azure > the `ks-ops` App Service > Settings > Environment variables):
+   - `KS_M365_CLIENT_ID`: Application (client) ID.
+   - `KS_M365_CLIENT_SECRET`: the secret value.
+   - `KS_OPS_PUBLIC_URL`: must be the address used in the redirect URI above. Alternatively, set
+     `KS_OAUTH_BROKER_URL` to `https://<that address>/api/oauth/callback`.
+8. **Optional, for Teams transcripts and recordings without a signed-in person.** Microsoft also needs an
+   "application access policy" in each company that wants this. Their Teams admin creates it once in Teams PowerShell
+   (`New-CsApplicationAccessPolicy` / `Grant-CsApplicationAccessPolicy`) for Keystone's client ID. Mail, calendar,
+   bookings and shared mailboxes do not need it.
+
+### Google Workspace: the Keystone client (checklist)
+
+KS-server `docs/GOOGLE_WORKSPACE.md` (sections 3.1 to 3.6) has the details. Differences for the one-client setup:
+
+1. **Give KS-Ops an address on a domain Keystone owns**, for example `ops.<keystone domain>`, as a custom domain on the
+   `ks-ops` App Service. Verify that domain in Google Search Console. Google refuses redirect URIs on unverified
+   domains, and `azurewebsites.net` can never be verified.
+2. **OAuth consent screen** (Google Auth Platform > Branding and Audience):
+   - User type **External**.
+   - App name **Keystone**, with the support email, logo, home page, privacy policy and terms links.
+   - Under **Authorized domains**, add the domain from step 1 and the website's domain.
+   - Scopes: `openid`, `email`, `profile`, `gmail.send`, `calendar.events`, `tasks`, `drive.file`. **No**
+     `gmail.readonly`: Gmail inbox reading stays off until the CASA assessment.
+3. **OAuth client** (Credentials > Create credentials > OAuth client ID, type *Web application*):
+   - **One** authorized redirect URI: `https://<KS-Ops address>/api/oauth/callback/google`.
+   - No JavaScript origins.
+4. **Verification.** Publish the app and submit it for Google's verification. Brand verification and sensitive
+   scopes are free and take a few days to a few weeks. Answer Google's emails at `borealfinancial@gmail.com`. Until
+   it is verified, people see an "unverified app" warning, and at most 100 users can use it.
+5. **Set the keys on KS-Ops:** `KS_GOOGLE_OAUTH_CLIENT_ID` and `KS_GOOGLE_OAUTH_CLIENT_SECRET`.
+
+There is no "connect the whole domain" option for Google: Keystone does not use domain-wide delegation. Each person
+connects their own account with one click.
+
+### Existing licensees and renewing a key
+
+New licensees get the keys during provisioning. If KS-Ops did not have them yet, the `workspace_apps` step says so in
+the run's log; set them on KS-Ops and press **Retry step**.
+
+A licensee set up before this change, or any licensee after a key is renewed, needs the new values written to its
+server once:
+
+```bash
+az webapp config appsettings set -g ks-<code> -n ks-<code>-server --settings \
+  KS_M365_CLIENT_ID=<id> KS_M365_CLIENT_SECRET=<secret> \
+  KS_GOOGLE_OAUTH_CLIENT_ID=<id> KS_GOOGLE_OAUTH_CLIENT_SECRET=<secret> \
+  KS_OAUTH_BROKER_URL=https://<KS-Ops address>/api/oauth/callback
+```
+
+A server that still has its own `MSAL_CLIENT_ID` / `MSAL_CLIENT_SECRET` (and `MSAL_TENANT_ID`) keeps using them, so
+Boreal's own server and existing staff sign-ins are not disturbed.
+
+### Check it
+
+1. Sign in to a brokerage's staff portal as an Admin and open **Settings > Connections**.
+2. Click **Connect Microsoft 365** and approve as that company's Microsoft 365 admin. The page shows "Connected to
+   <company domain or tenant> by <admin> on <date>", the permissions, and the last successful sync.
+3. On `/ops/provisioning`, open that licensee's run. "Microsoft 365 and Google Workspace" shows the same status.
 
 ## Keystone's own KS-Ops settings (once, not per licensee)
 

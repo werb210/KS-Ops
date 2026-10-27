@@ -4,6 +4,7 @@
 //
 // Everything outside (az, gh, the GitHub REST API, KS-Ops) goes through RunnerDeps, so the unit tests replace it all.
 // Every step is safe to run again. With DRY_RUN=true nothing is called but KS-Ops: each step prints what it would do.
+import { WORKSPACE_SETTING_NAMES } from "../../workspace/apps.js";
 import { APP_REPOS, describePlan, ENVIRONMENT_SETTINGS, GENERATED_AGENT_SECRETS, GENERATED_SERVER_SECRETS, registryEntry, resourceNames, type RunKind } from "../steps.js";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
@@ -214,6 +215,23 @@ export async function twilioSettings(deps: RunnerDeps, cfg: RunnerConfig, ctx: C
   return {};
 }
 
+/** KS_OPS_WORKSPACE_APPS - writes Keystone's Microsoft 365 / Google app keys (from KS-Ops, masked here) to the
+ *  licensee's KS-server. Nothing to write (KS-Ops does not have them yet) is not a failure: the step says so. */
+export async function workspaceApps(deps: RunnerDeps, cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
+  const n = resourceNames(ctx.code);
+  const r = await ops(deps, cfg, "POST", "/workspace-settings");
+  const settings = (r?.settings ?? {}) as Record<string, string>;
+  const missing = Array.isArray(r?.missing) ? (r.missing as unknown[]).map(String) : [];
+  const names = Object.keys(settings).filter((k) => (WORKSPACE_SETTING_NAMES as readonly string[]).includes(k) && settings[k]);
+  for (const k of names) if (/SECRET/.test(k)) mask(deps, settings[k]);
+  if (names.length) {
+    await az(deps, ["webapp", "config", "appsettings", "set", "-g", n.resourceGroup, "-n", n.serverApp, "--settings", ...names.map((k) => `${k}=${settings[k]}`), "-o", "none"]);
+    deps.log(`${n.serverApp}: Microsoft 365 / Google app settings written (${names.join(", ")})`);
+  }
+  if (missing.length) deps.log(`not written (not set up on KS-Ops yet): ${missing.join("; ")}`);
+  return { written: names, not_set_up: missing };
+}
+
 export async function secrets(deps: RunnerDeps, _cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
   const n = resourceNames(ctx.code);
   const names = async (app: string) =>
@@ -419,6 +437,7 @@ export const RUNNER_STEPS: Record<RunKind, Record<string, StepFn>> = {
   provision: {
     azure_resources: azureResources,
     twilio_settings: twilioSettings, // KS_OPS_TWILIO_AUTO_v1
+    workspace_apps: workspaceApps, // KS_OPS_WORKSPACE_APPS
     secrets,
     github_environments: githubEnvironments,
     deploy_registry: (d, c, x) => deployRegistry(d, c, x, true),

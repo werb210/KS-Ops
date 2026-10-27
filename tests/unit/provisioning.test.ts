@@ -191,6 +191,7 @@ describe("provisioning state machine", () => {
     const r1 = (await m.store.getRun(run.id))!;
     await handleCallback(m.deps, r1, { step: "azure_resources", status: "done", output: {} });
     await handleCallback(m.deps, r1, { step: "twilio_settings", status: "done" });
+    await handleCallback(m.deps, r1, { step: "workspace_apps", status: "done" }); // KS_OPS_WORKSPACE_APPS
     await handleCallback(m.deps, r1, { step: "secrets", status: "done" });
     await handleCallback(m.deps, r1, { step: "github_environments", status: "failed", message: "GitHub create environment: 403" });
     expect((await m.store.getRun(run.id))!.status).toBe("failed");

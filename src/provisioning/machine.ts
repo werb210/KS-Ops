@@ -25,6 +25,8 @@ import type { TwilioStore } from "../twilio/store.js";
 import type { TwilioHttp } from "../twilio/http.js";
 import { serverSettings } from "../twilio/account.js";
 import { twilioSummary } from "../twilio/view.js";
+import { workspaceAppSettings } from "../workspace/apps.js"; // KS_OPS_WORKSPACE_APPS
+import { workspaceSummary } from "../workspace/status.js";
 
 export const WORKFLOW_TIMEOUT_MS = 4 * 60 * 60_000;
 export const CALLBACK_TOKEN_TTL_MS = WORKFLOW_TIMEOUT_MS + 30 * 60_000;
@@ -408,7 +410,7 @@ export async function runForCallback(deps: MachineDeps, runId: string, token: un
   return matchesHash(token, run.callback_token_hash) ? run : null;
 }
 
-const OUTPUT_KEYS = ["server_url", "agent_url", "portal_url", "client_url", "resource_group", "deploy_client_id", "pull_requests", "deploys", "dry_run"];
+const OUTPUT_KEYS = ["server_url", "agent_url", "portal_url", "client_url", "resource_group", "deploy_client_id", "pull_requests", "deploys", "dry_run", "written", "not_set_up"];
 
 function cleanOutput(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
@@ -525,6 +527,23 @@ export async function twilioSettingsForWorkflow(deps: MachineDeps, run: RunRow):
   return r;
 }
 
+/** KS_OPS_WORKSPACE_APPS - Keystone's Microsoft 365 / Google app keys for the licensee's KS-server, handed only to the
+ *  workflow while its workspace_apps step runs. What KS-Ops does not have yet is logged, not a failure: the copy works
+ *  without them and the step can be retried once they are set. */
+export async function workspaceSettingsForWorkflow(deps: MachineDeps, run: RunRow): Promise<{ ok: true; settings: Record<string, string>; missing: string[] } | { ok: false; status: number; error: string }> {
+  if (run.dry_run) return { ok: false, status: 409, error: "dry_run" };
+  const step = (await deps.store.steps(run.id)).find((s) => s.step === "workspace_apps");
+  if (!step || step.status !== "running") return { ok: false, status: 409, error: "not_now" };
+  const r = workspaceAppSettings(deps.env);
+  const names = Object.keys(r.settings);
+  if (names.length) {
+    await audit(deps.db, "ks-ops provisioning", "licensee.workspace_settings_handed_over", run.licensee_id, { run_id: run.id, names });
+    await deps.store.log(run.id, "workspace_apps", "info", `Microsoft 365 / Google app settings handed to the workflow: ${names.join(", ")}`);
+  }
+  if (r.missing.length) await deps.store.log(run.id, "workspace_apps", "warn", `not set up on KS-Ops yet, so not written: ${r.missing.join("; ")}. Set them on KS-Ops, then Retry this step.`);
+  return { ok: true, ...r };
+}
+
 /** What the workflow needs to know about the licensee (nothing secret). */
 export async function workflowContext(deps: MachineDeps, run: RunRow) {
   const l = await getLicensee(deps.db, run.licensee_id);
@@ -593,6 +612,9 @@ export async function runView(deps: Pick<MachineDeps, "db" | "store" | "fetch" |
     logs,
     // KS_OPS_TWILIO_AUTO_v1 - the sub-account and texting registration, in plain words.
     twilio: run.kind === "provision" && !run.dry_run ? await twilioSummary(deps as MachineDeps, run.licensee_id) : null,
+    // KS_OPS_WORKSPACE_APPS - whether the brokerage has connected Microsoft 365 / Google (asked of its KS-server).
+    // Asked only for the opened run (logLimit > 0), never for every row of the list.
+    workspace: run.kind === "provision" && !run.dry_run && l && logLimit > 0 ? await workspaceSummary(deps as MachineDeps, l) : null,
   };
 }
 

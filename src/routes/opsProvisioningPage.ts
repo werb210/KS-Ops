@@ -167,6 +167,26 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     }
     return d;
   }
+  // KS_OPS_WORKSPACE_APPS - whether the brokerage connected Microsoft 365 / Google (asked of its own server).
+  function renderWorkspace(ws) {
+    var d = el("div");
+    d.appendChild(el("h3", null, "Microsoft 365 and Google Workspace"));
+    if (!ws.ok) { d.appendChild(el("p", { "class": "hint" }, ws.message)); return d; }
+    var ul = el("ul", { "class": "check" });
+    var ms = el("li"); ms.appendChild(el("strong", null, "Microsoft 365: ")); ms.appendChild(wsTag(ws.microsoft.state));
+    ms.appendChild(el("span", null, " " + ws.microsoft.headline + (ws.microsoft.connected ? " " + ws.microsoft.staff_connected + " staff signed in. Last successful sync: " + when(ws.microsoft.last_sync_at) + "." : "")));
+    ul.appendChild(ms);
+    var g = el("li"); g.appendChild(el("strong", null, "Google Workspace: ")); g.appendChild(wsTag(ws.google.state));
+    g.appendChild(el("span", null, " " + ws.google.headline + (ws.google.connected ? " Last successful sync: " + when(ws.google.last_sync_at) + "." : "")));
+    ul.appendChild(g);
+    d.appendChild(ul);
+    d.appendChild(el("p", { "class": "hint" }, "Nothing to do here: the brokerage's admin connects Microsoft 365 in one click (Settings > Connections), and each person connects Google from My Profile." + (ws.broker ? "" : " This server does not use Keystone's sign-in redirect yet (retry the workspace_apps step).")));
+    return d;
+  }
+  function wsTag(s) {
+    var c = s === "connected" ? "done" : s === "not_connected" || s === "not_available" ? "pending" : s === "partial" || s === "unreachable" || s === "needs_reconnect" ? "blocked" : "failed";
+    return el("span", { "class": "tag s-" + c }, words(s));
+  }
   function renderRun(run, full) {
     var box = el("div", { "class": "run" });
     var head = el("h3");
@@ -186,6 +206,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     var tb = el("tbody"); run.steps.forEach(function (s) { tb.appendChild(stepRow(run, s)); }); t.appendChild(tb);
     wrap.appendChild(t); box.appendChild(wrap);
     if (run.twilio) box.appendChild(renderTwilio(run));
+    if (full && full.workspace) box.appendChild(renderWorkspace(full.workspace));
     var logBtn = el("button", { type: "button", "class": "quiet" }, open[run.id] ? "Hide log" : "Show log");
     logBtn.onclick = function () { open[run.id] = !open[run.id]; load(); };
     box.appendChild(logBtn);
