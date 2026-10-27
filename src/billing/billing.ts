@@ -7,8 +7,8 @@ import type { Deps } from "../deps.js";
 import { periodOf } from "../lib/http.js";
 import { newSignupToken, type LicenseeRow } from "../licensees/repo.js";
 import {
-  CURRENCY, OVERAGE_CENTS, PLAN_NAMES, SUPPORT, computeOverage, dollars, monthlyCharge, onboardingFeeCents, priceKey,
-  subscriptionItems, trialOverlapsPeriod, type Plan, type TrialInfo,
+  CURRENCY, MARKETING_ADDON, OVERAGE_CENTS, PLAN_NAMES, SUPPORT, computeOverage, dollars, hasMarketingAddon, monthlyCharge,
+  onboardingFeeCents, priceKey, subscriptionItems, trialOverlapsPeriod, type Plan, type TrialInfo,
 } from "../pricing.js";
 import { isFinal } from "../sync/usage.js";
 import { BillingNotConfigured, type StripeLike } from "./stripeClient.js";
@@ -141,23 +141,31 @@ export type PreviewLine = { description: string; quantity: number; unit_amount: 
  *  alongside for comparison. */
 export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   const r = await db.query(
-    `SELECT minutes, texts, trial, overage_minutes, overage_texts, generated_at
+    `SELECT minutes, texts, campaign_emails, marketing_texts, signings, trial, overage_minutes, overage_texts, generated_at
        FROM usage_reports WHERE licensee_id = $1 AND period = $2`,
     [l.id, period],
   );
   const usage = r.rows[0] as
-    | { minutes: number; texts: number; trial: TrialInfo; overage_minutes: number; overage_texts: number; generated_at: Date }
+    | {
+        minutes: number; texts: number; campaign_emails: number; marketing_texts: number; signings: number; trial: TrialInfo;
+        overage_minutes: number; overage_texts: number; generated_at: Date;
+      }
     | undefined;
   const overage = usage
     ? computeOverage(
-        { plan: l.plan, seats: l.seats, trial: trialApplies(l.status, usage.trial, period) },
-        { minutes: Number(usage.minutes), texts: Number(usage.texts) },
+        { plan: l.plan, seats: l.seats, trial: trialApplies(l.status, usage.trial, period), marketing_addon: hasMarketingAddon(l) },
+        {
+          minutes: Number(usage.minutes), texts: Number(usage.texts), campaign_emails: Number(usage.campaign_emails) || 0,
+          marketing_texts: Number(usage.marketing_texts) || 0, signings: Number(usage.signings) || 0,
+        },
       )
     : null;
   const c = monthlyCharge({
     ...l,
     overage_minutes: overage?.minutes ?? 0,
     overage_texts: overage?.texts ?? 0,
+    overage_signings: overage?.signings ?? 0,
+    overage_campaign_email_blocks: overage?.campaign_email_blocks ?? 0,
   });
   const lines: PreviewLine[] = [];
   const add = (description: string, quantity: number, unitCents: number) => {
@@ -170,8 +178,11 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   add(`${support.name} support`, 1, support.price_cents);
   add(`${support.name} support - seats over ${support.covered_seats ?? 0}`, c.support_extra_seats, support.extra_seat_cents);
   add("Extra storage (50 GB blocks)", l.extra_storage_blocks, 1000);
+  add(MARKETING_ADDON.name, c.marketing_addon_cents > 0 ? 1 : 0, MARKETING_ADDON.price_cents); // KS_OPS_MARKETING_ADDON
   add("Extra call minutes", overage?.minutes ?? 0, OVERAGE_CENTS.minute);
   add("Extra texts", overage?.texts ?? 0, OVERAGE_CENTS.text);
+  add("Extra e-signings (over the 4 included)", overage?.signings ?? 0, OVERAGE_CENTS.signing);
+  add("Extra campaign emails (per 10,000)", overage?.campaign_email_blocks ?? 0, OVERAGE_CENTS.campaign_email_block);
   return {
     period,
     currency: CURRENCY,
@@ -185,14 +196,17 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
           generated_at: usage.generated_at,
           final: isFinal(period, usage.generated_at),
           allowance: overage!.allowance,
-          overage: { minutes: overage!.minutes, texts: overage!.texts },
+          overage: {
+            minutes: overage!.minutes, texts: overage!.texts, signings: overage!.signings,
+            campaign_emails: overage!.campaign_emails, campaign_email_blocks: overage!.campaign_email_blocks,
+          },
           reported_overage: { minutes: Number(usage.overage_minutes) || 0, texts: Number(usage.overage_texts) || 0 },
         }
       : null,
     note:
       l.billing_interval === "annual"
         ? "Annual plans are billed once a year at 12 times the monthly amount shown. Overage is billed after each month ends."
-        : "Overage is billed after each month ends.",
+        : "Overage (extra minutes, texts, signings and campaign emails) is added to the next month's bill.",
   };
 }
 
@@ -203,6 +217,13 @@ type OverageRow = {
   generated_at: Date;
   minutes: number;
   texts: number;
+  /** KS_OPS_MARKETING_ADDON */
+  campaign_emails?: number;
+  marketing_texts?: number;
+  signings?: number;
+  addons?: Record<string, boolean> | null;
+  billing_interval?: string;
+  stripe_subscription_id?: string | null;
   trial: TrialInfo;
   plan: Plan;
   seats: number;
@@ -211,19 +232,21 @@ type OverageRow = {
   company_name: string;
 };
 
-type Progress = {
+type Progress = Record<string, any> & {
   status: string;
   stripe_customer_id: string;
-  minutes: number;
-  texts: number;
-  minutes_amount: number;
-  texts_amount: number;
-  minutes_invoice_item_id: string | null;
-  texts_invoice_item_id: string | null;
   invoice_id: string | null;
 };
 
-const OVERAGE_KINDS = ["minutes", "texts"] as const;
+/** KS_OPS_MARKETING_ADDON - each overage line: the quantity column, the amount column, the unit price and the words. */
+export const OVERAGE_KINDS = {
+  minutes: { qty: "minutes", unit: OVERAGE_CENTS.minute, label: "Extra call minutes" },
+  texts: { qty: "texts", unit: OVERAGE_CENTS.text, label: "Extra texts" },
+  signings: { qty: "signings", unit: OVERAGE_CENTS.signing, label: "Extra e-signings (over the 4 included)" },
+  campaign_emails: { qty: "campaign_email_blocks", unit: OVERAGE_CENTS.campaign_email_block, label: "Extra campaign emails (per 10,000)" },
+} as const;
+export type OverageKind = keyof typeof OVERAGE_KINDS;
+const KINDS = Object.keys(OVERAGE_KINDS) as OverageKind[];
 
 async function markReportBilled(db: Q, reportId: string, invoiceId: string | null): Promise<void> {
   await db.query(
@@ -233,19 +256,39 @@ async function markReportBilled(db: Q, reportId: string, invoiceId: string | nul
 }
 
 /**
+ * Where a month's overage goes: on a monthly subscription that is still live it waits as pending invoice items and
+ * Stripe adds it to the next month's subscription invoice; otherwise (annual, or no subscription) it gets its own
+ * invoice now, as before.
+ */
+export function overageGoesOnNextInvoice(row: Pick<OverageRow, "billing_interval" | "stripe_subscription_id">): boolean {
+  return row.billing_interval === "monthly" && Boolean(row.stripe_subscription_id);
+}
+
+/**
  * Bills one licensee's overage for one finished month. Progress lives in overage_billing (one row per licensee and
  * month): the amounts are fixed when the row is made, each Stripe object's id is saved as soon as it exists, and
  * before creating anything Stripe is searched for an item or invoice already made for this licensee and month (by
  * metadata). So a rerun - even days later, past Stripe's 24-hour idempotency window - never charges twice.
+ * KS_OPS_MARKETING_ADDON - also signings and campaign emails; on monthly subscriptions the lines go on the next bill.
  */
 async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: OverageRow): Promise<"invoiced" | "nothing" | "skipped"> {
   const key = [row.licensee_id, row.period];
   let p = (await deps.db.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = $2", key)).rows[0] as Progress | undefined;
   if (!p) {
     const trial = trialApplies(row.status, row.trial, row.period);
-    const o = computeOverage({ plan: row.plan, seats: row.seats, trial }, { minutes: Number(row.minutes), texts: Number(row.texts) });
-    const details = { plan: row.plan, seats: row.seats, trial, allowance: o.allowance, used: { minutes: row.minutes, texts: row.texts } };
-    if (o.minutes === 0 && o.texts === 0) {
+    const addon = hasMarketingAddon(row);
+    const o = computeOverage(
+      { plan: row.plan, seats: row.seats, trial, marketing_addon: addon },
+      {
+        minutes: Number(row.minutes), texts: Number(row.texts), campaign_emails: Number(row.campaign_emails) || 0,
+        marketing_texts: Number(row.marketing_texts) || 0, signings: Number(row.signings) || 0,
+      },
+    );
+    const details = {
+      plan: row.plan, seats: row.seats, trial, marketing_addon: addon, allowance: o.allowance,
+      used: { minutes: row.minutes, texts: row.texts, signings: row.signings ?? 0, campaign_emails: row.campaign_emails ?? 0, marketing_texts: row.marketing_texts ?? 0 },
+    };
+    if (o.minutes === 0 && o.texts === 0 && o.signings === 0 && o.campaign_email_blocks === 0) {
       await deps.db.query(
         `INSERT INTO overage_billing (licensee_id, period, status, details) VALUES ($1, $2, 'nothing_to_bill', $3)
          ON CONFLICT (licensee_id, period) DO NOTHING`,
@@ -260,10 +303,11 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
     }
     await deps.db.query(
       `INSERT INTO overage_billing (licensee_id, period, status, stripe_customer_id, minutes, texts, minutes_amount,
-                                    texts_amount, details)
-       VALUES ($1, $2, 'started', $3, $4, $5, $6, $7, $8) ON CONFLICT (licensee_id, period) DO NOTHING`,
+                                    texts_amount, signings, signings_amount, campaign_email_blocks, campaign_emails_amount, details)
+       VALUES ($1, $2, 'started', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (licensee_id, period) DO NOTHING`,
       [
         ...key, row.stripe_customer_id, o.minutes, o.texts, o.minutes * OVERAGE_CENTS.minute, o.texts * OVERAGE_CENTS.text,
+        o.signings, o.signings * OVERAGE_CENTS.signing, o.campaign_email_blocks, o.campaign_email_blocks * OVERAGE_CENTS.campaign_email_block,
         JSON.stringify(details),
       ],
     );
@@ -273,7 +317,7 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
     await markReportBilled(deps.db, row.id, null);
     return "nothing";
   }
-  if (p.status === "invoiced") {
+  if (p.status === "invoiced" || p.status === "pending_next_invoice") {
     await markReportBilled(deps.db, row.id, p.invoice_id);
     return "nothing";
   }
@@ -285,8 +329,9 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
   let stripeItems: Obj[] | null = null;
   let invoiceFromItems: string | null = null;
   const base = `ks-overage-${row.licensee_id}-${row.period}`;
+  const nextInvoice = overageGoesOnNextInvoice(row);
 
-  for (const kind of OVERAGE_KINDS) {
+  for (const kind of KINDS) {
     const amount = Number(p[`${kind}_amount`]) || 0;
     if (amount <= 0) continue;
     const saved = p[`${kind}_invoice_item_id`];
@@ -298,16 +343,15 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
       itemId = found.id;
       invoiceFromItems ??= idOf(found.invoice);
     } else {
-      const qty = Number(p[kind]) || 0;
-      const unit = kind === "minutes" ? OVERAGE_CENTS.minute : OVERAGE_CENTS.text;
-      const label = kind === "minutes" ? "Extra call minutes" : "Extra texts";
+      const def = OVERAGE_KINDS[kind];
+      const qty = Number(p[def.qty]) || 0;
       itemId = (
         await stripe.invoiceItems.create(
           {
             customer,
             currency: CURRENCY.toLowerCase(),
             amount,
-            description: `${label} for ${row.period}: ${qty} at $${dollars(unit).toFixed(2)}`,
+            description: `${def.label} for ${row.period}: ${qty} at $${dollars(def.unit).toFixed(2)}`,
             metadata: { ...metadata, overage: kind },
           },
           { idempotencyKey: `${base}-${kind}` },
@@ -326,6 +370,16 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
   );
 
   let invoiceId = p.invoice_id ?? invoiceFromItems;
+  if (!invoiceId && nextInvoice) {
+    // KS_OPS_MARKETING_ADDON - monthly: the items stay pending and Stripe puts them on the next subscription invoice.
+    await deps.db.query(
+      `UPDATE overage_billing SET status = 'pending_next_invoice', last_error = NULL, updated_at = now()
+        WHERE licensee_id = $1 AND period = $2`,
+      key,
+    );
+    await markReportBilled(deps.db, row.id, null);
+    return "invoiced";
+  }
   if (!invoiceId) {
     const existing = (await stripe.invoices.list({ customer, limit: 100 })).data ?? [];
     invoiceId = existing.find((inv) => ours(inv) && inv.metadata?.ks_overage === "1")?.id ?? null;
@@ -364,7 +418,8 @@ export async function billOverage(deps: Pick<Deps, "db" | "stripe" | "now">): Pr
   const current = periodOf(deps.now());
   const r = await deps.db.query(
     `SELECT ur.id, ur.licensee_id, ur.period, ur.generated_at, ur.minutes, ur.texts, ur.trial,
-            l.plan, l.seats, l.status, l.stripe_customer_id, l.company_name
+            ur.campaign_emails, ur.marketing_texts, ur.signings,
+            l.plan, l.seats, l.status, l.stripe_customer_id, l.company_name, l.addons, l.billing_interval, l.stripe_subscription_id
        FROM usage_reports ur JOIN licensees l ON l.id = ur.licensee_id
       WHERE ur.overage_billed_at IS NULL AND ur.period < $1
       ORDER BY ur.period LIMIT 200`,

@@ -2,7 +2,8 @@
 //
 // - Invoice: one QuickBooks Invoice per Stripe invoice, for the licensee's Customer (found by company name, then email,
 //   or made). Lines: seats, support, extra storage, onboarding, usage overage and anything else, from the Stripe lines
-//   (prices are recognised from stripe_prices); a discount line for Stripe discounts; tax from Stripe's tax amount
+//   (prices are recognised from stripe_prices; the Marketing add-on and its extra campaign emails post to "Keystone
+//   Marketing add-on", extra signings to "Keystone e-signing"); a discount line for Stripe discounts; tax from Stripe's tax amount
 //   with the tax code in the settings. If the result does not add up to Stripe's total, a line for the difference is
 //   added and a warning logged, so the books match what Stripe charged.
 // - Payment: a QuickBooks Payment against that invoice for the amount paid (deposited to deposit_account_id when set,
@@ -110,6 +111,9 @@ export const ITEMS = {
   storage: "Keystone extra storage",
   onboarding: "Keystone onboarding",
   overage: "Keystone usage overage",
+  // KS_OPS_MARKETING_ADDON - the Marketing add-on and its extra campaign emails; e-signings over the 4 included.
+  marketing: "Keystone Marketing add-on",
+  signings: "Keystone e-signing",
   other: "Keystone other charges",
   refund: "Keystone refunds",
 } as const;
@@ -188,10 +192,19 @@ function kindOfKey(key: string | undefined): ItemKind {
   if (k === "support" || k === "support_extra_seat") return "support";
   if (k === "storage_block") return "storage";
   if (k === "onboarding") return "onboarding";
+  if (k === "marketing_addon") return "marketing"; // KS_OPS_MARKETING_ADDON
   return "other";
 }
 
-/** The Stripe invoice's lines sorted into seats, support, storage, onboarding, overage and other. */
+/** KS_OPS_MARKETING_ADDON - extra signings post to the e-signing item, extra campaign emails to the Marketing add-on
+ *  item, minutes and texts to usage overage. */
+export function overageItemKind(kind: unknown): ItemKind {
+  if (kind === "signings") return "signings";
+  if (kind === "campaign_emails") return "marketing";
+  return "overage";
+}
+
+/** The Stripe invoice's lines sorted into seats, support, storage, onboarding, Marketing add-on, e-signing, overage and other. */
 export async function invoiceLines(db: Q, stripe: StripeLike | null, inv: Obj): Promise<InvoiceLine[]> {
   const lines = await allLines(stripe, inv);
   const prices = [...new Set(lines.map(linePrice).filter((p): p is string => Boolean(p)))];
@@ -202,7 +215,7 @@ export async function invoiceLines(db: Q, stripe: StripeLike | null, inv: Obj): 
   }
   return lines.map((line) => {
     const price = linePrice(line);
-    const kind: ItemKind = line.metadata?.overage || line.metadata?.ks_overage ? "overage" : kindOfKey(price ? keys.get(price) : undefined);
+    const kind: ItemKind = line.metadata?.overage || line.metadata?.ks_overage ? overageItemKind(line.metadata?.overage) : kindOfKey(price ? keys.get(price) : undefined);
     return {
       kind,
       description: clip(String(line.description ?? ITEMS[kind]), 4000),

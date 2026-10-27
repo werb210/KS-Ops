@@ -345,6 +345,8 @@ export const signupSchema = z
     support_level: supportSchema,
     extra_storage_blocks: z.preprocess((v) => (v === null || v === "" ? undefined : v), storageBlocksSchema.default(0)),
     payment_method: z.preprocess((v) => (v === null || v === "" ? undefined : v), paymentMethodSchema.default(DEFAULT_PAYMENT_METHOD)),
+    // KS_OPS_MARKETING_ADDON - the Marketing add-on, chosen at sign-up ($49 a month, any plan).
+    marketing_addon: z.preprocess((v) => (v === null || v === "" || v === undefined ? false : v), z.boolean({ error: "Choose whether to add the Marketing add-on." })),
     primary_color: colorSchema,
     accent_color: colorSchema,
     background_color: colorSchema,
@@ -501,7 +503,11 @@ export const staffPatchSchema = z
     onboarding_fee_paid: z.boolean(),
     // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.
     addons: z
-      .object({ bank_connect: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "bank_connect must be true or false.") }) })
+      .object({
+        bank_connect: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "bank_connect must be true or false.") }),
+        // KS_OPS_MARKETING_ADDON - the Marketing add-on ($49 a month, flat).
+        marketing: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "marketing must be true or false.") }),
+      })
       .partial()
       .strict(),
   })

@@ -24,7 +24,7 @@ describe("plan push", () => {
     expect(url).toBe("https://ks-northwind.example/api/plan");
     expect(init.method).toBe("PUT");
     expect((init.headers as Record<string, string>)["X-KS-Ops-Key"]).toBe("ksops_abc");
-    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false }, beta_features: [],
+    expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false, marketing: false }, beta_features: [],
       branding: { primary_color: "", accent_color: "", background_color: "", font_family: "", logo_url: "" } });
     expect(d.calls.some((c) => /plan_sync_status = 'synced'/.test(c.sql))).toBe(true);
     expect(d.calls.some((c) => /UPDATE plan_changes SET status = 'pushed'/.test(c.sql))).toBe(true);
@@ -69,18 +69,18 @@ describe("plan push", () => {
 
   it("sends status only once the licensee is live", () => {
     for (const status of ["trial", "active", "past_due", "suspended", "cancelled"]) {
-      expect(planPushBody({ plan: "growth", extra_storage_blocks: 0, status })).toEqual({ plan: "growth", extra_storage_blocks: 0, status, addons: { bank_connect: false } });
+      expect(planPushBody({ plan: "growth", extra_storage_blocks: 0, status })).toEqual({ plan: "growth", extra_storage_blocks: 0, status, addons: { bank_connect: false, marketing: false } });
     }
     for (const status of ["pending_payment", "provisioning"]) {
-      expect(planPushBody({ plan: "growth", extra_storage_blocks: 0, status })).toEqual({ plan: "growth", extra_storage_blocks: 0, addons: { bank_connect: false } });
+      expect(planPushBody({ plan: "growth", extra_storage_blocks: 0, status })).toEqual({ plan: "growth", extra_storage_blocks: 0, addons: { bank_connect: false, marketing: false } });
     }
   });
 
   // KS_OPS_BANK_CONNECT_ADDON - the add-on set always travels in full, so switching it off reaches the server too.
   it("sends the bank_connect add-on as an explicit boolean", () => {
-    expect(planPushBody({ plan: "starter", extra_storage_blocks: 0, status: "active", addons: { bank_connect: true } }).addons).toEqual({ bank_connect: true });
-    expect(planPushBody({ plan: "pro", extra_storage_blocks: 0, status: "active", addons: { other: true } as any }).addons).toEqual({ bank_connect: false });
-    expect(planPushBody({ plan: "pro", extra_storage_blocks: 0, status: "active", addons: null }).addons).toEqual({ bank_connect: false });
+    expect(planPushBody({ plan: "starter", extra_storage_blocks: 0, status: "active", addons: { bank_connect: true } }).addons).toEqual({ bank_connect: true, marketing: false });
+    expect(planPushBody({ plan: "pro", extra_storage_blocks: 0, status: "active", addons: { other: true } as any }).addons).toEqual({ bank_connect: false, marketing: false });
+    expect(planPushBody({ plan: "pro", extra_storage_blocks: 0, status: "active", addons: null }).addons).toEqual({ bank_connect: false, marketing: false });
   });
 
   it("a suspended licensee's server is told so", async () => {

@@ -103,6 +103,20 @@ How they are handled:
   licensee with `PATCH /api/ops/licensees/:id { "addons": { "bank_connect": true } }` (or `false`), which is audited
   and pushed like a plan change. They are never listed in `/api/public/plans` and the licensee cannot change them.
   `bank_connect` = the applicant Connect Bank (View-Only) step, the staff request item, fraud check 3 and Flinks.
+- Marketing add-on (KS_OPS_MARKETING_ADDON, Todd Oct 26): CAD $49 a month, flat, one per brokerage, any plan (Pro does
+  not include it). Chosen at sign-up (`marketing_addon: true` on `POST /api/public/signup`) or switched on/off by staff
+  with `PATCH /api/ops/licensees/:id { "addons": { "marketing": true } }` (audited, pushed as `addons.marketing`, and the
+  Stripe subscription gets or loses its flat `marketing_addon:<interval>` line, 12 x on annual). Unlike `bank_connect`
+  it is public: `/api/public/plans` lists `marketing_addon` (what it adds), each plan's `marketing` limits (campaign
+  emails 500 / 1,000 / 2,500 a month, text-to-many 50 / 250 / 500, sequences 2 / 5 / 10, visitor history 30 / 90 / 365
+  days, 1 lead form) and `signings` (4 a month per brokerage, $2.50 each over). Both trials include the add-on (the
+  licensee's server turns it on during either trial; KS-Ops bills overage with its allowance while a trial applies).
+- Overage (after a month's final usage report, worked out from KS-Ops's own plan, seats and add-ons): extra minutes
+  ($0.04), texts ($0.03; with the add-on up to 1,000 marketing texts are not counted), signings over 4 ($2.50) and, with
+  the add-on, campaign emails over the plan's + 10,000 ($10 per 10,000 or part). Monthly subscriptions: the lines wait as
+  pending invoice items and go on the next month's subscription invoice (`overage_billing.status` `pending_next_invoice`).
+  Annual subscriptions get their own overage invoice as before. QuickBooks posts the add-on and extra campaign emails to
+  "Keystone Marketing add-on", extra signings to "Keystone e-signing", minutes and texts to "Keystone usage overage".
 
 ## API
 

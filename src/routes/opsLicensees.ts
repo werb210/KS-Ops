@@ -42,6 +42,7 @@ function pricingView(l: LicenseeRow) {
     seats: dollars(c.seats_cents),
     support: dollars(c.support_cents),
     storage: dollars(c.storage_cents),
+    marketing_addon: dollars(c.marketing_addon_cents), // KS_OPS_MARKETING_ADDON
     mrr: dollars(c.recurring_cents),
     onboarding_fee: dollars(onboardingFeeCents(l.plan)),
   };
@@ -273,7 +274,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
         planPush = await pushPlan(deps, l.id, actor);
       }
       let billingSync: string | null = null;
-      if (["plan", "billing_interval", "seats", "support_level", "extra_storage_blocks"].some((c) => changed.includes(c as any))) {
+      // KS_OPS_MARKETING_ADDON - switching the Marketing add-on on or off adds or removes its line on the subscription.
+      if (["plan", "billing_interval", "seats", "support_level", "extra_storage_blocks"].some((c) => changed.includes(c as any)) || addonsChanged.includes("marketing")) {
         try {
           billingSync = await syncSubscription(deps, next);
         } catch (err) {
