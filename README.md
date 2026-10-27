@@ -66,6 +66,10 @@ again after a price changes.
 | `KS_QBO_CLIENT_ID`, `KS_QBO_CLIENT_SECRET`, `KS_QBO_TOKEN_ENCRYPTION_KEY` | for Keystone's QuickBooks | Keystone's own QuickBooks Online (Stripe invoices, payments, refunds and fees posted there). The key is 32 bytes (64 hex characters). Unset: off. See `docs/QUICKBOOKS.md` |
 | `KS_QBO_ENVIRONMENT` | no | `sandbox` (default) or `production` |
 | `KS_QBO_REDIRECT_URI` | no | default `https://<ks-ops host>/api/ops/quickbooks/oauth/callback` (host from `KS_OPS_PUBLIC_URL` or Azure's `WEBSITE_HOSTNAME`); register it in the Intuit app |
+| `OPENAI_API_KEY` | for AI help | KS_OPS_KB_v1: Keystone's own key for the knowledge base's semantic search, Ask Maya (portal support assistant) and the website sales assistant. Unset: full-text search only, and both assistants answer with the closest articles. Never counts against a licensee's AI allowance |
+| `OPENAI_MODEL`, `OPENAI_EMBEDDING_MODEL` | no | default `gpt-4o-mini` (as KS-Agent) and `text-embedding-3-small` |
+| `KS_HELP_LICENSEE_DAILY_LIMIT` | no | Ask Maya questions a day per licensee (default 300; also 30 an hour per person) |
+| `KS_SALES_ASSISTANT_DAILY_LIMIT` | no | website assistant questions a day in all (default 3,000; also 40 a day per browser, 20 per 10 minutes per address) |
 | `OPS_WORKERS` | no | `off` stops the background jobs (they never run under `NODE_ENV=test`) |
 | `TRUST_PROXY_HOPS` | no | proxies in front of the app (default 1, Azure App Service) |
 | `BI_SERVER_URL` | for PGI referrals | the insurance partner's server (Boreal Insurance BI-Server), e.g. `https://bi-server-<id>.canadacentral-01.azurewebsites.net`. Every live licensee is made a PGI referral source there (20% referral fee) and its credentials are pushed to the licensee's server (`PUT /api/pgi/link`) |
@@ -205,6 +209,21 @@ live licensees (`trial`, `active`, `past_due`) with a server address are returne
   licensee's server is `pro`); then Starter unless a plan was chosen (`PATCH /api/ops/licensees/:id { plan }`). Who
   started it is kept on the licensee (`admin_trial_*`) and in `staff_audit`; the contact is emailed the dates, and again
   when it ends. One per licensee; refused for a licensee with a live subscription
+
+**Knowledge base and Keystone Maya (KS_OPS_KB_v1)** — one help library for every licensee, edited on `GET /ops/kb`
+(staff token). Articles: title, category, Markdown body with images, plans (empty = every plan), audience (`public` =
+website too, `all_staff`, `admins`), draft/published, last updated. Search is Postgres full text fused with OpenAI
+embeddings (stored as `real[]`, no pgvector) when `OPENAI_API_KEY` is set. The starter library (`src/kb/articles/`) is
+loaded once on startup and by `npm run migrate`.
+- Staff: `GET|POST /api/ops/kb/articles`, `GET|PATCH|DELETE /api/ops/kb/articles/:id`, `POST /api/ops/kb/images`,
+  `POST /api/ops/kb/preview`, `GET /api/ops/kb/categories`, `GET /api/ops/kb/report?days=` (questions with no good answer)
+- Public: `GET /api/public/kb/articles?q=&category=`, `GET /api/public/kb/articles/:slug`, `GET /api/public/kb/categories`,
+  `GET /api/public/kb/images/:id`, `POST /api/public/assistant/chat`, `POST /api/public/assistant/lead` (consent required;
+  `wants: live_demo | person` emails `KS_SALES_EMAIL` and adds `task` to the CRM upsert - BF-Server must read `task` to
+  create it; the follow-up is always in the note too)
+- From a licensee's KS-server (`X-KS-Ops-Key`): `POST /api/licensees/:id/kb/search`, `/kb/article`, `/kb/categories`,
+  `/kb/ask` (Ask Maya: answers from the KB with citations, uses only this licensee's plan/usage/connections, offers
+  "Contact support" when it can't help)
 
 `GET /api/health` reports whether the database answers.
 

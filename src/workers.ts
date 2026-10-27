@@ -18,6 +18,7 @@ import { flushQboOutbox } from "./qbo/outbox.js";
 import { advanceDueRuns } from "./provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
 import { machineDeps } from "./provisioning/index.js";
 import { refreshTexting, syncAccountStatuses } from "./twilio/lifecycle.js"; // KS_OPS_TWILIO_AUTO_v1
+import { embedPending } from "./kb/repo.js"; // KS_OPS_KB_v1
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -256,7 +257,21 @@ export function startWorkers(deps: Deps): () => void {
       twilioBusy = false;
     }
   };
+  // KS_OPS_KB_v1 - help articles without an up-to-date embedding (new, edited, or a new model), every 10 minutes.
+  let kbBusy = false;
+  const kb = async () => {
+    if (kbBusy) return;
+    kbBusy = true;
+    try {
+      const r = await embedPending(deps);
+      if (r.embedded || r.failed) console.log(`[workers] help articles embedded: ${r.embedded}, failed: ${r.failed}`);
+    } finally {
+      kbBusy = false;
+    }
+  };
   const timers = [
+    setInterval(kb, 10 * 60_000),
+    setTimeout(kb, 40_000),
     setInterval(twilio, 30 * 60_000),
     setTimeout(twilio, 3 * 60_000),
     setInterval(prov, 30_000),

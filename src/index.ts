@@ -8,6 +8,8 @@ import { encryptionKey } from "./lib/crypto.js";
 import { turnstileEnabled } from "./lib/turnstile.js";
 import { createMailer, graphConfigured, sendgridConfigured } from "./lib/email.js";
 import { runMigrations } from "./migrate.js";
+import { seedKnowledgeBase } from "./kb/seed.js";
+import { aiConfigured } from "./assistant/openai.js";
 import { startWorkers } from "./workers.js";
 import { demoConfigured } from "./demo/config.js";
 import { smsConfigured } from "./lib/sms.js";
@@ -17,6 +19,7 @@ import { qboMissing } from "./qbo/config.js";
 async function main() {
   const pool = getPool();
   await runMigrations(pool);
+  await seedKnowledgeBase(pool); // KS_OPS_KB_v1 - the starter help library, once
 
   const deps: Deps = { db: pool, fetch, mailer: createMailer(fetch), stripe: realStripe, now: () => new Date() };
 
@@ -32,6 +35,8 @@ async function main() {
   if (!bfCrmConfigured()) console.warn("[startup] BF_CRM_KEY not set: demo sign-ups, sign-ups and licensees are not pushed to the Keystone CRM on BF-Server.");
   if (qboMissing().length) console.warn(`[startup] Keystone QuickBooks is off (missing ${qboMissing().join(", ")}): Stripe activity is not posted to QuickBooks.`);
   if (!demoConfigured()) console.warn("[startup] KS_DEMO_SERVER_URL / KS_DEMO_OPS_KEY (16+ chars) / KS_DEMO_PORTAL_URL not all set: the self-serve demo answers 503.");
+
+  if (!aiConfigured()) console.warn("[startup] OPENAI_API_KEY not set: help search is full text only and Ask Maya / the website assistant answer with articles only.");
 
   const port = Number(process.env.PORT ?? 8080);
   createApp(deps).listen(port, () => console.log(`[startup] KS-Ops listening on ${port}`));
