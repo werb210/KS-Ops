@@ -21,6 +21,7 @@ Staff "Start" on /ops/provisioning ┘          │
                  Azure sign-in with a federated credential: no Azure secret is stored anywhere
                    azure_resources      scripts/provision-licensee.sh <code> canadacentral, DEPLOY_IDENTITY=1
                    twilio_settings      Twilio settings from KS-Ops (one-off token, masked) -> the KS-server app settings
+                   workspace_apps       Keystone's Microsoft 365 / Google app keys from KS-Ops (masked) -> the KS-server app settings
                    secrets              checks every generated key is stored on the two web apps
                    github_environments  ks-<code> in KS-server, KS-Agent, KS-Portal, KS-Client (secrets + variables)
                    deploy_registry      pull request to deploy/licensees.json in each, merged when CI passes
@@ -214,7 +215,11 @@ Also make sure `OPS_ALLOWED_SERVER_HOST_SUFFIXES` covers the licensee hosts (the
 - **Twilio**: nothing per licensee (KS_OPS_TWILIO_AUTO_v1). Todd's one-time Keystone setup (paid master account, its
   keys on KS-Ops, the ISV profile in Trust Hub) is in `PROVISIONING.md`. The carriers' review of texting registrations
   takes days; KS-Ops follows it by itself.
-- **The licensee's own Microsoft 365 / Google Workspace and QuickBooks apps** (`VITE_MSAL_*`, `QBO_*`): off until set.
+- **The licensee's own QuickBooks app** (`QBO_*`): off until set.
+- **Microsoft 365 / Google Workspace: nothing per licensee.** The `workspace_apps` step writes Keystone's one
+  Microsoft app and one Google client to the licensee's KS-server; the brokerage's admin then connects Microsoft 365
+  in one click (Settings > Connections) and each person connects Google from My Profile. The opened run on
+  `/ops/provisioning` shows whether they have. Todd's one-time setup is in `PROVISIONING.md`.
 - **Email sending from their domain** and any SPF/DKIM records.
 - A step that keeps failing: read the log, fix the cause, then **Retry step**, or do it by hand and **Mark done
   manually** (with a note).

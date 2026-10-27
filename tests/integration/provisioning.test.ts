@@ -100,10 +100,10 @@ describe("automatic provisioning", () => {
     const res = await request(app()).post("/api/ops/provisioning").set(staff()).send({ licensee_id: l.id });
     expect(res.status).toBe(201);
     runId = res.body.run.id;
-    expect(res.body.run.steps.map((s: any) => s.step)).toEqual(["twilio_account", "twilio_address", "azure_resources", "twilio_settings", "secrets", "github_environments", "deploy_registry", "deploy", "health", "configure", "admin_user", "welcome_email", "twilio_voice", "twilio_bundle", "phone_numbers", "texting_registration"]);
+    expect(res.body.run.steps.map((s: any) => s.step)).toEqual(["twilio_account", "twilio_address", "azure_resources", "twilio_settings", "workspace_apps", "secrets", "github_environments", "deploy_registry", "deploy", "health", "configure", "admin_user", "welcome_email", "twilio_voice", "twilio_bundle", "phone_numbers", "texting_registration"]);
     await until(async () => dispatches.length > 0, "the dispatch");
     expect(dispatches[0].url).toBe("https://api.github.com/repos/werb210/KS-Ops/actions/workflows/provision-licensee.yml/dispatches");
-    expect(dispatches[0].inputs).toMatchObject({ run_id: runId, code: "acme", steps: "azure_resources,twilio_settings,secrets,github_environments,deploy_registry,deploy" });
+    expect(dispatches[0].inputs).toMatchObject({ run_id: runId, code: "acme", steps: "azure_resources,twilio_settings,workspace_apps,secrets,github_environments,deploy_registry,deploy" });
     // KS_OPS_TWILIO_AUTO_v1 - the sub-account and address were made before the workflow started, and kept in Postgres.
     const tw = (await pool.query("SELECT * FROM licensee_twilio WHERE licensee_id = $1", [l.id])).rows[0];
     expect(tw).toMatchObject({ account_status: "active", friendly_name: "Keystone - Acme Lending (acme)" });
@@ -154,7 +154,30 @@ describe("automatic provisioning", () => {
     expect(tws.body.settings.TWILIO_AUTH_TOKEN).toBe(twilio.accounts.get(tws.body.settings.TWILIO_ACCOUNT_SID)!.auth_token);
     const bad = await request(app()).post(`/api/provisioning/callback/${runId}/twilio-settings`).set("Authorization", "Bearer nope");
     expect(bad.status).toBe(401);
-    for (const step of ["twilio_settings", "secrets", "github_environments", "deploy_registry", "deploy"]) expect((await cb({ step, status: "done" })).status).toBe(200);
+    expect((await cb({ step: "twilio_settings", status: "done" })).status).toBe(200);
+    // KS_OPS_WORKSPACE_APPS - Keystone's Microsoft 365 / Google app keys, only while workspace_apps runs.
+    process.env.KS_M365_CLIENT_ID = "11111111-2222-3333-4444-555555555555";
+    process.env.KS_M365_CLIENT_SECRET = "m365-secret";
+    process.env.KS_GOOGLE_OAUTH_CLIENT_ID = "123.apps.googleusercontent.com";
+    process.env.KS_GOOGLE_OAUTH_CLIENT_SECRET = "google-secret";
+    try {
+      const wsEarly = await request(app()).post(`/api/provisioning/callback/${runId}/workspace-settings`).set("Authorization", `Bearer ${token}`);
+      expect(wsEarly.status).toBe(409);
+      expect((await cb({ step: "workspace_apps", status: "running" })).status).toBe(200);
+      const ws = await request(app()).post(`/api/provisioning/callback/${runId}/workspace-settings`).set("Authorization", `Bearer ${token}`);
+      expect(ws.status).toBe(200);
+      expect(ws.body).toEqual({
+        settings: {
+          KS_M365_CLIENT_ID: "11111111-2222-3333-4444-555555555555", KS_M365_CLIENT_SECRET: "m365-secret",
+          KS_GOOGLE_OAUTH_CLIENT_ID: "123.apps.googleusercontent.com", KS_GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+          KS_OAUTH_BROKER_URL: "https://ks-ops.example.test/api/oauth/callback",
+        },
+        missing: [],
+      });
+    } finally {
+      for (const k of ["KS_M365_CLIENT_ID", "KS_M365_CLIENT_SECRET", "KS_GOOGLE_OAUTH_CLIENT_ID", "KS_GOOGLE_OAUTH_CLIENT_SECRET"]) delete process.env[k];
+    }
+    for (const step of ["workspace_apps", "secrets", "github_environments", "deploy_registry", "deploy"]) expect((await cb({ step, status: "done" })).status).toBe(200);
   });
 
   it("KS-Ops finishes: health, plan push, admin user, sign-in email", async () => {

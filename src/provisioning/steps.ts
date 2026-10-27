@@ -15,6 +15,8 @@ export const PROVISION_STEPS: readonly StepDef[] = [
   { key: "twilio_address", where: "service", label: "Register the business address in the Twilio sub-account", publicLabel: "Setting up your phone system" },
   { key: "azure_resources", where: "workflow", label: "Create the Azure resources (resource group, Postgres, App Service, Static Web Apps, deploy identity)", publicLabel: "Creating your servers and database" },
   { key: "twilio_settings", where: "workflow", label: "Write the Twilio settings (sub-account, API key, dialler app, sign-in codes, address) to the licensee's KS-server", publicLabel: "Securing your system" },
+  // KS_OPS_WORKSPACE_APPS - Keystone's one Microsoft 365 app and one Google client: no per-brokerage registration.
+  { key: "workspace_apps", where: "workflow", label: "Write Keystone's Microsoft 365 and Google Workspace app keys (and the sign-in redirect address) to the licensee's KS-server", publicLabel: "Securing your system" },
   { key: "secrets", where: "workflow", label: "Generate the secrets (JWT, encryption and token keys) and check they are stored on the apps", publicLabel: "Securing your system" },
   { key: "github_environments", where: "workflow", label: "Create the GitHub environment ks-<code> in KS-server, KS-Agent, KS-Portal and KS-Client", publicLabel: "Preparing your apps" },
   { key: "deploy_registry", where: "workflow", label: "Add the licensee to deploy/licensees.json in the four app repositories (pull request, merged when CI passes)", publicLabel: "Preparing your apps" },
@@ -126,6 +128,7 @@ export function describePlan(kind: RunKind, code: string, region = DEFAULT_REGIO
       `Static Web Apps ${n.portalSwa} and ${n.clientSwa}, Postgres firewall for the apps' outbound addresses, ` +
       `managed identity ${n.deployIdentity} (Website Contributor on ${n.resourceGroup}) with federated credentials for the ${n.environment} environments of KS-server and KS-Agent`,
     `twilio_settings: write TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_VOICE_APP_SID, TWILIO_VERIFY_SERVICE_SID, TWILIO_ADDRESS_SID and KS_SERVER_URL to ${n.serverApp}`,
+    `workspace_apps: write KS_M365_CLIENT_ID, KS_M365_CLIENT_SECRET, KS_GOOGLE_OAUTH_CLIENT_ID, KS_GOOGLE_OAUTH_CLIENT_SECRET and KS_OAUTH_BROKER_URL (Keystone's apps, from KS-Ops) to ${n.serverApp}; the brokerage's admin then connects Microsoft 365 in one click, and each person connects Google in one click`,
     `secrets: generated once and kept on ${n.serverApp}: ${GENERATED_SERVER_SECRETS.join(", ")}; on ${n.agentApp}: ${GENERATED_AGENT_SECRETS.join(", ")} (the ops key comes from KS-Ops)`,
     ...Object.entries(ENVIRONMENT_SETTINGS).map(
       ([repo, s]) => `github_environments: ${repo} - environment ${n.environment}; secrets: ${s.secrets.join(", ") || "none"}; variables: ${s.variables.join(", ")}`,

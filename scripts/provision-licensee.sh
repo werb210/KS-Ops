@@ -342,8 +342,8 @@ Environment variables (not secret), per repository:
              VITE_APP_URL = $PORTAL_URL
              VITE_CLIENT_APP_URL = $CLIENT_URL
              VITE_MSAL_REDIRECT_URI = $PORTAL_URL
-             VITE_MSAL_CLIENT_ID / VITE_MSAL_TENANT_ID / VITE_MSAL_SCOPES = the licensee's Microsoft app (optional;
-             without VITE_MSAL_CLIENT_ID Microsoft sign-in stays off)
+             (No Microsoft or Google app per licensee: Keystone's apps are written to KS-server by KS-Ops, and the
+             brokerage's admin connects Microsoft 365 in one click under Settings > Connections.)
   KS-Client  VITE_API_BASE_URL = $SERVER_URL
              VITE_CLIENT_APP_URL = $CLIENT_URL
              VITE_LICENSEE = <folder under KS-Client licensees/> (optional: the branded build)

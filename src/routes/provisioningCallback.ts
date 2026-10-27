@@ -5,6 +5,8 @@
 //   POST /api/provisioning/callback/:runId/ops-key    a new ops key for KS-server (only while azure_resources runs)
 //   POST /api/provisioning/callback/:runId/twilio-settings  the licensee's Twilio settings for its KS-server (only while
 //                                                     twilio_settings runs; KS_OPS_TWILIO_AUTO_v1)
+//   POST /api/provisioning/callback/:runId/workspace-settings  Keystone's Microsoft 365 / Google app keys for its KS-server
+//                                                     (only while workspace_apps runs; KS_OPS_WORKSPACE_APPS)
 //   POST /api/provisioning/callback/:runId            { step, status: running|done|failed|log|setup_missing, message, output, missing }
 // Website (public, CORS PUBLIC_SITE_URL):
 //   GET  /api/public/provisioning/:token              setup progress for the thank-you page (token: statusToken.ts)
@@ -13,7 +15,7 @@ import { limiter } from "../lib/clientIp.js";
 import type { Deps } from "../deps.js";
 import { h, UUID_RE } from "../lib/http.js";
 import { kick, machineDeps } from "../provisioning/index.js";
-import { advanceRun, handleCallback, opsKeyForWorkflow, twilioSettingsForWorkflow, publicStatus, runForCallback, workflowContext, type MachineDeps } from "../provisioning/machine.js";
+import { advanceRun, handleCallback, opsKeyForWorkflow, twilioSettingsForWorkflow, workspaceSettingsForWorkflow, publicStatus, runForCallback, workflowContext, type MachineDeps } from "../provisioning/machine.js";
 import { licenseeIdFromStatusToken } from "../provisioning/statusToken.js";
 import { EncryptionNotConfigured } from "../licensees/repo.js";
 
@@ -68,6 +70,18 @@ export function provisioningCallbackRouter(deps: Deps, md: MachineDeps = machine
       const r = await twilioSettingsForWorkflow(md, run);
       if (!r.ok) return res.status(r.status).json({ error: r.error });
       return res.json({ settings: r.settings });
+    }),
+  );
+
+  router.post(
+    "/:runId/workspace-settings",
+    h(async (req, res) => {
+      const run = await load(req);
+      if (!run) return res.status(401).json(denied);
+      res.setHeader("Cache-Control", "no-store");
+      const r = await workspaceSettingsForWorkflow(md, run);
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      return res.json({ settings: r.settings, missing: r.missing });
     }),
   );
 
