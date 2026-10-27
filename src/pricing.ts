@@ -110,8 +110,12 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // PGI referrals to the insurance partner on every plan (20% referral fee on bound policies); same key as KS-server.
   { key: "pgi_referrals", label: "Personal Guarantee Insurance referrals (20% referral fee)", plan: "starter" },
   // Calls are recorded on every plan; playback is growth and up.
+  // Custom fields on contacts, companies and applications, every plan (KS-server v20).
+  { key: "custom_fields", label: "Custom fields", plan: "starter" },
   { key: "call_recording", label: "Call recording on every plan (playback on Growth and Pro)", plan: "starter" },
   { key: "call_recording_playback", label: "Call recording playback", plan: "growth" },
+  // Teams and record visibility (all / team / own), growth and up (KS-server v20).
+  { key: "teams", label: "Teams and record visibility", plan: "growth" },
   { key: "call_summaries", label: "AI call summaries", plan: "growth" },
   { key: "voicemail_transcription", label: "Voicemail transcription", plan: "growth" },
   { key: "watch_app", label: "Apple Watch app", plan: "growth" },
@@ -123,10 +127,14 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "full_reports", label: "Reports", plan: "growth" },
   { key: "visitor_tracking", label: "Website visitor tracking", plan: "growth" },
   { key: "toll_free_number", label: "Toll-free number", plan: "growth" },
+  // The post-funding survey and review request, growth and up (KS-server settings pack).
+  { key: "nps_survey", label: "Post-funding survey and review requests", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Ad attribution", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
   { key: "sso", label: "Single sign-on", plan: "pro" },
+  // Outgoing webhooks and Zapier Catch Hook triggers, pro (KS-server v20).
+  { key: "webhooks", label: "Webhooks and Zapier", plan: "pro" },
   // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
   // No bank connect / Flinks in Keystone: bank_connect and fraud_3 are gone; the other keys keep their numbers.
   { key: "fraud_1", label: "Document tamper scan", plan: "starter" },
