@@ -225,7 +225,7 @@ These are planned but **not available yet**. We'll update this page as each one 
 
 - **Hold queue** for callers waiting on the main line (today calls ring the available people, then go to a message or voicemail).
 - **Android staff apps** (the dialler and the iPad-style portal app). The client app already works on Android.
-- **Gmail inbox reading** inside Keystone. Sending from Gmail works today.
+- **Gmail inbox reading** inside Keystone: built, waiting for Google's security review. Sending from Gmail works today.
 - **Sending deals straight into a lender's own system** through an API. Email and download-link packages work today.
 - **Lenders viewing your submitted files** inside the lender portal.
 - **Custom roles and permissions** beyond Admin, Staff, Marketing and Ops.

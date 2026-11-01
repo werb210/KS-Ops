@@ -266,7 +266,7 @@ KS-server `docs/GOOGLE_WORKSPACE.md` (sections 3.1 to 3.6) has the details. Diff
    - App name **Keystone**, with the support email, logo, home page, privacy policy and terms links.
    - Under **Authorized domains**, add the domain from step 1 and the website's domain.
    - Scopes: `openid`, `email`, `profile`, `gmail.send`, `calendar.events`, `tasks`, `drive.file`. **No**
-     `gmail.readonly`: Gmail inbox reading stays off until the CASA assessment.
+     `gmail.readonly` yet: Gmail inbox reading stays off until the CASA assessment (step 6).
 3. **OAuth client** (Credentials > Create credentials > OAuth client ID, type *Web application*):
    - **One** authorized redirect URI: `https://<KS-Ops address>/api/oauth/callback/google`.
    - No JavaScript origins.
@@ -274,6 +274,21 @@ KS-server `docs/GOOGLE_WORKSPACE.md` (sections 3.1 to 3.6) has the details. Diff
    scopes are free and take a few days to a few weeks. Answer Google's emails at `borealfinancial@gmail.com`. Until
    it is verified, people see an "unverified app" warning, and at most 100 users can use it.
 5. **Set the keys on KS-Ops:** `KS_GOOGLE_OAUTH_CLIENT_ID` and `KS_GOOGLE_OAUTH_CLIENT_SECRET`.
+6. **Later: Gmail inbox reading (restricted scope, CASA).** Leave `KS_GOOGLE_GMAIL_READ_ENABLED` unset on KS-Ops until
+   Google has approved it. Then:
+   1. Add `https://www.googleapis.com/auth/gmail.readonly` to the consent screen's scopes (only this one; never
+      `gmail.modify` or full mail access) and submit for restricted-scope verification, with a demo video of client
+      email reaching the CRM timeline and the portal's Gmail inbox.
+   2. Google asks for a **CASA Tier 2** security assessment by an App Defense Alliance lab. Published Tier 2 prices
+      were about US$540 to US$1,500 (TAC Security about $540 to $720) and it takes about 1 to 3 weeks; Tier 3, only if
+      Google asks, is about $4,500 to $8,000. The lab sends Google a letter of validation. Both the verification and
+      the assessment are renewed **every 12 months** (Google emails about 90 days before; set your own reminder too).
+   3. Once approved, set `KS_GOOGLE_GMAIL_READ_ENABLED=true` on KS-Ops. The `workspace_apps` step writes it, with the
+      Google keys, to every licensee server; for existing licensees run the `az webapp config appsettings set` command
+      below with `KS_GOOGLE_GMAIL_READ_ENABLED=true` added, and restart the server.
+   4. Each Google user reconnects once (My Profile > Reconnect Google). Settings > Connections counts who still has to.
+   Until then every server shows "Gmail inbox reading is pending Google's security review". KS-server
+   `docs/GOOGLE_WORKSPACE.md` section 5 has the details, and the optional Gmail push (Pub/Sub) setup.
 
 There is no "connect the whole domain" option for Google: Keystone does not use domain-wide delegation. Each person
 connects their own account with one click.

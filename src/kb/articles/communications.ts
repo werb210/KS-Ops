@@ -19,7 +19,7 @@ Keystone works with **Microsoft 365** and **Google Workspace**. Your Admin choos
 
 ## What you get
 - **Microsoft 365**: your Outlook inbox in the portal (read, reply, forward), shared mailboxes, sending, calendar with Teams links, To Do, and OneDrive client folders. Every email is logged on the right contact.
-- **Google**: sending from Gmail, Google Calendar with Meet links, Google Tasks and Drive folders. Reading a Gmail inbox inside Keystone is coming soon.
+- **Google**: sending from Gmail, Google Calendar with Meet links, Google Tasks and Drive folders. Reading your Gmail inbox inside Keystone (client email and documents reaching the CRM) is built and waiting for Google's security review; Settings > Connections says when it is on.
 
 ## Disconnect
 In **Settings** > **My Profile**, choose **Disconnect**. Keystone stops using your account at once.

@@ -54,6 +54,14 @@ describe("settings pushed to every licensee server", () => {
     expect(workspaceAppSettings({})).toEqual({ settings: {}, missing: [expect.stringMatching(/^Microsoft 365/), expect.stringMatching(/^Google Workspace/)] });
   });
 
+  it("hands over the Gmail inbox reading switch with the Google keys (off unless set to true)", () => {
+    expect(workspaceAppSettings(all).settings.KS_GOOGLE_GMAIL_READ_ENABLED).toBeUndefined();
+    expect(workspaceAppSettings({ ...all, KS_GOOGLE_GMAIL_READ_ENABLED: "true" }).settings.KS_GOOGLE_GMAIL_READ_ENABLED).toBe("true");
+    expect(workspaceAppSettings({ ...all, KS_GOOGLE_GMAIL_READ_ENABLED: "no" }).settings.KS_GOOGLE_GMAIL_READ_ENABLED).toBe("false");
+    const noGoogle = { KS_M365_CLIENT_ID: "ms-id", KS_M365_CLIENT_SECRET: "ms-secret", KS_OPS_PUBLIC_URL: "https://ops.keystone.example", KS_GOOGLE_GMAIL_READ_ENABLED: "true" };
+    expect(workspaceAppSettings(noGoogle).settings.KS_GOOGLE_GMAIL_READ_ENABLED).toBeUndefined();
+  });
+
   it("an explicit broker address wins; without an https address there is none", () => {
     expect(brokerBaseUrl({ KS_OAUTH_BROKER_URL: "https://login.keystone.example/cb/", KS_OPS_PUBLIC_URL: "https://ops.keystone.example" })).toBe("https://login.keystone.example/cb");
     expect(brokerBaseUrl({ KS_OPS_PUBLIC_URL: "http://localhost:8080" })).toBe("");
