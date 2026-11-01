@@ -83,7 +83,17 @@ export const SUPPORT: Record<SupportLevel, SupportDef> = {
 export const STORAGE_BLOCK = { gb: 50, price_cents: 1000 };
 // KS_OPS_MARKETING_ADDON - signings over the 4 included are $2.50 each; with the Marketing add-on, campaign emails over
 // the allowance are $10 for each 10,000 (or part). Both go on the next month's bill.
-export const OVERAGE_CENTS = { minute: 4, text: 3, signing: 250, campaign_email_block: 1000 };
+export const OVERAGE_CENTS = { minute: 4, text: 3, signing: 250, campaign_email_block: 1000, id_check: 400 };
+// KS_OPS_KYC - ID and selfie verification (Entrust IDV): each completed vendor check is counted by the licensee's server
+// (usage report id_checks). Some are included each month per brokerage (not per seat); each one over is $4.00 on the
+// next bill. Never blocked. Mirrors KS-server src/plans/idChecks.ts. Starter has no ID verification (growth and up).
+export const ID_CHECKS = { included: { starter: 0, growth: 10, pro: 30 } as Record<"starter" | "growth" | "pro", number>, trial_included: 5, overage_cents: 400 };
+
+/** ID checks over the month's included number. During a trial at least the trial's few are included. */
+export function idCheckOverage(plan: "starter" | "growth" | "pro", trial: boolean, used: number): { id_checks: number; included: number } {
+  const included = trial ? Math.max(ID_CHECKS.trial_included, ID_CHECKS.included[plan]) : ID_CHECKS.included[plan];
+  return { id_checks: Math.max(0, Math.floor(Number(used) || 0) - included), included };
+}
 
 // KS_OPS_MARKETING_ADDON (Todd, Oct 26) - mirrors KS-server src/plans/marketing.ts. Every plan markets to its own
 // client list at these limits; the Marketing add-on ($49 a month, flat, one per brokerage, any plan; Pro does not
@@ -192,6 +202,11 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "payment_links", label: "Payment links and bank debit for fees (your own Stripe account)", plan: "growth" },
   { key: "call_scripts", label: "Call scripts (playbooks)", plan: "growth" },
   { key: "custom_pipelines", label: "Extra pipelines with custom stages (Growth 3, Pro unlimited)", plan: "growth" },
+  // KS_OPS_KYC - ID and selfie verification of applicants and guarantors, growth and up (some checks included; see ID_CHECKS).
+  { key: "id_verification", label: "ID and selfie verification of applicants and guarantors (some checks included each month)", plan: "growth" },
+  // KS_OPS_QUOTES_FORECAST - quotes for the client and the revenue forecast, growth and up (mirrors KS-server).
+  { key: "quotes", label: "Quotes: compare lender offers for the client, branded PDF and acceptance in the client app", plan: "growth" },
+  { key: "forecasting", label: "Revenue forecast: weighted pipeline, commit and best case per rep and team, against goals", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
@@ -255,6 +270,8 @@ export type ChargeInput = {
   overage_texts?: number;
   overage_signings?: number;
   overage_campaign_email_blocks?: number;
+  /** KS_OPS_KYC - ID checks over the month's included number. */
+  overage_id_checks?: number;
 };
 
 export type ChargeBreakdown = {
@@ -270,6 +287,8 @@ export type ChargeBreakdown = {
   overage_texts_cents: number;
   overage_signings_cents: number;
   overage_campaign_emails_cents: number;
+  /** KS_OPS_KYC */
+  overage_id_checks_cents: number;
   overage_cents: number;
   /** Recurring part only (seats + support + storage + Marketing add-on): the licensee's MRR. */
   recurring_cents: number;
@@ -288,6 +307,7 @@ export function monthlyCharge(i: ChargeInput): ChargeBreakdown {
   const ot = whole(i.overage_texts) * OVERAGE_CENTS.text;
   const os = whole(i.overage_signings) * OVERAGE_CENTS.signing;
   const oe = whole(i.overage_campaign_email_blocks) * OVERAGE_CENTS.campaign_email_block;
+  const oi = whole(i.overage_id_checks) * OVERAGE_CENTS.id_check; // KS_OPS_KYC
   const recurring = seatsCents + support + storage + marketing;
   return {
     billable_seats: seats,
@@ -301,9 +321,10 @@ export function monthlyCharge(i: ChargeInput): ChargeBreakdown {
     overage_texts_cents: ot,
     overage_signings_cents: os,
     overage_campaign_emails_cents: oe,
-    overage_cents: om + ot + os + oe,
+    overage_id_checks_cents: oi,
+    overage_cents: om + ot + os + oe + oi,
     recurring_cents: recurring,
-    total_cents: recurring + om + ot + os + oe,
+    total_cents: recurring + om + ot + os + oe + oi,
   };
 }
 
@@ -361,7 +382,10 @@ export function publicPlans() {
       signing: dollars(OVERAGE_CENTS.signing),
       campaign_email_block: dollars(OVERAGE_CENTS.campaign_email_block),
       campaign_email_block_size: MARKETING_ADDON.campaign_email_block,
+      id_check: dollars(OVERAGE_CENTS.id_check), // KS_OPS_KYC
     },
+    // KS_OPS_KYC - ID checks included each month per brokerage, by plan, and during the trial.
+    id_checks: { included: { ...ID_CHECKS.included }, trial_included: ID_CHECKS.trial_included, price: dollars(ID_CHECKS.overage_cents) },
     // KS_OPS_MARKETING_ADDON - sold at sign-up; Keystone staff can switch it on or off.
     marketing_addon: {
       key: MARKETING_ADDON.key,
@@ -540,15 +564,19 @@ export type UsageForBilling = {
   campaign_emails?: number;
   marketing_texts?: number;
   signings?: number;
+  /** KS_OPS_KYC - completed ID checks (0 when an older server does not send them). */
+  id_checks?: number;
 };
 
 export type OverageResult = {
   minutes: number;
   texts: number;
   signings: number;
+  /** KS_OPS_KYC */
+  id_checks: number;
   campaign_emails: number;
   campaign_email_blocks: number;
-  allowance: { minutes: number; texts: number; signings: number; campaign_emails: number; bonus_marketing_texts: number };
+  allowance: { minutes: number; texts: number; signings: number; campaign_emails: number; bonus_marketing_texts: number; id_checks: number };
 };
 
 /**
@@ -570,8 +598,9 @@ export function computeOverage(
     minutes: Math.max(0, whole(used.minutes) - allowance.minutes),
     texts: Math.max(0, whole(used.texts) - allowance.texts - bonus),
     signings: Math.max(0, whole(used.signings) - SIGNINGS.included),
+    id_checks: idCheckOverage(i.plan, i.trial, whole(used.id_checks)).id_checks, // KS_OPS_KYC
     campaign_emails: overEmails,
     campaign_email_blocks: overEmails > 0 ? Math.ceil(overEmails / MARKETING_ADDON.campaign_email_block) : 0,
-    allowance: { ...allowance, signings: SIGNINGS.included, campaign_emails: campaignAllowance, bonus_marketing_texts: addon ? MARKETING_ADDON.bonus_marketing_texts : 0 },
+    allowance: { ...allowance, signings: SIGNINGS.included, campaign_emails: campaignAllowance, bonus_marketing_texts: addon ? MARKETING_ADDON.bonus_marketing_texts : 0, id_checks: idCheckOverage(i.plan, i.trial, 0).included },
   };
 }
