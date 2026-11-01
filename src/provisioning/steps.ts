@@ -128,7 +128,7 @@ export function describePlan(kind: RunKind, code: string, region = DEFAULT_REGIO
       `Static Web Apps ${n.portalSwa} and ${n.clientSwa}, Postgres firewall for the apps' outbound addresses, ` +
       `managed identity ${n.deployIdentity} (Website Contributor on ${n.resourceGroup}) with federated credentials for the ${n.environment} environments of KS-server and KS-Agent`,
     `twilio_settings: write TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_VOICE_APP_SID, TWILIO_VERIFY_SERVICE_SID, TWILIO_ADDRESS_SID and KS_SERVER_URL to ${n.serverApp}`,
-    `workspace_apps: write KS_M365_CLIENT_ID, KS_M365_CLIENT_SECRET, KS_GOOGLE_OAUTH_CLIENT_ID, KS_GOOGLE_OAUTH_CLIENT_SECRET and KS_OAUTH_BROKER_URL (Keystone's apps, from KS-Ops) to ${n.serverApp}; the brokerage's admin then connects Microsoft 365 in one click, and each person connects Google in one click`,
+    `workspace_apps: write KS_M365_CLIENT_ID, KS_M365_CLIENT_SECRET, KS_GOOGLE_OAUTH_CLIENT_ID, KS_GOOGLE_OAUTH_CLIENT_SECRET, KS_OAUTH_BROKER_URL and (when set) KS_GOOGLE_GMAIL_READ_ENABLED (Keystone's apps, from KS-Ops) to ${n.serverApp}; the brokerage's admin then connects Microsoft 365 in one click, and each person connects Google in one click`,
     `secrets: generated once and kept on ${n.serverApp}: ${GENERATED_SERVER_SECRETS.join(", ")}; on ${n.agentApp}: ${GENERATED_AGENT_SECRETS.join(", ")} (the ops key comes from KS-Ops)`,
     ...Object.entries(ENVIRONMENT_SETTINGS).map(
       ([repo, s]) => `github_environments: ${repo} - environment ${n.environment}; secrets: ${s.secrets.join(", ") || "none"}; variables: ${s.variables.join(", ")}`,

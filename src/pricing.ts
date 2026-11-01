@@ -199,6 +199,8 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // Outgoing webhooks and Zapier Catch Hook triggers, pro (KS-server v20).
   { key: "webhooks", label: "Webhooks and Zapier", plan: "pro" },
   { key: "call_queues", label: "Call queues", plan: "pro" },
+  // Custom roles from a permission matrix (view/create/edit/delete/export per area, own/team/all records), pro (KS-server custom roles).
+  { key: "custom_roles", label: "Custom roles and permissions", plan: "pro" },
   // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
   // No bank connect / Flinks in Keystone: bank_connect and fraud_3 are gone; the other keys keep their numbers.
   { key: "fraud_1", label: "Document tamper scan", plan: "starter" },

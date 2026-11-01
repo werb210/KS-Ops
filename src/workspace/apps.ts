@@ -35,10 +35,15 @@ export function workspaceAppSettings(e: NodeJS.ProcessEnv = process.env): Worksp
   const broker = brokerBaseUrl(e);
   if (Object.keys(settings).length && broker) settings.KS_OAUTH_BROKER_URL = broker;
   else if (Object.keys(settings).length) missing.push("the redirect broker address (KS_OPS_PUBLIC_URL on KS-Ops)");
+  // KS_OPS_GMAIL_READ - the Gmail inbox reading switch: "true" only once Google has approved Keystone's client for the
+  // restricted gmail.readonly scope (CASA). Handed over with the Google keys; not set means off on every server.
+  const read = env("KS_GOOGLE_GMAIL_READ_ENABLED", e).toLowerCase();
+  if (settings.KS_GOOGLE_OAUTH_CLIENT_ID && read) settings.KS_GOOGLE_GMAIL_READ_ENABLED = /^(true|1|yes|on)$/.test(read) ? "true" : "false";
   return { settings, missing };
 }
 
 /** Names the workflow may write (anything else KS-Ops hands over is ignored there). */
 export const WORKSPACE_SETTING_NAMES = [
   "KS_M365_CLIENT_ID", "KS_M365_CLIENT_SECRET", "KS_GOOGLE_OAUTH_CLIENT_ID", "KS_GOOGLE_OAUTH_CLIENT_SECRET", "KS_OAUTH_BROKER_URL",
+  "KS_GOOGLE_GMAIL_READ_ENABLED", // KS_OPS_GMAIL_READ
 ] as const;
