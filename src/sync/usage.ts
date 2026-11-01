@@ -25,6 +25,7 @@ export const usageReportSchema = z
     campaign_emails: count.default(0),
     marketing_texts: count.default(0),
     signings: count.default(0),
+    id_checks: count.default(0), // KS_OPS_KYC - completed ID checks; older servers do not send it
     marketing_addon: z.boolean().optional(),
     allowances: z.any().optional(),
     overage: z.object({ minutes: count.default(0), texts: count.default(0) }).partial().passthrough().optional(),
@@ -55,8 +56,8 @@ export async function storeUsageReport(db: Q, licenseeId: string, report: UsageR
   const r = await db.query(
     `INSERT INTO usage_reports (licensee_id, period, generated_at, plan, effective_plan, seats, minutes, texts,
                                 assistant_chats, storage_bytes, overage_minutes, overage_texts, extra_storage_blocks,
-                                trial, report, source, campaign_emails, marketing_texts, signings)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                                trial, report, source, campaign_emails, marketing_texts, signings, id_checks)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      ON CONFLICT (licensee_id, period) DO UPDATE SET
        generated_at = EXCLUDED.generated_at, plan = EXCLUDED.plan, effective_plan = EXCLUDED.effective_plan,
        seats = EXCLUDED.seats, minutes = EXCLUDED.minutes, texts = EXCLUDED.texts,
@@ -64,7 +65,7 @@ export async function storeUsageReport(db: Q, licenseeId: string, report: UsageR
        overage_minutes = EXCLUDED.overage_minutes, overage_texts = EXCLUDED.overage_texts,
        extra_storage_blocks = EXCLUDED.extra_storage_blocks, trial = EXCLUDED.trial, report = EXCLUDED.report,
        source = EXCLUDED.source, campaign_emails = EXCLUDED.campaign_emails, marketing_texts = EXCLUDED.marketing_texts,
-       signings = EXCLUDED.signings, updated_at = now()
+       signings = EXCLUDED.signings, id_checks = EXCLUDED.id_checks, updated_at = now()
      WHERE usage_reports.generated_at <= EXCLUDED.generated_at
      RETURNING id`,
     [
@@ -87,6 +88,7 @@ export async function storeUsageReport(db: Q, licenseeId: string, report: UsageR
       report.campaign_emails,
       report.marketing_texts,
       report.signings,
+      report.id_checks,
     ],
   );
   return { stored: (r.rowCount ?? r.rows.length) > 0, period: report.period };

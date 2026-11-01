@@ -412,6 +412,24 @@ describe("Stripe billing", () => {
     await pool.query("UPDATE licensees SET addons = '{}'::jsonb WHERE id = $1", [id]);
   });
 
+  it("bills ID checks over the plan's included number (KS_OPS_KYC)", async () => {
+    // acme is pro: 30 ID checks included a month. 35 used -> 5 extra at $4.00. Minutes and texts within the allowance.
+    await pool.query("UPDATE licensees SET billing_interval = 'annual' WHERE id = $1", [id]);
+    await pool.query(
+      `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, id_checks, report)
+       VALUES ($1, '2026-05', '2026-06-01T00:05:00Z', 10, 10, 35, '{}')`,
+      [id],
+    );
+    expect((await billOverage(deps)).billed).toBeGreaterThanOrEqual(1);
+    const item = (stripe!.invoiceItems.create as any).mock.calls.find((c: any) => c[0].metadata?.period === "2026-05");
+    expect(item[0]).toMatchObject({ amount: 2000, metadata: { overage: "id_checks" } });
+    expect(item[0].description).toBe("Extra ID checks for 2026-05: 5 at $4.00");
+    const p6 = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-05'", [id])).rows[0];
+    expect(p6).toMatchObject({ id_checks: 5, id_checks_amount: 2000, minutes: 0, texts: 0 });
+    expect(p6.id_checks_invoice_item_id).toMatch(/^ii_/);
+    expect(p6.details).toMatchObject({ allowance: { id_checks: 30 }, used: { id_checks: 35 } });
+  });
+
   it("daily jobs run once a day", async () => {
     expect(await claimDailyJob(deps, "test_job")).toBe(true);
     expect(await claimDailyJob(deps, "test_job")).toBe(false);

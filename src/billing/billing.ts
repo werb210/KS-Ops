@@ -141,13 +141,13 @@ export type PreviewLine = { description: string; quantity: number; unit_amount: 
  *  alongside for comparison. */
 export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   const r = await db.query(
-    `SELECT minutes, texts, campaign_emails, marketing_texts, signings, trial, overage_minutes, overage_texts, generated_at
+    `SELECT minutes, texts, campaign_emails, marketing_texts, signings, id_checks, trial, overage_minutes, overage_texts, generated_at
        FROM usage_reports WHERE licensee_id = $1 AND period = $2`,
     [l.id, period],
   );
   const usage = r.rows[0] as
     | {
-        minutes: number; texts: number; campaign_emails: number; marketing_texts: number; signings: number; trial: TrialInfo;
+        minutes: number; texts: number; campaign_emails: number; marketing_texts: number; signings: number; id_checks: number; trial: TrialInfo;
         overage_minutes: number; overage_texts: number; generated_at: Date;
       }
     | undefined;
@@ -156,7 +156,7 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
         { plan: l.plan, seats: l.seats, trial: trialApplies(l.status, usage.trial, period), marketing_addon: hasMarketingAddon(l) },
         {
           minutes: Number(usage.minutes), texts: Number(usage.texts), campaign_emails: Number(usage.campaign_emails) || 0,
-          marketing_texts: Number(usage.marketing_texts) || 0, signings: Number(usage.signings) || 0,
+          marketing_texts: Number(usage.marketing_texts) || 0, signings: Number(usage.signings) || 0, id_checks: Number(usage.id_checks) || 0,
         },
       )
     : null;
@@ -165,6 +165,7 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
     overage_minutes: overage?.minutes ?? 0,
     overage_texts: overage?.texts ?? 0,
     overage_signings: overage?.signings ?? 0,
+    overage_id_checks: overage?.id_checks ?? 0, // KS_OPS_KYC
     overage_campaign_email_blocks: overage?.campaign_email_blocks ?? 0,
   });
   const lines: PreviewLine[] = [];
@@ -182,6 +183,7 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   add("Extra call minutes", overage?.minutes ?? 0, OVERAGE_CENTS.minute);
   add("Extra texts", overage?.texts ?? 0, OVERAGE_CENTS.text);
   add("Extra e-signings (over the 4 included)", overage?.signings ?? 0, OVERAGE_CENTS.signing);
+  add(`ID checks over the ${overage?.allowance.id_checks ?? 0} included`, overage?.id_checks ?? 0, OVERAGE_CENTS.id_check); // KS_OPS_KYC
   add("Extra campaign emails (per 10,000)", overage?.campaign_email_blocks ?? 0, OVERAGE_CENTS.campaign_email_block);
   return {
     period,
@@ -197,7 +199,7 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
           final: isFinal(period, usage.generated_at),
           allowance: overage!.allowance,
           overage: {
-            minutes: overage!.minutes, texts: overage!.texts, signings: overage!.signings,
+            minutes: overage!.minutes, texts: overage!.texts, signings: overage!.signings, id_checks: overage!.id_checks,
             campaign_emails: overage!.campaign_emails, campaign_email_blocks: overage!.campaign_email_blocks,
           },
           reported_overage: { minutes: Number(usage.overage_minutes) || 0, texts: Number(usage.overage_texts) || 0 },
@@ -221,6 +223,8 @@ type OverageRow = {
   campaign_emails?: number;
   marketing_texts?: number;
   signings?: number;
+  /** KS_OPS_KYC */
+  id_checks?: number;
   addons?: Record<string, boolean> | null;
   billing_interval?: string;
   stripe_subscription_id?: string | null;
@@ -244,6 +248,7 @@ export const OVERAGE_KINDS = {
   texts: { qty: "texts", unit: OVERAGE_CENTS.text, label: "Extra texts" },
   signings: { qty: "signings", unit: OVERAGE_CENTS.signing, label: "Extra e-signings (over the 4 included)" },
   campaign_emails: { qty: "campaign_email_blocks", unit: OVERAGE_CENTS.campaign_email_block, label: "Extra campaign emails (per 10,000)" },
+  id_checks: { qty: "id_checks", unit: OVERAGE_CENTS.id_check, label: "Extra ID checks" }, // KS_OPS_KYC
 } as const;
 export type OverageKind = keyof typeof OVERAGE_KINDS;
 const KINDS = Object.keys(OVERAGE_KINDS) as OverageKind[];
@@ -281,14 +286,14 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
       { plan: row.plan, seats: row.seats, trial, marketing_addon: addon },
       {
         minutes: Number(row.minutes), texts: Number(row.texts), campaign_emails: Number(row.campaign_emails) || 0,
-        marketing_texts: Number(row.marketing_texts) || 0, signings: Number(row.signings) || 0,
+        marketing_texts: Number(row.marketing_texts) || 0, signings: Number(row.signings) || 0, id_checks: Number(row.id_checks) || 0,
       },
     );
     const details = {
       plan: row.plan, seats: row.seats, trial, marketing_addon: addon, allowance: o.allowance,
-      used: { minutes: row.minutes, texts: row.texts, signings: row.signings ?? 0, campaign_emails: row.campaign_emails ?? 0, marketing_texts: row.marketing_texts ?? 0 },
+      used: { minutes: row.minutes, texts: row.texts, signings: row.signings ?? 0, campaign_emails: row.campaign_emails ?? 0, marketing_texts: row.marketing_texts ?? 0, id_checks: row.id_checks ?? 0 },
     };
-    if (o.minutes === 0 && o.texts === 0 && o.signings === 0 && o.campaign_email_blocks === 0) {
+    if (o.minutes === 0 && o.texts === 0 && o.signings === 0 && o.campaign_email_blocks === 0 && o.id_checks === 0) {
       await deps.db.query(
         `INSERT INTO overage_billing (licensee_id, period, status, details) VALUES ($1, $2, 'nothing_to_bill', $3)
          ON CONFLICT (licensee_id, period) DO NOTHING`,
@@ -303,12 +308,13 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
     }
     await deps.db.query(
       `INSERT INTO overage_billing (licensee_id, period, status, stripe_customer_id, minutes, texts, minutes_amount,
-                                    texts_amount, signings, signings_amount, campaign_email_blocks, campaign_emails_amount, details)
-       VALUES ($1, $2, 'started', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) ON CONFLICT (licensee_id, period) DO NOTHING`,
+                                    texts_amount, signings, signings_amount, campaign_email_blocks, campaign_emails_amount, id_checks,
+                                    id_checks_amount, details)
+       VALUES ($1, $2, 'started', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) ON CONFLICT (licensee_id, period) DO NOTHING`,
       [
         ...key, row.stripe_customer_id, o.minutes, o.texts, o.minutes * OVERAGE_CENTS.minute, o.texts * OVERAGE_CENTS.text,
         o.signings, o.signings * OVERAGE_CENTS.signing, o.campaign_email_blocks, o.campaign_email_blocks * OVERAGE_CENTS.campaign_email_block,
-        JSON.stringify(details),
+        o.id_checks, o.id_checks * OVERAGE_CENTS.id_check, JSON.stringify(details),
       ],
     );
     p = (await deps.db.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = $2", key)).rows[0] as Progress;
@@ -418,7 +424,7 @@ export async function billOverage(deps: Pick<Deps, "db" | "stripe" | "now">): Pr
   const current = periodOf(deps.now());
   const r = await deps.db.query(
     `SELECT ur.id, ur.licensee_id, ur.period, ur.generated_at, ur.minutes, ur.texts, ur.trial,
-            ur.campaign_emails, ur.marketing_texts, ur.signings,
+            ur.campaign_emails, ur.marketing_texts, ur.signings, ur.id_checks,
             l.plan, l.seats, l.status, l.stripe_customer_id, l.company_name, l.addons, l.billing_interval, l.stripe_subscription_id
        FROM usage_reports ur JOIN licensees l ON l.id = ur.licensee_id
       WHERE ur.overage_billed_at IS NULL AND ur.period < $1

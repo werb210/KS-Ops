@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ID_CHECKS, idCheckOverage, computeOverage,
   billableSeats, monthlyCharge, onboardingFeeCents, pooledAllowances, publicPlans, stripePriceSpecs,
   subscriptionItems, supportCents,
 } from "../../src/pricing.js";
@@ -26,6 +27,17 @@ describe("monthlyCharge", () => {
     expect(supportCents("premium", 11)).toBe(49900 + 3000);
     expect(supportCents("dedicated", 25)).toBe(120000);
     expect(supportCents("dedicated", 30)).toBe(120000 + 5 * 4000);
+  });
+
+  it("bills ID checks over the included number at $4.00 (KS_OPS_KYC)", () => {
+    expect(idCheckOverage("growth", false, 12)).toEqual({ id_checks: 2, included: 10 });
+    expect(idCheckOverage("pro", false, 30)).toEqual({ id_checks: 0, included: 30 });
+    expect(idCheckOverage("starter", true, 7)).toEqual({ id_checks: 2, included: ID_CHECKS.trial_included });
+    expect(computeOverage({ plan: "growth", seats: 1, trial: false }, { minutes: 0, texts: 0, id_checks: 13 })).toMatchObject({ id_checks: 3, allowance: { id_checks: 10 } });
+    const c = monthlyCharge({ plan: "growth", billing_interval: "monthly", seats: 1, support_level: "email", overage_id_checks: 3 });
+    expect(c.overage_id_checks_cents).toBe(1200);
+    expect(c.total_cents).toBe(13900 + 1200);
+    expect(c.recurring_cents).toBe(13900);
   });
 
   it("adds extra storage at $10 a block and overage at 4 and 3 cents", () => {
@@ -67,7 +79,8 @@ describe("publicPlans", () => {
     expect(p.extra_storage).toEqual({ block_gb: 50, price: 10, max_blocks: 1000 });
     // Seat limits the sign-up form uses: the plan minimum and the most the sign-up accepts.
     expect(p.plans.map((x) => [x.min_seats, x.max_seats])).toEqual([[1, 1000], [1, 1000], [2, 1000]]);
-    expect(p.overage).toEqual({ minute: 0.04, text: 0.03, signing: 2.5, campaign_email_block: 10, campaign_email_block_size: 10000 });
+    expect(p.overage).toEqual({ minute: 0.04, text: 0.03, signing: 2.5, campaign_email_block: 10, campaign_email_block_size: 10000, id_check: 4 });
+    expect(p.id_checks).toEqual({ included: { starter: 0, growth: 10, pro: 30 }, trial_included: 5, price: 4 }); // KS_OPS_KYC
     // KS_OPS_v14_TRIAL_RULES - the in-app Pro trial is offered on Starter and Growth; the allowance is unchanged.
     expect(p.trial).toEqual({ days: 14, plan: "pro", for: ["starter", "growth"], allowance_from: "starter", bonus_minutes_per_seat: 100, bonus_texts_per_seat: 100 });
   });

@@ -76,7 +76,7 @@ describe("overage: signings, campaign emails and bonus marketing texts", () => {
     expect(overageGoesOnNextInvoice({ billing_interval: "monthly", stripe_subscription_id: "sub_1" })).toBe(true);
     expect(overageGoesOnNextInvoice({ billing_interval: "annual", stripe_subscription_id: "sub_1" })).toBe(false);
     expect(overageGoesOnNextInvoice({ billing_interval: "monthly", stripe_subscription_id: null })).toBe(false);
-    expect(Object.keys(OVERAGE_KINDS)).toEqual(["minutes", "texts", "signings", "campaign_emails"]);
+    expect(Object.keys(OVERAGE_KINDS)).toEqual(["minutes", "texts", "signings", "campaign_emails", "id_checks"]); // KS_OPS_KYC - ID checks too
   });
 
   it("posts the new lines to their own QuickBooks items", () => {
