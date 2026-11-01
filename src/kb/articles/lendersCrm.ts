@@ -44,7 +44,12 @@ Invite a lender to the **lender portal**. They sign in with a text code, keep th
 - See what went to whom and when, and send again if you need to.
 - With Microsoft 365 connected, emails that bounce are flagged with the reason.
 
-> Sending straight into a lender's own system through an API is coming soon.
+## Send by API (Growth and Pro)
+If a lender offers a broker API and you have your own broker credentials for it, an Admin connects it on **Lenders > edit lender > Connection**: pick the connection type (REST/JSON with field mapping, or a Salesforce broker portal), enter the credentials (stored encrypted) and the status-to-stage map, and run **Test**.
+- On the file's **Lenders** tab, **Submit by API** sends the package into the lender's system. If the API is down or refuses it, Keystone retries and email stays the fallback.
+- The lender's status, offers, conditions and document requests come back onto the file by webhook or by checking every few minutes. The assigned staff member is notified, and the pipeline stage moves where you mapped it.
+- **Send a document** answers a lender's document request straight into their system.
+- Some lenders have not published their API yet; their connection shows as awaiting the lender's documentation and email is used.
 `,
   },
   {
