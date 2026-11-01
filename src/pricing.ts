@@ -182,6 +182,10 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "call_recording", label: "Call recording on every plan (playback on Growth and Pro)", plan: "starter" },
   { key: "marketing", label: "Marketing to your own client list: email and text campaigns, sequences, templates and a website lead form", plan: "starter" },
   { key: "ads_results", label: "Google Ads and LinkedIn Ads results, Google Analytics connection", plan: "starter" },
+  // KS_BROKER_TOOLS - Broker deal tools (KS-server KS_BROKER_TOOLS): 1-3 every plan.
+  { key: "funding_conditions", label: "Funding conditions checklist", plan: "starter" },
+  { key: "invoice_reading", label: "Vendor invoice reading", plan: "starter" },
+  { key: "sales_tax", label: "Canadian sales tax in quotes and calculators", plan: "starter" },
   { key: "call_recording_playback", label: "Call recording playback", plan: "growth" },
   // Teams and record visibility (all / team / own), growth and up (KS-server v20).
   { key: "teams", label: "Teams and record visibility", plan: "growth" },
@@ -211,6 +215,11 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "active_contracts", label: "Active contracts: renewals, re-engagement queues and commission tracking", plan: "growth" },
   // Lender API connections: send the lender package by API, sync status, offers and conditions back (KS-server lender API).
   { key: "lender_api", label: "Lender API connections (submit by API, sync status, offers and conditions)", plan: "growth" },
+  // KS_BROKER_TOOLS - Broker deal tools growth and up.
+  { key: "credit_lines", label: "Approved credit lines per client", plan: "growth" },
+  { key: "rate_cards", label: "Lender rate cards and deal structuring", plan: "growth" },
+  { key: "credit_scorecards", label: "Credit scorecards and pre-decision rules", plan: "growth" },
+  { key: "contract_templates", label: "Contracts from Word templates", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
@@ -220,6 +229,8 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "call_queues", label: "Call queues", plan: "pro" },
   // Custom roles from a permission matrix (view/create/edit/delete/export per area, own/team/all records), pro (KS-server custom roles).
   { key: "custom_roles", label: "Custom roles and permissions", plan: "pro" },
+  // KS_BROKER_TOOLS - Vendor and dealer portal, pro.
+  { key: "vendor_portal", label: "Vendor and dealer portal with point-of-sale quoting", plan: "pro" },
   // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
   // No bank connect / Flinks in Keystone: bank_connect and fraud_3 are gone; the other keys keep their numbers.
   { key: "fraud_1", label: "Document tamper scan", plan: "starter" },
