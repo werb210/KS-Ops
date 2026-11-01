@@ -18,7 +18,9 @@ import { checkEntries, checkSchema, optInSchema, replaceReport, reportSchema, se
 
 const requestSchema = z
   .object({
-    kind: z.enum(["upgrade", "storage", "other"]).optional(),
+    // KS_OPS_MARKETING_ADDON - "addon" (the Marketing add-on); KS-server sends "plan" / "plan_and_storage" for upgrades.
+    kind: z.enum(["upgrade", "storage", "other", "addon", "plan", "plan_and_storage"]).optional(),
+    addon: z.string().max(40).optional(),
     plan: z.string().max(40).optional(),
     requested_plan: z.string().max(40).optional(),
     current_plan: z.string().max(40).optional(),
@@ -110,7 +112,8 @@ export function licenseeApiRouter(deps: Deps): Router {
       if (!parsed.ok) return res.status(400).json({ error: "invalid_request", errors: parsed.errors });
       const v = parsed.data;
       const requestedPlan = v.requested_plan ?? v.plan ?? null;
-      const kind = v.kind ?? (requestedPlan ? "upgrade" : v.extra_storage_blocks ? "storage" : "other");
+      const kind = v.kind === "plan" || v.kind === "plan_and_storage" ? "upgrade"
+        : v.kind ?? (requestedPlan ? "upgrade" : v.extra_storage_blocks ? "storage" : "other");
       const r = await deps.db.query(
         `INSERT INTO requests (licensee_id, kind, current_plan, requested_plan, requested_extra_storage_blocks,
                                requested_by, message, payload)
@@ -122,7 +125,7 @@ export function licenseeApiRouter(deps: Deps): Router {
           requestedPlan,
           v.extra_storage_blocks ?? null,
           v.requested_by ?? null,
-          v.message ?? null,
+          v.message ?? (kind === "addon" ? `Asked for the ${v.addon === "marketing" ? "Marketing" : String(v.addon ?? "")} add-on.` : null),
           JSON.stringify(req.body ?? {}),
         ],
       );

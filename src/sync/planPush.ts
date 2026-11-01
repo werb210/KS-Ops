@@ -23,7 +23,9 @@ export const isServiceStatus = (s: unknown): boolean => (SERVICE_STATUSES as rea
 
 /** KS_OPS_BANK_CONNECT_ADDON - the add-ons Keystone staff can switch on for one licensee. Not plan features: they are
  *  never listed in /api/public/plans and the licensee cannot change them. */
-export const ADDONS = ["bank_connect"] as const;
+// KS_OPS_MARKETING_ADDON - "marketing" is the Marketing add-on: sold at sign-up and on the website (unlike bank_connect),
+// switched on or off by staff with the same PATCH, billed as a flat line on the subscription.
+export const ADDONS = ["bank_connect", "marketing"] as const;
 export type AddonKey = (typeof ADDONS)[number];
 
 /** Every known add-on as an explicit boolean (missing = off), so a push also switches one off. */

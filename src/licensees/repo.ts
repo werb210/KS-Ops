@@ -145,6 +145,7 @@ export const INSERTABLE = [
   "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
   "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
   "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
+  "addons", // KS_OPS_MARKETING_ADDON - the Marketing add-on chosen at sign-up
 ] as const;
 
 export async function insertLicensee(db: Q, fields: Partial<Record<(typeof INSERTABLE)[number], unknown>>): Promise<LicenseeRow> {

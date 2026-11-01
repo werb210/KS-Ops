@@ -44,7 +44,8 @@ function salesSignupMail(l: LicenseeRow, note: string) {
         `Company: ${l.company_name} (${l.legal_name})`,
         `Company code: ${l.company_code}`,
         `Plan: ${PLAN_NAMES[l.plan]}, ${l.seats} seat(s), ${l.billing_interval} billing, ${l.support_level} support` +
-          (l.extra_storage_blocks > 0 ? `, ${l.extra_storage_blocks} extra 50 GB storage block(s)` : ""),
+          (l.extra_storage_blocks > 0 ? `, ${l.extra_storage_blocks} extra 50 GB storage block(s)` : "") +
+          (l.addons?.marketing === true ? ", Marketing add-on" : ""),
         `Pays by: ${PAYMENT_METHOD_NAMES[isPaymentMethod(l.payment_method) ? l.payment_method : DEFAULT_PAYMENT_METHOD]}`,
         `Contact: ${l.contact_name}, ${l.contact_email}, ${l.contact_phone}`,
         `Address: ${l.mailing_address ?? ""}, ${l.province_state ?? ""}, ${l.country}`,
@@ -133,6 +134,7 @@ export function publicRouter(deps: Deps): Router {
           seats: input.seats,
           extra_storage_blocks: input.extra_storage_blocks,
           payment_method: input.payment_method,
+          addons: input.marketing_addon ? { marketing: true } : {}, // KS_OPS_MARKETING_ADDON
           primary_color: input.primary_color,
           accent_color: input.accent_color,
           background_color: input.background_color,
@@ -157,7 +159,7 @@ export function publicRouter(deps: Deps): Router {
       }
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
-        payment_method: l.payment_method, logo_uploaded: Boolean(logo), ip: clientIp(req),
+        payment_method: l.payment_method, marketing_addon: input.marketing_addon === true, logo_uploaded: Boolean(logo), ip: clientIp(req),
       });
       await crmLicenseeCreated(deps, l);
 
