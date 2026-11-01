@@ -189,12 +189,16 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "toll_free_number", label: "Toll-free number", plan: "growth" },
   // The post-funding survey and review request, growth and up (KS-server settings pack).
   { key: "nps_survey", label: "Post-funding survey and review requests", plan: "growth" },
+  { key: "payment_links", label: "Payment links and bank debit for fees (your own Stripe account)", plan: "growth" },
+  { key: "call_scripts", label: "Call scripts (playbooks)", plan: "growth" },
+  { key: "custom_pipelines", label: "Extra pipelines with custom stages (Growth 3, Pro unlimited)", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
   { key: "sso", label: "Single sign-on", plan: "pro" },
   // Outgoing webhooks and Zapier Catch Hook triggers, pro (KS-server v20).
   { key: "webhooks", label: "Webhooks and Zapier", plan: "pro" },
+  { key: "call_queues", label: "Call queues", plan: "pro" },
   // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
   // No bank connect / Flinks in Keystone: bank_connect and fraud_3 are gone; the other keys keep their numbers.
   { key: "fraud_1", label: "Document tamper scan", plan: "starter" },
