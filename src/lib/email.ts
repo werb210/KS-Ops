@@ -30,7 +30,8 @@ export function sendgridConfigured(): boolean {
 
 let graphToken: { token: string; expiresAt: number } | null = null;
 
-async function graphAccessToken(fetchImpl: typeof fetch): Promise<string> {
+/** KS_OPS_PROSPECT_MARKETING_v1 - also used to read the reply mailbox. */
+export async function graphAccessToken(fetchImpl: typeof fetch): Promise<string> {
   if (graphToken && graphToken.expiresAt > Date.now() + 60_000) return graphToken.token;
   const url = `https://login.microsoftonline.com/${encodeURIComponent(env("MS_GRAPH_TENANT_ID"))}/oauth2/v2.0/token`;
   const body = new URLSearchParams({

@@ -244,6 +244,8 @@ loaded once on startup and by `npm run migrate`.
 
 ## Background jobs
 
+- Every 30 seconds: Keystone prospect marketing (campaign sends, sequence steps, CRM timeline; the prospect sync every
+  2 minutes, the reply mailbox every 5, the Keystone CRM pull every 10).
 - Every minute: post queued Stripe invoices, payments, fees and refunds to Keystone's QuickBooks (`qbo_outbox`).
 - Every 5 minutes: end staff free trials whose 28 days are up, then push plans that are waiting (`pending_sync`) to
   licensees' servers.
@@ -252,6 +254,47 @@ loaded once on startup and by `npm run migrate`.
   a rerun days later never charges twice), remind past-due licensees every 3 days, cancel website sign-ups unpaid
   after `PENDING_SIGNUP_DAYS` (their company code becomes `exp--<id>` and the old one is kept in
   `released_company_code`).
+
+## Prospect marketing (KS_OPS_PROSPECT_MARKETING_v1)
+
+Email marketing to prospective licensees, run from the staff portal's Keystone silo > Marketing (staff API under
+`/api/ops/marketing/*`, see `src/routes/opsMarketing.ts`).
+
+- Prospects (`ks_prospects`, one per email) are synced every 2 minutes from demo sign-ups, beta sign-ups, the website
+  assistant's lead form and licensees, and every 10 minutes from the Keystone CRM on BF-Server
+  (`GET /api/ks/marketing/contacts`); staff can add or import them. Each carries a status (lead, demo booked, trial,
+  customer, lost), its sources, plan interest, country and province/state, and the consent we hold.
+- Consent (CASL / CAN-SPAM, `src/marketing/consent.ts`): express; implied by an inquiry (6 months); implied by a
+  subscription (while it runs, then 2 years); implied by a published business email (12-month review); US business
+  contacts under CAN-SPAM opt-out. Nobody without valid consent is emailed: they are listed as blocked with the reason.
+  The suppression list (unsubscribed, hard bounce, spam report, opted out in the CRM, staff) is checked at queue time
+  and again right before every email.
+- Every email has the Keystone layout and a fixed footer: why they get it, the sender (business and legal name), the
+  mailing address (`KS_MARKETING_ADDRESS`, default Boreal's business address), a contact address and an unsubscribe
+  link, plus `List-Unsubscribe` and `List-Unsubscribe-Post` (one-click). `GET/POST /api/public/marketing/unsubscribe`.
+- Campaigns: send now or schedule (up to 90 days), test send (max 5 addresses, marked [Test]). Sequences: steps of
+  "wait N days, send template"; an enrolment stops when the prospect replies, signs up or books a demo after enrolling,
+  unsubscribes or loses consent.
+- Tracking: SendGrid Event Webhook to `POST /api/public/marketing/sendgrid-events` (signed with
+  `KS_MARKETING_WEBHOOK_PUBLIC_KEY`, or `?token=KS_MARKETING_WEBHOOK_TOKEN`). Opens, clicks, bounces, spam reports and
+  unsubscribes go on the prospect's timeline here and on the Keystone CRM contact on BF-Server
+  (`POST /api/ks/marketing/events`, through `ks_mkt_timeline_outbox`).
+- Replies: the reply mailbox (`KS_MARKETING_REPLY_MAILBOX`, default `MS_GRAPH_SEND_AS`) is checked every 5 minutes when
+  the Graph app has Mail.Read; staff can also click "Mark replied".
+
+| Variable | Needed | What it is |
+| --- | --- | --- |
+| `KS_MARKETING_FROM` | yes, once the domain is chosen | marketing From address on an authenticated SendGrid domain. Until set, `SENDGRID_FROM` is used and the portal shows a warning |
+| `KS_MARKETING_FROM_NAME` | no | default `Keystone` |
+| `KS_MARKETING_REPLY_TO` | no | default `KS_SALES_EMAIL` |
+| `KS_MARKETING_BUSINESS_NAME` / `KS_MARKETING_LEGAL_NAME` | no | footer sender identification (default `Keystone` / `2630108 Alberta Ltd.`) |
+| `KS_MARKETING_ADDRESS` | recommended | footer mailing address (default `450 Sparling Crt SW, Edmonton, AB T6X 1G9, Canada`) |
+| `KS_MARKETING_SENDGRID_API_KEY` | no | a separate SendGrid key (e.g. a Keystone subuser); default `SENDGRID_API_KEY` |
+| `KS_MARKETING_WEBHOOK_PUBLIC_KEY` | for tracking | the Signed Event Webhook verification key |
+| `KS_MARKETING_WEBHOOK_TOKEN` | alternative | 24+ character token in the webhook URL instead of the signature |
+| `KS_MARKETING_UNSUBSCRIBE_SECRET` | no | signs unsubscribe links (default `OPS_JWT_SECRET`) |
+| `KS_MARKETING_REPLY_MAILBOX` | no | mailbox checked for replies (default `MS_GRAPH_SEND_AS`) |
+| `KS_OPS_PUBLIC_URL` | yes | KS-Ops's public address, used in unsubscribe links |
 
 ## Provisioning
 

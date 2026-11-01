@@ -19,6 +19,7 @@ import { advanceDueRuns } from "./provisioning/machine.js"; // KS_OPS_AUTO_PROVI
 import { machineDeps } from "./provisioning/index.js";
 import { refreshTexting, syncAccountStatuses } from "./twilio/lifecycle.js"; // KS_OPS_TWILIO_AUTO_v1
 import { embedPending } from "./kb/repo.js"; // KS_OPS_KB_v1
+import { newMarketingClock, runMarketingTick } from "./marketing/worker.js"; // KS_OPS_PROSPECT_MARKETING_v1
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -269,7 +270,21 @@ export function startWorkers(deps: Deps): () => void {
       kbBusy = false;
     }
   };
+  // KS_OPS_PROSPECT_MARKETING_v1 - Keystone prospect marketing: sends, sequences, sync, replies, CRM timeline (30 s).
+  let mktBusy = false;
+  const mktClock = newMarketingClock();
+  const mkt = async () => {
+    if (mktBusy) return;
+    mktBusy = true;
+    try {
+      await runMarketingTick(deps, mktClock);
+    } finally {
+      mktBusy = false;
+    }
+  };
   const timers = [
+    setInterval(mkt, 30_000),
+    setTimeout(mkt, 50_000),
     setInterval(kb, 10 * 60_000),
     setTimeout(kb, 40_000),
     setInterval(twilio, 30 * 60_000),
