@@ -226,6 +226,7 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // Outgoing webhooks and Zapier Catch Hook triggers, pro (KS-server v20).
   { key: "webhooks", label: "Webhooks and Zapier", plan: "pro" },
   { key: "call_queues", label: "Call queues", plan: "pro" },
+  { key: "vendor_portal", label: "Vendor and dealer portal: point-of-sale quotes, apply links, deal status, invoice upload and vendor fees", plan: "pro" },
   // Custom roles from a permission matrix (view/create/edit/delete/export per area, own/team/all records), pro (KS-server custom roles).
   { key: "custom_roles", label: "Custom roles and permissions", plan: "pro" },
   // KS_BROKER_TOOLS - Vendor and dealer portal, pro.
