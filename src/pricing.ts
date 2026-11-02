@@ -219,7 +219,6 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "rate_cards", label: "Rate cards and deal structuring: payment options across lenders side by side, with sales tax", plan: "growth" },
   { key: "credit_scorecards", label: "Credit scorecards and pre-decision rules: grade, rule hits and lender ranking on each application", plan: "growth" },
   { key: "contract_templates", label: "Contracts from Word templates: merge fields, Word and PDF, sent for e-signature", plan: "growth" },
-  { key: "credit_bureau", label: "Credit bureau pulls (Equifax and TransUnion Canada) with the client's consent", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
