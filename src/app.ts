@@ -31,6 +31,8 @@ import { opsKbRouter } from "./routes/opsKb.js"; // KS_OPS_KB_v1
 import { kbPageRouter } from "./routes/opsKbPage.js";
 import { publicAssistantRouter, publicKbRouter } from "./routes/publicKb.js";
 import { licenseeKbRouter } from "./routes/licenseeKb.js";
+import { opsMarketingRouter } from "./routes/opsMarketing.js"; // KS_OPS_PROSPECT_MARKETING_v1
+import { publicMarketingRouter } from "./routes/publicMarketing.js";
 
 /** CORS for a list of allowed origins read from env vars at request time. */
 function corsFor(...envNames: string[]) {
@@ -63,6 +65,8 @@ export function createApp(deps: Deps) {
 
   // Raw body for the Stripe signature: before the JSON parser.
   app.use("/api/ops/stripe/webhook", stripeWebhookRouter(deps));
+  // KS_OPS_PROSPECT_MARKETING_v1 - unsubscribe pages and the SendGrid Event Webhook (raw body): before the JSON parser.
+  app.use("/api/public/marketing", publicMarketingRouter(deps));
 
   // The demo server's completion carries the sample lender package (a small PDF, base64).
   app.use("/api/demo/sessions", express.json({ limit: "16mb" }));
@@ -96,6 +100,7 @@ export function createApp(deps: Deps) {
   app.use("/api/ops/quickbooks/oauth/callback", qboCallbackRouter(deps));
   app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps), opsTrialsRouter(deps), opsBetaRouter(deps), opsProvisioningRouter(deps));
   app.use("/api/ops", requireStaff, opsKbRouter(deps)); // KS_OPS_KB_v1
+  app.use("/api/ops", requireStaff, opsMarketingRouter(deps)); // KS_OPS_PROSPECT_MARKETING_v1
   // The QuickBooks and free-trial ops pages (they hold no data; their calls need a staff token).
   app.use("/ops/quickbooks", qboPageRouter());
   app.use("/ops/trials", trialsPageRouter());
