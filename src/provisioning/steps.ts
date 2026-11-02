@@ -101,7 +101,7 @@ export const ENVIRONMENT_SETTINGS: Record<string, { secrets: string[]; variables
 /** The secrets generated once on the licensee's KS-server (and kept on later runs), and on KS-Agent. */
 export const GENERATED_SERVER_SECRETS = [
   "DATABASE_URL", "JWT_SECRET", "JWT_REFRESH_SECRET", "OTP_HASH_SALT", "QBO_TOKEN_ENCRYPTION_KEY",
-  "GOOGLE_TOKEN_ENCRYPTION_KEY", "WATCH_PUSH_ENCRYPTION_KEY", "KS_OPS_KEY",
+  "GOOGLE_TOKEN_ENCRYPTION_KEY", "WATCH_PUSH_ENCRYPTION_KEY", "LENDER_CREDENTIALS_ENCRYPTION_KEY", "KS_OPS_KEY",
 ] as const;
 export const GENERATED_AGENT_SECRETS = ["JWT_SECRET"] as const;
 
