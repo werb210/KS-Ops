@@ -216,6 +216,7 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // Lender API connections: send the lender package by API, sync status, offers and conditions back (KS-server lender API).
   { key: "lender_api", label: "Lender API connections (submit by API, sync status, offers and conditions)", plan: "growth" },
   { key: "credit_lines", label: "Approved credit lines per client: limit, used, available and expiry reminders", plan: "growth" },
+  { key: "rate_cards", label: "Rate cards and deal structuring: payment options across lenders side by side, with sales tax", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
