@@ -221,7 +221,10 @@ export function opsSupportRouter(deps: Deps): Router {
         if (l.status === "trial") trials += 1;
       }
       res.json({
-        licensees: ls.rows.length,
+        // Live licensees only (trial, active, past due); cancelled ones stay in by_status. A cancelled licensee was
+        // counted here, so the dashboard read "1 licensee" for a book with none.
+        licensees: (ls.rows as LicenseeRow[]).filter((l) => live.has(l.status)).length,
+        licensees_all: ls.rows.length,
         by_status: byStatus,
         seats,
         mrr: Math.round(mrr * 100) / 100,
