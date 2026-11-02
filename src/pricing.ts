@@ -185,6 +185,7 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // KS_BROKER_TOOLS - broker deal tools 1-3, every plan.
   { key: "funding_conditions", label: "Funding conditions checklist", plan: "starter" },
   { key: "sales_tax", label: "Canadian sales tax in quotes and calculators", plan: "starter" },
+  { key: "invoice_reading", label: "Vendor invoice reading (vendor, line items, taxes, serial numbers and VINs)", plan: "starter" },
   { key: "call_recording_playback", label: "Call recording playback", plan: "growth" },
   // Teams and record visibility (all / team / own), growth and up (KS-server v20).
   { key: "teams", label: "Teams and record visibility", plan: "growth" },
@@ -214,6 +215,10 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "active_contracts", label: "Active contracts: renewals, re-engagement queues and commission tracking", plan: "growth" },
   // Lender API connections: send the lender package by API, sync status, offers and conditions back (KS-server lender API).
   { key: "lender_api", label: "Lender API connections (submit by API, sync status, offers and conditions)", plan: "growth" },
+  { key: "credit_lines", label: "Approved credit lines per client: limit, used, available and expiry reminders", plan: "growth" },
+  { key: "rate_cards", label: "Rate cards and deal structuring: payment options across lenders side by side, with sales tax", plan: "growth" },
+  { key: "credit_scorecards", label: "Credit scorecards and pre-decision rules: grade, rule hits and lender ranking on each application", plan: "growth" },
+  { key: "contract_templates", label: "Contracts from Word templates: merge fields, Word and PDF, sent for e-signature", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
@@ -221,6 +226,7 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // Outgoing webhooks and Zapier Catch Hook triggers, pro (KS-server v20).
   { key: "webhooks", label: "Webhooks and Zapier", plan: "pro" },
   { key: "call_queues", label: "Call queues", plan: "pro" },
+  { key: "vendor_portal", label: "Vendor and dealer portal: point-of-sale quotes, apply links, deal status, invoice upload and vendor fees", plan: "pro" },
   // Custom roles from a permission matrix (view/create/edit/delete/export per area, own/team/all records), pro (KS-server custom roles).
   { key: "custom_roles", label: "Custom roles and permissions", plan: "pro" },
   // KS_BROKER_TOOLS - Vendor and dealer portal, pro.
