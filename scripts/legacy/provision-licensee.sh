@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# ======================================================================================================================
+# LEGACY - kept for reference only (KS_SHARED_HOSTING_v1, 2026-11-03).
+#
+# Keystone no longer gives each brokerage its own resource group, servers and Postgres server. Every brokerage now runs
+# on the one shared server (resource group ks-shared, made once by scripts/provision-shared.sh) with its own database
+# ks_<code> on ks-shared-pg, set up by KS-Ops itself on /ops/provisioning. See docs/PROVISIONING.md.
+#
+# Use this script only to look after a brokerage that was set up the old way (resource group ks-<code>) until it is
+# moved to the shared server. KS-Ops's automatic provisioning no longer calls it. Do not use it for new brokerages.
+# ======================================================================================================================
+#
 # Provisions the Azure resources for one Keystone licensee. Safe to run again: anything that already exists is kept,
 # and secrets already stored in the apps' settings are reused rather than replaced.
 #

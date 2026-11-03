@@ -14,6 +14,12 @@ export function migrationsDir(): string {
   return path.resolve(here, "..", "migrations");
 }
 
+/** KS_SHARED_HOSTING_v1 - the control database's migrations (ks_tenants), applied to KS_CONTROL_OWNER_DATABASE_URL. */
+export function controlMigrationsDir(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "..", "migrations-control");
+}
+
 export async function runMigrations(pool: pg.Pool, dir = migrationsDir()): Promise<string[]> {
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
   const client = await pool.connect();

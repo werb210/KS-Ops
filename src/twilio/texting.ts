@@ -434,7 +434,7 @@ export async function pushTexting(deps: TwilioDeps, l: LicenseeRow): Promise<{ o
   try {
     const r = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/provision/texting`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops texting" },
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops texting", "X-KS-Tenant": l.company_code },
       body: JSON.stringify({ registrations: regs.map((x) => ({ kind: x.kind, status: x.status, phone_number: x.phone_number, reason: x.reason, message: plainStatus(x) })) }),
       signal: AbortSignal.timeout(15_000),
     });

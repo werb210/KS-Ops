@@ -1,11 +1,17 @@
 # Automatic provisioning
 
 When a licensee pays through Stripe Checkout, or staff start a free trial for a licensee that has no copy yet, KS-Ops
-sets up the licensee's own Keystone copy by itself. Staff follow it on `/ops/provisioning`. When a cancelled licensee's
-data purge has run, a matching teardown can remove the copy, but only once the retention rules allow it.
+sets the brokerage up on the shared Keystone server by itself. Staff follow it on `/ops/provisioning`. When a cancelled
+licensee's data purge has run, a matching teardown removes its database, published apps and registry entry, but only
+once the retention rules allow it.
 
-Until the one-time setup below is done, nothing breaks: runs wait in **waiting for manual setup**, sales is emailed the
-checklist once, and `scripts/provision-licensee.sh` still works by hand (see `PROVISIONING.md`).
+> **KS_SHARED_HOSTING_v1 (2026-11-03).** Brokerages no longer get their own Azure resources: they share
+> `ks-shared-server`, `ks-shared-agent` and `ks-shared-web`, each with its own database on `ks-shared-pg`. The layout,
+> the one-time script (`scripts/provision-shared.sh`), every setting and the per-brokerage steps are in
+> [PROVISIONING.md](PROVISIONING.md). This page covers the run mechanics and the GitHub side.
+
+Until the one-time setup is done, nothing breaks: runs wait in **waiting for manual setup** and sales is emailed the
+checklist once.
 
 ## How it works
 
@@ -15,25 +21,26 @@ Staff free trial (/ops/trials)  ───┼─> KS-Ops provisioning run (Postgr
 Staff "Start" on /ops/provisioning ┘          │
                                               │ twilio_account   the licensee's Twilio sub-account (API key, dialler app, Verify service)
                                               │ twilio_address   its business address in Twilio
+                                              │ database         ks_<code> + role ks_<code>_app on ks-shared-pg (KS_SHARED_PG_ADMIN_URL)
+                                              │ tenant_registry  its ks_tenants row: host names, encrypted settings (secrets, ops key, addresses)
+                                              │ twilio_settings  the Twilio values -> the same encrypted settings
+                                              │ workspace_apps   Keystone's Microsoft 365 / Google keys -> the same encrypted settings
+                                              │ shared_server    POST /api/ops/tenants/reload and /api/ops/tenants/<code>/migrate
                                               │ 1. starts the GitHub Actions workflow in KS-Ops (one API call)
                                               v
-                 KS-Ops workflow provision-licensee.yml  (GitHub environment ks-ops-provisioning)
-                 Azure sign-in with a federated credential: no Azure secret is stored anywhere
-                   azure_resources      scripts/provision-licensee.sh <code> canadacentral, DEPLOY_IDENTITY=1
-                   twilio_settings      Twilio settings from KS-Ops (one-off token, masked) -> the KS-server app settings
-                   workspace_apps       Keystone's Microsoft 365 / Google app keys from KS-Ops (masked) -> the KS-server app settings
-                   secrets              checks every generated key is stored on the two web apps
-                   github_environments  ks-<code> in KS-server, KS-Agent, KS-Portal, KS-Client (secrets + variables)
+                 KS-Ops workflow provision-licensee.yml  (GitHub environment ks-ops-provisioning; no Azure sign-in)
+                   github_environments  ks-<code> in KS-Portal and KS-Client (VITE_* variables)
                    deploy_registry      pull request to deploy/licensees.json in each, merged when CI passes
-                   deploy               runs each repository's deploy workflow for this licensee and waits
+                   deploy               runs each repository's deploy workflow for this brokerage (build, upload to sites/<code>/)
                  each step is reported back to KS-Ops with the run's one-off token
                                               v
                  KS-Ops (service steps)
+                   custom_domains       DNS records + az commands on the page; done when every address answers over https
                    health               server, assistant, portal and client answer
                    configure            status provisioning -> active (or trial), plan + branding + flags pushed
-                   admin_user           POST /api/provision/admin on the new KS-server
+                   admin_user           POST /api/provision/admin on the brokerage's address
                    welcome_email        sign-in link emailed to the contact
-                   twilio_voice         the dialler app's voice URL -> the new server
+                   twilio_voice         the dialler app's voice URL -> the brokerage's address
                    twilio_bundle        a regulatory bundle only if Twilio's rules ask for one (waits for approval)
                    phone_numbers        POST /api/provision/phone-numbers: business line (+ toll-free on Growth/Pro) via Twilio
                    texting_registration toll-free verification; US A2P 10DLC for a US line (status followed every 2 h)
@@ -41,18 +48,15 @@ Staff "Start" on /ops/provisioning ┘          │
 
 Why this design:
 
-- **KS-Ops never holds an Azure credential.** KS-Ops is a public web service (sign-ups, webhooks). The power to create
-  resources lives only in a GitHub Actions job that runs the fixed workflow on `main`, signs in to Azure with OIDC
-  (federated credential, no client secret), and can be required to run in a protected GitHub environment.
+- **KS-Ops never holds an Azure credential.** KS-Ops is a public web service (sign-ups, webhooks). It holds a Postgres
+  admin login for `ks-shared-pg` (to make each brokerage's database and role) and the registry owner login, nothing
+  that can change Azure resources. The shared resources are made once by a person (`scripts/provision-shared.sh`), and
+  custom domains are bound by a person from the commands on the page.
 - **KS-Ops's own GitHub credential is tiny**: Actions read and write on the KS-Ops repository only, to start that
-  workflow. The token that writes to the four app repositories exists only inside the workflow.
-- **Secrets never pass through KS-Ops or its database.** The database password, JWT secrets and encryption keys are
-  made by the script and stored straight into the App Service settings; the Static Web Apps tokens go straight into the
-  GitHub environments (through `gh secret set`, via stdin, masked in the log). KS-Ops stores only the licensee's ops
-  key, encrypted, as before.
-- **The licensee's deploy workflows sign in with a per-licensee managed identity** (`ks-<code>-deploy`, Website
-  Contributor on `ks-<code>` only) through a federated credential for the `ks-<code>` environment. No
-  `AZURE_CREDENTIALS` JSON is ever made.
+  workflow. The token that writes to KS-Portal and KS-Client exists only inside the workflow.
+- **Secrets are made in KS-Ops and stored only encrypted**: the database password, JWT secrets and encryption keys go
+  straight into the brokerage's registry entry (`ks_tenants`, AES-256-GCM with `KS_TENANT_KEY`), never into KS-Ops's own
+  database, a log, a step output or the workflow. The workflow gets no secret at all.
 - **Every step is idempotent and resumable.** Each step's status, attempts, error and output are stored; a run picks up
   at the first unfinished step. "Retry step" and "Mark done manually" are on the page.
 
@@ -73,10 +77,10 @@ labels and, once ready, the public portal address.
 
 - **Sub-account**: "Keystone - <company> (<code>)" under `KS_TWILIO_ACCOUNT_SID`. Its auth token and API key secret
   are stored encrypted (`licensee_twilio`, `OPS_ENCRYPTION_KEY`). Found again by name if the row is ever lost.
-- **Settings on the licensee's KS-server** (written by the workflow's `twilio_settings` step, which fetches them from
-  `POST /api/provisioning/callback/<run>/twilio-settings` while that step runs): `TWILIO_ACCOUNT_SID`,
-  `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY`, `TWILIO_API_SECRET`, `TWILIO_VOICE_APP_SID`, `TWILIO_VERIFY_SERVICE_SID`,
-  `TWILIO_ADDRESS_SID`, `KS_SERVER_URL`. The bundle id (when there is one) goes with the phone-numbers request.
+- **Settings for the brokerage** (written by the `twilio_settings` step into its encrypted registry settings):
+  `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY`, `TWILIO_API_SECRET`, `TWILIO_VOICE_APP_SID`,
+  `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_ADDRESS_SID`, `KS_SERVER_URL`. The bundle id (when there is one) goes with the
+  phone-numbers request.
 - **Texting**: toll-free verification for the toll-free line (Messaging API); for a US business line, A2P 10DLC through
   the ISV flow (secondary customer profile and A2P trust product in the sub-account, with Keystone's primary profile
   `KS_TWILIO_ISV_PROFILE_SID` attached; brand; messaging service; campaign once the brand is approved). Canadian local
@@ -99,9 +103,11 @@ When the cancellation purge is marked done (KS-server reports it, or staff press
    `GET /api/provision/teardown-check` says `deletable` (KS-server v14 retention: no `retention_archive` left, no open
    legal holds, nothing still inside its 7 years). A server that cannot be asked means no teardown. Re-checked daily;
    the run shows **blocked** with the reason (for example "kept until 2033-04-01").
-2. `deploy_registry_remove`, `github_environments_remove`, `azure_delete` (workflow `teardown-licensee.yml`, GitHub
-   environment `ks-ops-teardown`). Only a resource group tagged `keystone-licensee=<code>` is ever deleted.
-3. `finish`: audited as `licensee.torn_down`.
+2. `deploy_registry_remove`, `github_environments_remove` (workflow `teardown-licensee.yml`, GitHub environment
+   `ks-ops-teardown`): KS-Portal and KS-Client only.
+3. `database_drop`, `sites_delete`, `tenant_delete` (KS-Ops): the database `ks_<code>` and role `ks_<code>_app`, the
+   blobs under `sites/<code>/`, and the `ks_tenants` row (then the shared server reloads). See PROVISIONING.md.
+4. `finish`: audited as `licensee.torn_down`.
 
 ### Dry run
 
@@ -111,38 +117,14 @@ When the cancellation purge is marked done (KS-server reports it, or staff press
 
 ## What Todd sets up once
 
-### 1. Azure: an app registration for provisioning, with federated credentials
+The shared Azure resources and every KS-Ops setting for them: [PROVISIONING.md](PROVISIONING.md), "What Todd sets up
+once". The GitHub side, for the KS-Portal and KS-Client steps:
 
-In the Azure portal: Microsoft Entra ID > App registrations > New registration, name `keystone-provisioning`.
-Single tenant. No redirect URI. **Do not create a client secret.**
+The `keystone-provisioning` Azure app registration, its federated credentials and its roles (sections 1 and 2 of the
+earlier version of this page) are no longer used by provisioning; they can be deleted once no brokerage is left on the
+old layout.
 
-Certificates & secrets > Federated credentials > Add credential > "GitHub Actions deploying Azure resources", twice:
-
-| Name | Organization | Repository | Entity type | Environment |
-| --- | --- | --- | --- | --- |
-| `ks-ops-provisioning` | `werb210` | `KS-Ops` | Environment | `ks-ops-provisioning` |
-| `ks-ops-teardown` | `werb210` | `KS-Ops` | Environment | `ks-ops-teardown` |
-
-(Subjects `repo:werb210/KS-Ops:environment:ks-ops-provisioning` and `...:ks-ops-teardown`, issuer
-`https://token.actions.githubusercontent.com`, audience `api://AzureADTokenExchange`.)
-
-### 2. Azure: roles and scope
-
-On the Keystone subscription (Subscriptions > the subscription > Access control (IAM) > Add role assignment), for the
-`keystone-provisioning` app:
-
-| Role | Scope | Why |
-| --- | --- | --- |
-| Contributor | the Keystone subscription | create resource groups `ks-<code>`, Postgres, App Service, Static Web Apps, the managed identity and its federated credentials; delete `ks-<code>` on teardown |
-| Role Based Access Control Administrator, **with a condition**: may only assign the role *Website Contributor* | the Keystone subscription | give each licensee's deploy identity Website Contributor on its own resource group |
-
-The condition keeps the provisioning app from granting itself or anyone else broader rights. (Portal: "Allow user to
-only assign selected roles to selected principals (fewer privileges)" > Website Contributor.) Use a dedicated
-subscription for licensees if you can, so this app has no rights over Boreal's other resources.
-
-No Entra ID (Graph) permission is needed: deploy identities are managed identities, not app registrations.
-
-### 3. GitHub: an app (or token) for the four app repositories
+### 1. GitHub: an app (or token) for KS-Portal and KS-Client
 
 Preferred, a GitHub App owned by `werb210`: Settings > Developer settings > GitHub Apps > New GitHub App, name
 `keystone-provisioning`, no webhook. Repository permissions:
@@ -157,32 +139,31 @@ Preferred, a GitHub App owned by `werb210`: Settings > Developer settings > GitH
 | Checks | Read | wait for CI on the registry pull request |
 | Metadata | Read | required |
 
-Install it on `KS-Ops`, `KS-server`, `KS-Agent`, `KS-Portal` and `KS-Client` only. Generate a private key.
+Install it on `KS-Ops`, `KS-Portal` and `KS-Client` only. Generate a private key.
 
-Alternative: a fine-grained personal access token with the same permissions on the same five repositories (it expires,
-so set a reminder).
+Alternative: a fine-grained personal access token with the same permissions on the same three repositories (it
+expires, so set a reminder).
 
 If branch protection on `main` requires reviews, either let the app bypass it (Settings > Rules > bypass list) or the
 registry step will wait and fail; then merge the pull request by hand and press "Mark done manually".
 
-### 4. GitHub: the KS-Ops environments
+### 2. GitHub: the KS-Ops environments
 
 In KS-Ops: Settings > Environments > New environment `ks-ops-provisioning`, then again `ks-ops-teardown`. In each:
 
 | Kind | Name | Value |
 | --- | --- | --- |
-| Variable | `AZURE_CLIENT_ID` | the `keystone-provisioning` app's Application (client) ID |
-| Variable | `AZURE_TENANT_ID` | Directory (tenant) ID |
-| Variable | `AZURE_SUBSCRIPTION_ID` | the Keystone subscription ID |
 | Variable | `KS_PROVISION_APP_ID` | the GitHub App's App ID |
 | Secret | `KS_PROVISION_APP_PRIVATE_KEY` | the GitHub App's private key (.pem contents) |
 | Secret | `KS_PROVISION_GH_TOKEN` | only if you use a token instead of the app |
-| Secret | `OPENAI_API_KEY` | `ks-ops-provisioning` only: written to each licensee's KS-server and KS-Agent (KS-server will not start without one) |
+
+The Azure variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`) and `OPENAI_API_KEY` are no longer
+read and can be removed. `OPENAI_API_KEY` is a setting of the shared server and agent now.
 
 Recommended: on `ks-ops-teardown`, tick **Required reviewers** and add yourself, so every deletion waits for a person.
 Optionally limit both environments to the `main` branch (Deployment branches and tags > Selected branches > `main`).
 
-### 5. KS-Ops app settings (the `ks-ops` App Service)
+### 3. KS-Ops app settings (the `ks-ops` App Service)
 
 | Setting | Value |
 | --- | --- |
@@ -195,10 +176,11 @@ Optionally limit both environments to the `main` branch (Deployment branches and
 | `KS_TEARDOWN_ENABLED` | `true` to allow teardown runs (off by default) |
 | `KS_PROVISION_GITHUB_REPO`, `KS_PROVISION_GITHUB_REF` | optional; default `werb210/KS-Ops` and `main` |
 
-Also make sure `OPS_ALLOWED_SERVER_HOST_SUFFIXES` covers the licensee hosts (the default `.azurewebsites.net,
-.azurestaticapps.net` does): the addresses the workflow reports are only saved when they match.
+Plus the shared-layout settings (`KS_CONTROL_OWNER_DATABASE_URL`, `KS_TENANT_KEY`, `KS_SHARED_PG_ADMIN_URL`,
+`KS_SHARED_SERVER_URL`, `KS_SHARED_AGENT_URL`, `KS_OPS_SERVICE_KEY`, `KS_DOMAIN`, `KS_SITES_STORAGE_CONNECTION_STRING`):
+see PROVISIONING.md. `OPS_ALLOWED_SERVER_HOST_SUFFIXES` includes `.<KS_DOMAIN>` by itself.
 
-### 6. Check it
+### 4. Check it
 
 1. `/ops/provisioning` shows no "Waiting for manual setup" box.
 2. Start a **dry run** for any licensee: the KS-Ops Actions tab shows "Provision <code> (dry run)", and the run's log
@@ -207,9 +189,9 @@ Also make sure `OPS_ALLOWED_SERVER_HOST_SUFFIXES` covers the licensee hosts (the
 
 ## What still needs a person
 
-- **Custom domains and DNS** (`portal.<their-domain>`, `apply.<their-domain>`): the copy runs on its
-  `*.azurewebsites.net` / `*.azurestaticapps.net` addresses until a domain is added to the Static Web Apps and App
-  Service, and the addresses are updated on the licensee and in the `ks-<code>` environment variables.
+- **Custom domains and DNS**: the DNS records and `az` commands for the brokerage's three addresses under `KS_DOMAIN`
+  are shown on its run; a person adds the records and runs the commands, and the `custom_domains` step finishes by
+  itself. A brokerage's own domain (`apply.<their-domain>`) is added to its `client_hosts` and bound the same way.
 - **App store builds per licensee** (branded iPhone, iPad and Android apps): KS-Client's "Build licensee apps" workflow
   and its own environment (`docs/LICENSEE_APPS.md` in KS-Client), plus the store listings.
 - **Twilio**: nothing per licensee (KS_OPS_TWILIO_AUTO_v1). Todd's one-time Keystone setup (paid master account, its
@@ -217,7 +199,7 @@ Also make sure `OPS_ALLOWED_SERVER_HOST_SUFFIXES` covers the licensee hosts (the
   takes days; KS-Ops follows it by itself.
 - **The licensee's own QuickBooks app** (`QBO_*`): off until set.
 - **Microsoft 365 / Google Workspace: nothing per licensee.** The `workspace_apps` step writes Keystone's one
-  Microsoft app and one Google client to the licensee's KS-server; the brokerage's admin then connects Microsoft 365
+  Microsoft app and one Google client into the brokerage's encrypted settings; the brokerage's admin then connects Microsoft 365
   in one click (Settings > Connections) and each person connects Google from My Profile. The opened run on
   `/ops/provisioning` shows whether they have. Todd's one-time setup is in `PROVISIONING.md`.
 - **Email sending from their domain** and any SPF/DKIM records.

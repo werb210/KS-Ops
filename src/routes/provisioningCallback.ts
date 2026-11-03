@@ -1,12 +1,9 @@
 // KS_OPS_AUTO_PROVISION_v1 - the KS-Ops provisioning workflow reports back here, and the website reads progress.
 //
 // Workflow (Authorization: Bearer <the run's one-off callback token>; the token expires with the run's workflow):
-//   GET  /api/provisioning/callback/:runId/context    the licensee's non-secret details
-//   POST /api/provisioning/callback/:runId/ops-key    a new ops key for KS-server (only while azure_resources runs)
-//   POST /api/provisioning/callback/:runId/twilio-settings  the licensee's Twilio settings for its KS-server (only while
-//                                                     twilio_settings runs; KS_OPS_TWILIO_AUTO_v1)
-//   POST /api/provisioning/callback/:runId/workspace-settings  Keystone's Microsoft 365 / Google app keys for its KS-server
-//                                                     (only while workspace_apps runs; KS_OPS_WORKSPACE_APPS)
+//   GET  /api/provisioning/callback/:runId/context    the licensee's non-secret details (and its addresses)
+// KS_SHARED_HOSTING_v1 - the ops-key, twilio-settings and workspace-settings hand-overs are gone: those values are
+// written by KS-Ops itself, encrypted, into the brokerage's registry entry. No secret is handed to the workflow.
 //   POST /api/provisioning/callback/:runId            { step, status: running|done|failed|log|setup_missing, message, output, missing }
 // Website (public, CORS PUBLIC_SITE_URL):
 //   GET  /api/public/provisioning/:token              setup progress for the thank-you page (token: statusToken.ts)
@@ -15,9 +12,8 @@ import { limiter } from "../lib/clientIp.js";
 import type { Deps } from "../deps.js";
 import { h, UUID_RE } from "../lib/http.js";
 import { kick, machineDeps } from "../provisioning/index.js";
-import { advanceRun, handleCallback, opsKeyForWorkflow, twilioSettingsForWorkflow, workspaceSettingsForWorkflow, publicStatus, runForCallback, workflowContext, type MachineDeps } from "../provisioning/machine.js";
+import { advanceRun, handleCallback, publicStatus, runForCallback, workflowContext, type MachineDeps } from "../provisioning/machine.js";
 import { licenseeIdFromStatusToken } from "../provisioning/statusToken.js";
-import { EncryptionNotConfigured } from "../licensees/repo.js";
 
 const bearer = (req: Request) => {
   const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization ?? ""));
@@ -41,47 +37,6 @@ export function provisioningCallbackRouter(deps: Deps, md: MachineDeps = machine
       if (!run) return res.status(401).json(denied);
       res.setHeader("Cache-Control", "no-store");
       return res.json(await workflowContext(md, run));
-    }),
-  );
-
-  router.post(
-    "/:runId/ops-key",
-    h(async (req, res) => {
-      const run = await load(req);
-      if (!run) return res.status(401).json(denied);
-      res.setHeader("Cache-Control", "no-store");
-      try {
-        const r = await opsKeyForWorkflow(md, run);
-        if (!r.ok) return res.status(r.status).json({ error: r.error });
-        return res.json({ ops_key: r.ops_key });
-      } catch (err) {
-        if (err instanceof EncryptionNotConfigured) return res.status(503).json({ error: "encryption_not_configured" });
-        throw err;
-      }
-    }),
-  );
-
-  router.post(
-    "/:runId/twilio-settings",
-    h(async (req, res) => {
-      const run = await load(req);
-      if (!run) return res.status(401).json(denied);
-      res.setHeader("Cache-Control", "no-store");
-      const r = await twilioSettingsForWorkflow(md, run);
-      if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ settings: r.settings });
-    }),
-  );
-
-  router.post(
-    "/:runId/workspace-settings",
-    h(async (req, res) => {
-      const run = await load(req);
-      if (!run) return res.status(401).json(denied);
-      res.setHeader("Cache-Control", "no-store");
-      const r = await workspaceSettingsForWorkflow(md, run);
-      if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ settings: r.settings, missing: r.missing });
     }),
   );
 

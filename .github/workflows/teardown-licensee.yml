@@ -1,15 +1,17 @@
 name: Tear down licensee
 
 # KS_OPS_AUTO_PROVISION_v1 - started by KS-Ops through the GitHub API (POST .../actions/workflows/teardown-licensee.yml/dispatches),
-# never by hand in normal use. It does the teardown (registry, GitHub environments, Azure resource group) steps and reports each one back to KS-Ops with the run's
-# one-off callback token. See docs/AUTO_PROVISIONING.md.
+# never by hand in normal use. It does the GitHub steps of a brokerage's removal (its deploy/licensees.json entry and its ks-<code>
+# environment in KS-Portal and KS-Client) and reports each step back to KS-Ops with the run's one-off callback token.
+# See docs/PROVISIONING.md and docs/AUTO_PROVISIONING.md.
+#
+# KS_SHARED_HOSTING_v1 - no Azure sign-in any more: every brokerage runs on the shared apps made once by
+# scripts/provision-shared.sh, and its database, role, registry entry and settings are KS-Ops service steps.
 #
 # Credentials (GitHub environment "ks-ops-teardown" of this repository - nothing is stored in KS-Ops):
-#   variables AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID   the provisioning app registration; its federated
-#             credential trusts repo:werb210/KS-Ops:environment:ks-ops-teardown, so no Azure secret exists anywhere
-#   variable  KS_PROVISION_APP_ID + secret KS_PROVISION_APP_PRIVATE_KEY  GitHub App for the four app repositories
+#   variable  KS_PROVISION_APP_ID + secret KS_PROVISION_APP_PRIVATE_KEY  GitHub App for KS-Portal and KS-Client
 #             (or secret KS_PROVISION_GH_TOKEN, a fine-grained token)
-# Recommended: add a required reviewer to the ks-ops-teardown environment, so a person approves every deletion.
+# Recommended: add a required reviewer to the ks-ops-teardown environment, so a person approves every removal.
 # Anything missing is reported to KS-Ops ("waiting for manual setup") and nothing is changed.
 on:
   workflow_dispatch:
@@ -48,7 +50,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   teardown:
@@ -83,20 +84,10 @@ jobs:
           app-id: ${{ vars.KS_PROVISION_APP_ID }}
           private-key: ${{ secrets.KS_PROVISION_APP_PRIVATE_KEY }}
           owner: werb210
-          repositories: KS-server,KS-Agent,KS-Portal,KS-Client
-
-      - name: Azure sign-in (federated credential)
-        id: azure
-        if: inputs.dry_run != 'true' && vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != ''
-        continue-on-error: true
-        uses: azure/login@v2
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          repositories: KS-Portal,KS-Client
 
       - id: runner
-        name: Tear down (registry, GitHub environments, Azure resource group)
+        name: Tear down (registry, GitHub environments)
         env:
           MODE: teardown
           RUN_ID: ${{ inputs.run_id }}
@@ -106,10 +97,6 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           GH_OWNER: werb210
           GH_TOKEN: ${{ steps.app.outputs.token || secrets.KS_PROVISION_GH_TOKEN }}
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-          AZURE_LOGIN_OUTCOME: ${{ steps.azure.outcome || 'skipped' }}
         run: npx tsx src/provisioning/runner/main.ts
 
       # Something failed before the runner could start (checkout, npm ci): tell KS-Ops so it does not wait for hours.

@@ -147,7 +147,7 @@ export async function pushPlan(deps: Pick<Deps, "db" | "fetch" | "now">, license
   try {
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/plan`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120) },
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120), "X-KS-Tenant": l.company_code }, // KS_SHARED_HOSTING_v1
       body: JSON.stringify({ ...planPushBody(l, deps.now()), ...(beta ? { beta_features: beta } : {}), branding: brandingOf(l) }),
       signal: AbortSignal.timeout(15_000),
     });

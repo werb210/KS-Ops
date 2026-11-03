@@ -1,0 +1,91 @@
+name: Deploy the shared web host
+
+# KS_SHARED_HOSTING_v1 - builds web-host/ and deploys it to the App Service ks-shared-web (resource group ks-shared),
+# which serves every brokerage's KS-Portal and KS-Client web build from blob storage by host name.
+# Runs when web-host/ changes on main (after its tests pass), or by hand.
+#
+# Repository settings:
+#   secret   KS_SHARED_AZURE_CREDENTIALS  JSON of a service principal with Website Contributor on the ks-shared
+#                                         resource group (az ad sp create-for-rbac --json-auth; see docs/PROVISIONING.md)
+#   variable KS_SHARED_WEB_APP_NAME       optional, default ks-shared-web
+# App settings on ks-shared-web (set once by scripts/provision-shared.sh): KS_CONTROL_DATABASE_URL (ks_control_reader),
+# KS_SITES_STORAGE_CONNECTION_STRING.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web-host/**"
+      - ".github/workflows/deploy-web-host.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-ks-shared-web
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web-host
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Use Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: web-host/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web-host
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Use Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: rm -rf dist && npm run build
+
+      - name: Prune dev deps
+        run: npm prune --omit=dev
+
+      - name: Verify build
+        run: test -f dist/index.js && test -f dist/server.js
+
+      - name: Create deployment package
+        run: zip -qr ../web-host-release.zip dist node_modules package.json package-lock.json
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.KS_SHARED_AZURE_CREDENTIALS }}
+
+      - name: Deploy to Azure
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.KS_SHARED_WEB_APP_NAME || 'ks-shared-web' }}
+          package: web-host-release.zip

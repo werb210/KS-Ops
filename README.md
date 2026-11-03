@@ -58,6 +58,13 @@ again after a price changes.
 | `KS_TWILIO_ISV_PROFILE_SID` | for US texting | Keystone's approved ISV primary customer profile in Twilio Trust Hub (`BU...`), attached to each licensee's A2P 10DLC registration. Without it US local-line registrations wait as "needs info" |
 | `KS_TWILIO_NOTIFICATION_EMAIL` | no | where Twilio sends registration notices (default: the sales inbox) |
 | `KS_OPS_PUBLIC_URL` | recommended | this server's public https address, used for uploaded-logo links (falls back to Azure's `WEBSITE_HOSTNAME`, then the request's host) |
+| `KS_CONTROL_OWNER_DATABASE_URL` | for provisioning | the brokerage registry: database `ks_control` on `ks-shared-pg` as `ks_control_owner`. Its migrations (`migrations-control/`) run on startup (KS_SHARED_HOSTING_v1, `docs/PROVISIONING.md`) |
+| `KS_TENANT_KEY` | for provisioning | encrypts each brokerage's database address and settings in the registry; the same value as on the shared server, agent and web host |
+| `KS_SHARED_PG_ADMIN_URL` | for provisioning | the `ks-shared-pg` admin (database `postgres`): makes and drops each brokerage's database and role |
+| `KS_SHARED_SERVER_URL`, `KS_SHARED_AGENT_URL` | for provisioning | the shared KS-server and KS-Agent addresses (https) |
+| `KS_OPS_SERVICE_KEY` | for provisioning | sent as `X-KS-Ops-Service-Key` to the shared server's `/api/ops/tenants` routes; the same value as on `ks-shared-server` |
+| `KS_DOMAIN` | recommended | Keystone's domain for brokerage addresses (`<code>.api.<domain>`, `<code>.portal.<domain>`, `<code>.app.<domain>`). Without it no host names or custom domains are made, and the web apps cannot be opened |
+| `KS_SITES_STORAGE_CONNECTION_STRING` | for teardown | the `ksshared<suffix>` storage account; the purge deletes `sites/<code>/` |
 | `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` (licensee pushes include `company.support_level`). Licensee support tickets and their follow-ups go to `POST {BF_CRM_URL}/api/ks/support/ingest` through the same outbox (required: `external_id`, `subject`, `message`, `message_id`, `licensee`, `requester`; 404/503 there = not deployed yet: retried every 6 h, logged once; 400/422 = rejected: logged with details, given up after 6 tries) |
 | `BF_CRM_KEY` | for the CRM | the same value as `KS_OPS_CRM_KEY` on BF-Server (sent as `X-KS-Ops-Key`). Unset: nothing is pushed (logged once at startup). Pushes wait in `crm_outbox` and are retried after 1 min, 5 min, 30 min, 2 h, 12 h, then daily until BF-Server accepts them |
 | `KS_M365_CLIENT_ID`, `KS_M365_CLIENT_SECRET` | for Microsoft 365 | Keystone's one multi-tenant Entra app (KS_OPS_WORKSPACE_APPS). Written to every licensee's KS-server by the `workspace_apps` provisioning step; the brokerage's admin then connects in one click. See `docs/PROVISIONING.md` |
@@ -298,4 +305,8 @@ Email marketing to prospective licensees, run from the staff portal's Keystone s
 
 ## Provisioning
 
-`KS_OPS_URL=https://<ks-ops> scripts/provision-licensee.sh <code> <region>` creates a licensee's Azure resources. See `docs/PROVISIONING.md`.
+Every brokerage runs on Keystone's one shared server with its own database (KS_SHARED_HOSTING_v1).
+`scripts/provision-shared.sh` makes the shared Azure resources once; after that KS-Ops sets up each brokerage itself
+on `/ops/provisioning` (its database `ks_<code>`, its role, its `ks_tenants` registry entry, its web builds).
+`web-host/` is the shared web host (`ks-shared-web`). See `docs/PROVISIONING.md`. The old per-brokerage script is kept
+as `scripts/legacy/provision-licensee.sh`.

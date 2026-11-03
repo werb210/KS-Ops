@@ -13,7 +13,7 @@ const exec: Exec = (cmd, args, opts) =>
     let stderr = "";
     child.stdout.on("data", (d) => {
       stdout += d;
-      // provision-licensee.sh prints progress (never a secret with KS_NONINTERACTIVE=1); pass it to the Actions log.
+      // A bash step's progress goes to the Actions log as it happens (none of the current steps use bash).
       if (cmd === "bash") process.stdout.write(d);
     });
     child.stderr.on("data", (d) => {

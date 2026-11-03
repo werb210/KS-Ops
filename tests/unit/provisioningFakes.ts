@@ -6,6 +6,89 @@ import type { MachineDeps } from "../../src/provisioning/machine.js";
 import { stepsFor } from "../../src/provisioning/steps.js";
 import type { LogRow, ProvisioningStore, RunRow, StepRow } from "../../src/provisioning/store.js";
 import { fakeDb, fakeMailer } from "../helpers.js";
+import type { SharedDeps } from "../../src/tenants/shared.js";
+import type { TenantRow } from "../../src/tenants/repo.js";
+
+/**
+ * KS_SHARED_HOSTING_v1 - the shared layout faked: ks_tenants in memory (answered by SQL content), the ks-shared-pg
+ * admin connection (roles and databases in sets, every statement recorded) and the sites container.
+ */
+export function fakeShared() {
+  const tenants = new Map<string, TenantRow>();
+  const roles = new Set<string>();
+  const databases = new Set<string>();
+  const blobs = new Set<string>();
+  const now = () => new Date("2026-10-25T12:00:00Z");
+  const control = fakeDb([
+    [/^SELECT \* FROM ks_tenants WHERE code = \$1/, (p) => (tenants.has(String(p[0])) ? [{ ...tenants.get(String(p[0])) }] : [])],
+    [/^INSERT INTO ks_tenants \(code, licensee_id, database_name, database_url_enc\)/, (p) => {
+      const code = String(p[0]);
+      const prev = tenants.get(code);
+      tenants.set(code, {
+        code, licensee_id: String(p[1]), status: prev?.status ?? "provisioning", api_hosts: prev?.api_hosts ?? [], portal_hosts: prev?.portal_hosts ?? [],
+        client_hosts: prev?.client_hosts ?? [], database_name: String(p[2]), database_url_enc: String(p[3]), env_enc: prev?.env_enc ?? "", updated_at: now(),
+      });
+      return [];
+    }],
+    [/^UPDATE ks_tenants SET api_hosts = \$2, portal_hosts = \$3, client_hosts = \$4/, (p) => {
+      const t = tenants.get(String(p[0]));
+      if (!t) return [];
+      Object.assign(t, { api_hosts: p[1], portal_hosts: p[2], client_hosts: p[3] });
+      return { rows: [], rowCount: 1 };
+    }],
+    [/^UPDATE ks_tenants SET env_enc = \$2/, (p) => {
+      const t = tenants.get(String(p[0]));
+      if (t) t.env_enc = String(p[1]);
+      return { rows: [], rowCount: t ? 1 : 0 };
+    }],
+    [/^UPDATE ks_tenants SET status = \$2/, (p) => {
+      const t = tenants.get(String(p[0]));
+      if (!t || t.status === p[1]) return [];
+      t.status = p[1] as TenantRow["status"];
+      return [{ code: t.code }];
+    }],
+    [/^DELETE FROM ks_tenants WHERE code = \$1/, (p) => (tenants.delete(String(p[0])) ? [{ code: p[0] }] : [])],
+    [/^SELECT code, licensee_id, status FROM ks_tenants/, () => [...tenants.values()].map((t) => ({ code: t.code, licensee_id: t.licensee_id, status: t.status }))],
+  ]);
+  const name = (sql: string) => /"([a-z0-9_]+)"/.exec(sql)?.[1] ?? "";
+  const admin = fakeDb([
+    [/^SELECT 1 FROM pg_roles WHERE rolname = \$1/, (p) => (roles.has(String(p[0])) ? [{ "?column?": 1 }] : [])],
+    [/^SELECT 1 FROM pg_database WHERE datname = \$1/, (p) => (databases.has(String(p[0])) ? [{ "?column?": 1 }] : [])],
+    [/^CREATE ROLE /, (_p) => []],
+    [/^CREATE DATABASE /, () => []],
+    [/^DROP DATABASE /, () => []],
+    [/^DROP ROLE /, () => []],
+  ]);
+  const origQuery = admin.query.bind(admin);
+  admin.query = async (sql: string, params: unknown[] = []) => {
+    const r = await origQuery(sql, params);
+    const flat = sql.replace(/\s+/g, " ");
+    if (/^CREATE ROLE /.test(flat)) roles.add(name(flat));
+    if (/^CREATE DATABASE /.test(flat)) databases.add(name(flat));
+    if (/^DROP DATABASE /.test(flat)) databases.delete(name(flat));
+    if (/^DROP ROLE /.test(flat)) roles.delete(name(flat));
+    return r;
+  };
+  const onDb: Array<{ database: string; db: ReturnType<typeof fakeDb>; ended: boolean }> = [];
+  const shared: SharedDeps = {
+    control: () => control,
+    admin: () => admin,
+    adminOn: async (database: string) => {
+      const db = fakeDb();
+      const entry = { database, db, ended: false };
+      onDb.push(entry);
+      return Object.assign(db, { end: async () => { entry.ended = true; } });
+    },
+    sites: () => ({
+      async deletePrefix(prefix: string) {
+        const gone = [...blobs].filter((b) => b.startsWith(prefix));
+        gone.forEach((b) => blobs.delete(b));
+        return gone.length;
+      },
+    }),
+  };
+  return { shared, tenants, roles, databases, blobs, control, admin, onDb };
+}
 
 export function memoryStore(): ProvisioningStore & { runs: Map<string, RunRow>; stepRows: Map<string, StepRow[]>; logRows: LogRow[] } {
   const runs = new Map<string, RunRow>();
@@ -110,6 +193,11 @@ export function licenseeDb(l: LicenseeRow) {
       state.l = { ...state.l, server_url: String(p[1]), portal_url: String(p[2]), client_url: String(p[3]) };
       return [{ id: state.l.id }];
     }],
+    // KS_SHARED_HOSTING_v1 - the tenant_registry step's addresses (portal and client only when there is a domain).
+    [/^UPDATE licensees SET server_url = \$2, portal_url = COALESCE\(NULLIF\(\$3, ''\), portal_url\)/, (p) => {
+      state.l = { ...state.l, server_url: String(p[1]), portal_url: String(p[2]) || state.l.portal_url, client_url: String(p[3]) || state.l.client_url };
+      return { rows: [], rowCount: 1 };
+    }],
     [/^UPDATE licensees SET status = \$2, updated_at = now\(\) WHERE id = \$1 AND status = 'provisioning'/, (p) => {
       if (state.l.status !== "provisioning") return [];
       state.l = { ...state.l, status: String(p[1]) };
@@ -123,6 +211,7 @@ export function machine(l: LicenseeRow, over: Partial<MachineDeps> = {}, env: No
   const { db, state } = licenseeDb(l);
   const { mailer, sent } = fakeMailer();
   const store = memoryStore();
+  const sh = fakeShared();
   let now = new Date("2026-10-25T12:00:00Z");
   const dispatch = vi.fn(async (_file: string, _inputs: Record<string, string>) => {});
   const deps: MachineDeps = {
@@ -133,9 +222,10 @@ export function machine(l: LicenseeRow, over: Partial<MachineDeps> = {}, env: No
     store,
     dispatch,
     env,
+    shared: sh.shared,
     ...over,
   };
-  return { deps, store, db, state, sent, dispatch, tick: (ms: number) => { now = new Date(now.getTime() + ms); } };
+  return { deps, store, db, state, sent, dispatch, sh, tick: (ms: number) => { now = new Date(now.getTime() + ms); } };
 }
 
 export function configuredEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
@@ -146,6 +236,14 @@ export function configuredEnv(extra: Record<string, string> = {}): NodeJS.Proces
     OPS_ENCRYPTION_KEY: "a".repeat(64),
     KS_TWILIO_ACCOUNT_SID: `AC${"0".repeat(32)}`, // KS_OPS_TWILIO_AUTO_v1 - Keystone's master account (faked)
     KS_TWILIO_AUTH_TOKEN: "master-token",
+    // KS_SHARED_HOSTING_v1 - the shared layout (connections are faked by fakeShared)
+    KS_CONTROL_OWNER_DATABASE_URL: "postgresql://ks_control_owner:pw@ks-shared-pg.test:5432/ks_control?sslmode=require",
+    KS_TENANT_KEY: "test-tenant-key",
+    KS_SHARED_PG_ADMIN_URL: "postgresql://ksadmin:pw@ks-shared-pg.test:5432/postgres?sslmode=require",
+    KS_SHARED_SERVER_URL: "https://ks-shared-server.azurewebsites.net",
+    KS_SHARED_AGENT_URL: "https://ks-shared-agent.azurewebsites.net",
+    KS_OPS_SERVICE_KEY: "test-service-key",
+    KS_DOMAIN: "keystone.test",
     ...extra,
   };
 }
