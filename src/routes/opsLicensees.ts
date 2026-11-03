@@ -95,8 +95,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
             extra_storage_blocks: v.extra_storage_blocks,
             status: v.status,
             // A cancelled licensee earns nothing; its plan price stays as plan_mrr. The list showed $357 MRR for a
-            // cancelled licensee. Trials keep their plan price (what they pay once converted).
-            mrr: ["trial", "active", "past_due"].includes(String(v.status)) ? v.mrr : 0,
+            // cancelled licensee.
+            mrr: v.status === "cancelled" ? 0 : v.mrr,
             plan_mrr: v.mrr,
             trial: row.last_report_trial ?? null,
             plan_sync_status: v.plan_sync_status,
