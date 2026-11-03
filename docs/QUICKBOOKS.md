@@ -1,8 +1,8 @@
 # Keystone's QuickBooks Online (Stripe to QuickBooks)
 
 Keystone collects licensee payments through Stripe and records them in **Keystone's own** QuickBooks Online company.
-This is separate from each licensee's own QuickBooks (set up per licensee by `provision-licensee.sh` with `QBO_*`
-settings on their KS-server).
+This is separate from each licensee's own QuickBooks (the `QBO_*` values in that brokerage's encrypted settings in the
+registry, `ks_tenants.env_enc`; see `PROVISIONING.md`).
 
 ## How licensees pay
 

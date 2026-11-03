@@ -236,7 +236,7 @@ async function checkoutCompleted(deps: HookDeps, s: Obj, paidNow: boolean): Prom
       licenseeSummary(l),
       run
         ? "Automatic setup has started. Follow it on /ops/provisioning; you are emailed if a step fails or if setup is waiting for configuration."
-        : `Next step: run scripts/provision-licensee.sh ${l.company_code} and then set the server, portal and client addresses in Keystone operations.`,
+        : `Next step: start the setup of ${l.company_code} on /ops/provisioning (automatic setup is off, or could not start).`,
     ]);
     await sendQuietly(deps.mailer, { to: [salesEmail()], subject: `New Keystone licensee paid: ${l.company_name}`, ...sales }, "sales signup notice");
     const welcome = bodies([

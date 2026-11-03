@@ -39,10 +39,11 @@ jobs:
         run: npm prune --omit=dev
 
       - name: Verify build
-        run: test -f dist/index.js && test -f migrations/001_init.sql
+        run: test -f dist/index.js && test -f migrations/001_init.sql && test -f migrations-control/001_ks_tenants.sql
 
       - name: Create deployment package
-        run: zip -qr release.zip dist migrations node_modules package.json package-lock.json
+        # migrations-control: the brokerage registry (ks_tenants), applied to KS_CONTROL_OWNER_DATABASE_URL on startup.
+        run: zip -qr release.zip dist migrations migrations-control node_modules package.json package-lock.json
 
       # Service principal from AZURE_CREDENTIALS; the target app comes from the AZURE_WEBAPP_NAME repository variable.
       - name: Azure Login

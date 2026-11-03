@@ -8,13 +8,14 @@ import { isUsLocal, linesFrom, plainStatus, pushTexting, submitTexting } from ".
 import { plainTwilioError, TwilioError } from "../../src/twilio/http.js";
 import { normalizeBusinessNumber, signupSchema } from "../../src/licensees/validation.js";
 import { optInPage } from "../../src/routes/textingOptIn.js";
-import { twilioSettingsForWorkflow, startRun, advanceRun, handleCallback } from "../../src/provisioning/machine.js";
 import { phoneNumbers, twilioBundle, type ExecCtx } from "../../src/provisioning/executors.js";
-import { twilioSettings, type RunnerConfig, type RunnerDeps } from "../../src/provisioning/runner/runner.js";
+import { twilioSettings } from "../../src/provisioning/sharedSteps.js";
+import { saveTenantDatabase, tenantEnv } from "../../src/tenants/repo.js";
+import { tenantKey } from "../../src/tenants/crypto.js";
 import type { LicenseeRow } from "../../src/licensees/repo.js";
 import { encryptionKey, encryptSecret } from "../../src/lib/crypto.js";
 import { FakeTwilio, MASTER_SID, MASTER_TOKEN, memoryTwilioStore } from "./twilioFake.js";
-import { configuredEnv, licensee, LICENSEE_ID, licenseeDb, machine } from "./provisioningFakes.js";
+import { configuredEnv, fakeShared, licensee, LICENSEE_ID, licenseeDb } from "./provisioningFakes.js";
 import { fakeMailer } from "../helpers.js";
 
 const DAY = 86_400_000;
@@ -226,41 +227,39 @@ describe("settings for the licensee's KS-server", () => {
     expect(subCreds(await t.store.get(LICENSEE_ID), t.deps.env)!.accountSid).toBe(s.TWILIO_ACCOUNT_SID);
   });
 
-  it("the workflow gets them only while its twilio_settings step runs, and writes them to the App Service masked", async () => {
-    const t = setup(ready({ status: "provisioning", server_url: null }));
-    const m = machine(ready({ status: "provisioning", server_url: null }), {
-      executors: Object.fromEntries(["twilio_account", "twilio_address"].map((k) => [k, vi.fn(async () => ({ kind: "done" as const }))])),
-      twilioStore: t.store,
-      db: t.db,
-    });
+  // KS_SHARED_HOSTING_v1 - they go into the brokerage's encrypted env in the registry, not to an App Service.
+  it("the twilio_settings step saves them encrypted in the brokerage's registry entry", async () => {
+    const t = setup(ready({ status: "provisioning" }));
     await ensureSubaccount(t.deps, ready());
-    const { run } = await startRun(m.deps, LICENSEE_ID, "provision", "checkout");
-    await advanceRun(m.deps, run.id); // the two Twilio steps (faked), then the workflow starts at azure_resources
-    let r = (await m.store.getRun(run.id))!;
-    expect(r.workflow_steps.slice(0, 2)).toEqual(["azure_resources", "twilio_settings"]);
-    expect(await twilioSettingsForWorkflow(m.deps, r)).toEqual({ ok: false, status: 409, error: "not_now" });
-    await handleCallback(m.deps, r, { step: "azure_resources", status: "done", output: {} });
-    await handleCallback(m.deps, r, { step: "twilio_settings", status: "running" });
-    r = (await m.store.getRun(run.id))!;
-    const got = await twilioSettingsForWorkflow(m.deps, r);
-    expect(got.ok).toBe(true);
-
-    const exec = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+    await ensureAddress(t.deps, ready());
+    const sh = fakeShared();
+    const key = tenantKey("test-tenant-key")!;
+    await saveTenantDatabase(sh.control, key, { code: "prairie", licensee_id: LICENSEE_ID, database_name: "ks_prairie", database_url: "postgresql://ks_prairie_app:pw@h/ks_prairie" });
     const logs: string[] = [];
-    const deps = {
-      exec, log: (x: string) => logs.push(x), env: {}, sleep: async () => {}, now: () => new Date(), readFile: async () => "", tempFile: (n: string) => n,
-      fetch: vi.fn(async () => new Response(JSON.stringify({ settings: (got as { settings: Record<string, string> }).settings }), { status: 200 })),
-    } as unknown as RunnerDeps;
-    const cfg = { opsUrl: "https://ks-ops.example.test", runId: run.id, token: "t", steps: [], dryRun: false, owner: "werb210", ghToken: "g", mode: "provision" } as RunnerConfig;
-    await twilioSettings(deps, cfg, { code: "prairie" } as never);
-    const args = (exec.mock.calls[0] as unknown as [string, string[]])[1];
-    expect(args.slice(0, 7)).toEqual(["webapp", "config", "appsettings", "set", "-g", "ks-prairie", "-n"]);
-    expect(args).toContain("ks-prairie-server");
-    expect(args.some((a) => a.startsWith("TWILIO_VERIFY_SERVICE_SID=VA"))).toBe(true);
-    const settings = (got as { settings: Record<string, string> }).settings;
-    expect(logs).toContain(`::add-mask::${settings.TWILIO_AUTH_TOKEN}`);
-    expect(logs).toContain(`::add-mask::${settings.TWILIO_API_SECRET}`);
-    expect(logs.join("\n")).not.toMatch(new RegExp(`Twilio settings written.*${settings.TWILIO_AUTH_TOKEN}`));
+    const ctx = {
+      deps: { ...t.deps, shared: sh.shared }, run: { id: "r1" }, step: { step: "twilio_settings", started_at: new Date() }, licensee: ready(), outputs: {},
+      log: async (m: string) => { logs.push(m); },
+    } as unknown as ExecCtx;
+    const out = await twilioSettings(ctx);
+    expect(out).toMatchObject({ kind: "done" });
+    const env = tenantEnv(sh.tenants.get("prairie")!, key);
+    const sub = (await t.store.get(LICENSEE_ID))!;
+    expect(env.TWILIO_ACCOUNT_SID).toBe(sub.subaccount_sid);
+    expect(env.TWILIO_AUTH_TOKEN).toBe(t.tw.accounts.get(sub.subaccount_sid)!.auth_token);
+    expect(env.TWILIO_VERIFY_SERVICE_SID).toMatch(/^VA/);
+    expect(env.KS_SERVER_URL).toBe(SERVER);
+    // Never in the clear: not in what was written to the registry, not in the log, not in the step's output.
+    const written = sh.control.calls.map((c) => JSON.stringify(c.params)).join("\n");
+    expect(written).not.toContain(env.TWILIO_AUTH_TOKEN);
+    expect(written).not.toContain(env.TWILIO_API_SECRET);
+    expect(JSON.stringify(out) + logs.join("\n")).not.toContain(env.TWILIO_AUTH_TOKEN);
+    expect(t.audits()).toContain("licensee.twilio_settings_saved");
+  });
+
+  it("the twilio_settings step fails plainly before the sub-account exists", async () => {
+    const t = setup(ready({ status: "provisioning" }));
+    const ctx = { deps: { ...t.deps, shared: fakeShared().shared }, run: { id: "r1" }, step: { step: "twilio_settings" }, licensee: ready(), outputs: {}, log: async () => {} } as unknown as ExecCtx;
+    expect(await twilioSettings(ctx)).toEqual({ kind: "failed", error: expect.stringMatching(/retry twilio_account first/) });
   });
 });
 

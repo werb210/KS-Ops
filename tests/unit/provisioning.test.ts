@@ -11,9 +11,14 @@ import { serviceSetupMissing } from "../../src/provisioning/config.js";
 import { describePlan, PROVISION_STEPS, registryEntry } from "../../src/provisioning/steps.js";
 import { licenseeIdFromStatusToken, statusTokenFor } from "../../src/provisioning/statusToken.js";
 import { configuredEnv, licensee, LICENSEE_ID, machine } from "./provisioningFakes.js";
+import { SHARED_EXECUTORS } from "../../src/provisioning/sharedSteps.js";
 
 const WORKFLOW_STEPS = PROVISION_STEPS.filter((s) => s.where === "workflow").map((s) => s.key);
+// KS_SHARED_HOSTING_v1 - the database, registry, workspace, shared-server and custom-domain steps are the real ones,
+// against the faked shared layout (fakeShared); Twilio and the steps that talk to the brokerage are faked.
 const okExecutors = (): Record<string, Executor> => ({
+  ...SHARED_EXECUTORS,
+  twilio_settings: vi.fn(async () => ({ kind: "done" as const })),
   twilio_account: vi.fn(async () => ({ kind: "done" as const })), // KS_OPS_TWILIO_AUTO_v1
   twilio_address: vi.fn(async () => ({ kind: "done" as const })),
   twilio_voice: vi.fn(async () => ({ kind: "done" as const })),
@@ -26,17 +31,11 @@ const okExecutors = (): Record<string, Executor> => ({
   phone_numbers: vi.fn(async () => ({ kind: "done" as const })), // KS_OPS_PHONE_PROVISIONING
 });
 
-/** Plays the workflow: reports every step it was given as done (with the addresses for azure_resources). */
+/** Plays the workflow: reports every step it was given as done. */
 async function workflowReportsAllDone(m: ReturnType<typeof machine>, runId: string) {
   const run = (await m.store.getRun(runId))!;
   for (const step of run.workflow_steps) {
-    const r = await handleCallback(m.deps, (await m.store.getRun(runId))!, {
-      step,
-      status: "done",
-      output: step === "azure_resources"
-        ? { server_url: "https://ks-prairie-server.azurewebsites.net", agent_url: "https://ks-prairie-agent.azurewebsites.net", portal_url: "https://ks-prairie-portal.azurestaticapps.net", client_url: "https://ks-prairie-client.azurestaticapps.net" }
-        : {},
-    });
+    const r = await handleCallback(m.deps, (await m.store.getRun(runId))!, { step, status: "done", output: {} });
     expect(r).toEqual({ ok: true });
   }
 }
@@ -60,30 +59,44 @@ describe("status token", () => {
 });
 
 describe("dry-run plan", () => {
-  it("lists every provisioning change with the script's names, in Canada Central", () => {
-    const plan = describePlan("provision", "northwind");
-    expect(plan[0]).toMatch(/^twilio_account: .*Keystone - <company> \(northwind\)/); // KS_OPS_TWILIO_AUTO_v1
-    expect(plan.find((l) => l.startsWith("azure_resources:"))).toContain("scripts/provision-licensee.sh northwind canadacentral");
-    expect(plan.join("\n")).toContain("ks-northwind-pg");
-    expect(plan.join("\n")).toContain("ks-northwind-deploy");
-    expect(plan.join("\n")).toContain(JSON.stringify(registryEntry("northwind")));
+  it("lists every provisioning change on the shared server: database, registry, reload and migrate, web builds", () => {
+    const plan = describePlan("provision", "north-wind", "canadacentral", "keystone.test");
+    expect(plan[0]).toMatch(/^twilio_account: .*Keystone - <company> \(north-wind\)/); // KS_OPS_TWILIO_AUTO_v1
+    const all = plan.join("\n");
+    expect(plan.find((l) => l.startsWith("database:"))).toMatch(/ks-shared-pg.*CREATE ROLE "ks_north_wind_app".*CREATE DATABASE "ks_north_wind".*REVOKE ALL ON DATABASE FROM PUBLIC/);
+    expect(plan.find((l) => l.startsWith("tenant_registry:"))).toContain("api north-wind.api.keystone.test, portal north-wind.portal.keystone.test, client north-wind.app.keystone.test");
+    expect(plan.find((l) => l.startsWith("shared_server:"))).toContain("/api/ops/tenants/north-wind/migrate");
+    expect(all).toContain(JSON.stringify(registryEntry("north-wind")));
+    expect(all).not.toMatch(/KS-server -|KS-Agent -|ks-north-wind-pg|resource group ks-north-wind\b/);
+    expect(plan.filter((l) => l.startsWith("deploy:")).map((l) => l.split(" - ")[0])).toEqual(["deploy: KS-Portal", "deploy: KS-Client"]);
     for (const s of PROVISION_STEPS) expect(plan.some((l) => l.startsWith(`${s.key}:`))).toBe(true);
+    expect(describePlan("provision", "north-wind").find((l) => l.startsWith("custom_domains:"))).toMatch(/skipped - KS_DOMAIN is not set/);
   });
 
-  it("teardown starts with the retention check and only deletes the licensee's own resource group", () => {
+  it("teardown starts with the retention check, then drops the database and role, the blob folder and the row", () => {
     const plan = describePlan("teardown", "northwind");
     expect(plan[0]).toMatch(/^retention_gate:/);
-    expect(plan.join("\n")).toContain("az group delete -n ks-northwind ");
+    const all = plan.join("\n");
+    expect(all).toContain('DROP DATABASE "ks_northwind" WITH (FORCE), then DROP ROLE "ks_northwind_app"');
+    expect(all).toContain("sites/northwind/");
+    expect(all).toContain("DELETE FROM ks_tenants WHERE code = 'northwind'");
+    expect(all).not.toContain("az group delete");
   });
 });
 
 describe("setup checklist", () => {
   it("lists what KS-Ops lacks and is empty once configured", () => {
     const missing = serviceSetupMissing("provision", { NODE_ENV: "test" });
-    expect(missing.map((m) => m.key)).toEqual(["KS_PROVISION_GITHUB_TOKEN", "OPS_ENCRYPTION_KEY", "KS_OPS_PUBLIC_URL", "KS_TWILIO_ACCOUNT_SID"]);
+    expect(missing.map((m) => m.key)).toEqual([
+      "KS_PROVISION_GITHUB_TOKEN", "OPS_ENCRYPTION_KEY", "KS_OPS_PUBLIC_URL", "KS_TWILIO_ACCOUNT_SID",
+      // KS_SHARED_HOSTING_v1
+      "KS_CONTROL_OWNER_DATABASE_URL", "KS_TENANT_KEY", "KS_SHARED_PG_ADMIN_URL", "KS_SHARED_SERVER_URL", "KS_OPS_SERVICE_KEY",
+    ]);
     expect(serviceSetupMissing("provision", configuredEnv())).toEqual([]);
-    expect(serviceSetupMissing("teardown", configuredEnv()).map((m) => m.key)).toEqual(["KS_TEARDOWN_ENABLED"]);
-    expect(serviceSetupMissing("teardown", configuredEnv({ KS_TEARDOWN_ENABLED: "true" }))).toEqual([]);
+    // KS_DOMAIN is optional: without it the custom domains are skipped (and the page says so).
+    expect(serviceSetupMissing("provision", configuredEnv({ KS_DOMAIN: "" }))).toEqual([]);
+    expect(serviceSetupMissing("teardown", configuredEnv()).map((m) => m.key)).toEqual(["KS_SITES_STORAGE_CONNECTION_STRING", "KS_TEARDOWN_ENABLED"]);
+    expect(serviceSetupMissing("teardown", configuredEnv({ KS_TEARDOWN_ENABLED: "true", KS_SITES_STORAGE_CONNECTION_STRING: "UseDevelopmentStorage=true" }))).toEqual([]);
   });
 });
 
@@ -102,7 +115,7 @@ describe("provisioning state machine", () => {
     expect(notices[0].text).toMatch(/1\. KS-Ops app setting KS_PROVISION_GITHUB_TOKEN/);
   });
 
-  it("starts the workflow once for all Azure and GitHub steps, then runs the service steps to the end", async () => {
+  it("runs the shared-server steps, starts the workflow once for the web build steps, then runs the rest to the end", async () => {
     const ex = okExecutors();
     const m = machine(licensee(), { executors: ex });
     const { run, created } = await startRun(m.deps, LICENSEE_ID, "provision", "checkout");
@@ -121,8 +134,15 @@ describe("provisioning state machine", () => {
     await advanceRun(m.deps, run.id);
     expect(m.dispatch).toHaveBeenCalledTimes(1);
 
+    // Before the workflow: the database, the registry row and the shared server's reload and migrate.
+    expect(m.state.l.server_url).toBe("https://prairie.api.keystone.test");
+    expect(m.sh.databases.has("ks_prairie")).toBe(true);
+    expect(m.sh.tenants.get("prairie")).toMatchObject({ licensee_id: LICENSEE_ID, api_hosts: ["prairie.api.keystone.test"], portal_hosts: ["prairie.portal.keystone.test"], client_hosts: ["prairie.app.keystone.test"] });
+    const calls = (m.deps.fetch as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls.map((c) => String(c[0]));
+    expect(calls).toContain("https://ks-shared-server.azurewebsites.net/api/ops/tenants/reload");
+    expect(calls).toContain("https://ks-shared-server.azurewebsites.net/api/ops/tenants/prairie/migrate");
+
     await workflowReportsAllDone(m, run.id);
-    expect(m.state.l.server_url).toBe("https://ks-prairie-server.azurewebsites.net");
     const done = (await advanceRun(m.deps, run.id))!;
     expect(done.status).toBe("done");
     for (const k of ["health", "configure", "admin_user", "welcome_email"]) expect(ex[k]).toHaveBeenCalledTimes(1);
@@ -157,7 +177,7 @@ describe("provisioning state machine", () => {
     m.tick(WORKFLOW_TIMEOUT_MS + 1000);
     const failed = (await advanceRun(m.deps, run.id))!;
     expect(failed.status).toBe("failed");
-    expect(failed.last_error).toMatch(/^azure_resources: no report from the GitHub workflow/);
+    expect(failed.last_error).toMatch(/^github_environments: no report from the GitHub workflow/);
     await advanceRun(m.deps, run.id);
     expect(m.sent.filter((s) => /needs attention/.test(s.subject))).toHaveLength(1);
   });
@@ -189,16 +209,14 @@ describe("provisioning state machine", () => {
     const { run } = await startRun(m.deps, LICENSEE_ID, "provision", "checkout");
     await advanceRun(m.deps, run.id);
     const r1 = (await m.store.getRun(run.id))!;
-    await handleCallback(m.deps, r1, { step: "azure_resources", status: "done", output: {} });
-    await handleCallback(m.deps, r1, { step: "twilio_settings", status: "done" });
-    await handleCallback(m.deps, r1, { step: "workspace_apps", status: "done" }); // KS_OPS_WORKSPACE_APPS
-    await handleCallback(m.deps, r1, { step: "secrets", status: "done" });
-    await handleCallback(m.deps, r1, { step: "github_environments", status: "failed", message: "GitHub create environment: 403" });
+    expect(r1.workflow_steps).toEqual(["github_environments", "deploy_registry", "deploy"]);
+    await handleCallback(m.deps, r1, { step: "github_environments", status: "done" });
+    await handleCallback(m.deps, r1, { step: "deploy_registry", status: "failed", message: "GitHub merge: 405" });
     expect((await m.store.getRun(run.id))!.status).toBe("failed");
-    await retryStep(m.deps, run.id, "github_environments", "staff");
+    await retryStep(m.deps, run.id, "deploy_registry", "staff");
     await advanceRun(m.deps, run.id);
     expect(m.dispatch).toHaveBeenCalledTimes(2);
-    expect(m.dispatch.mock.calls[1][1].steps).toBe("github_environments,deploy_registry,deploy");
+    expect(m.dispatch.mock.calls[1][1].steps).toBe("deploy_registry,deploy");
   });
 
   it("Mark done manually skips a step and the run carries on", async () => {
@@ -218,12 +236,12 @@ describe("provisioning state machine", () => {
     const m = machine(licensee(), { executors: okExecutors() });
     const { run } = await startRun(m.deps, LICENSEE_ID, "provision", "checkout");
     await advanceRun(m.deps, run.id);
-    await handleCallback(m.deps, (await m.store.getRun(run.id))!, { status: "setup_missing", missing: ["AZURE_CLIENT_ID", "OPENAI_API_KEY", "nonsense"] });
+    await handleCallback(m.deps, (await m.store.getRun(run.id))!, { status: "setup_missing", missing: ["GITHUB_APP", "AZURE_CLIENT_ID", "nonsense"] });
     const after = (await m.store.getRun(run.id))!;
     expect(after.status).toBe("waiting_for_setup");
-    expect(after.setup_missing.map((x) => x.key)).toEqual(["AZURE_CLIENT_ID", "OPENAI_API_KEY"]);
+    expect(after.setup_missing.map((x) => x.key)).toEqual(["GITHUB_APP"]);
     expect(after.callback_token_hash).toBeNull();
-    expect((await m.store.steps(run.id)).find((s) => s.step === "azure_resources")!.status).toBe("pending");
+    expect((await m.store.steps(run.id)).find((s) => s.step === "github_environments")!.status).toBe("pending");
   });
 
   it("a dry run changes nothing: no workflow without GitHub, no service step, every step logs its plan", async () => {
@@ -233,9 +251,11 @@ describe("provisioning state machine", () => {
     const done = (await advanceRun(m.deps, run.id))!;
     expect(done.status).toBe("done");
     expect(m.dispatch).not.toHaveBeenCalled();
-    for (const k of Object.keys(ex)) expect(ex[k]).not.toHaveBeenCalled();
+    for (const k of Object.keys(ex)) if (vi.isMockFunction(ex[k])) expect(ex[k]).not.toHaveBeenCalled();
     const lines = m.store.logRows.map((l) => l.message);
-    expect(lines.some((l) => l.startsWith("would: azure_resources: scripts/provision-licensee.sh prairie canadacentral"))).toBe(true);
+    expect(lines.some((l) => l.startsWith('would: database: on ks-shared-pg (KS_SHARED_PG_ADMIN_URL): CREATE ROLE "ks_prairie_app"'))).toBe(true);
+    expect(m.sh.admin.calls).toHaveLength(0);
+    expect(m.sh.control.calls).toHaveLength(0);
     expect(lines.some((l) => l.startsWith("would: welcome_email:"))).toBe(true);
     expect(m.sent).toHaveLength(0);
   });
@@ -264,12 +284,13 @@ describe("provisioning state machine", () => {
     expect(JSON.stringify(during)).not.toMatch(/azure|github|token/i);
     const steps = (during as { steps: Array<{ label: string; status: string }> }).steps;
     expect(steps[0]).toEqual({ label: "Setting up your phone system", status: "done" }); // KS_OPS_TWILIO_AUTO_v1
-    expect(steps[1]).toEqual({ label: "Creating your servers and database", status: "in_progress" });
+    expect(steps[1]).toEqual({ label: "Creating your database", status: "done" }); // KS_SHARED_HOSTING_v1
+    expect(steps.find((x) => x.label === "Preparing your apps")).toEqual({ label: "Preparing your apps", status: "in_progress" });
     await workflowReportsAllDone(m, run.id);
     m.state.l = { ...m.state.l, status: "active" };
     await advanceRun(m.deps, run.id);
     const ready = await publicStatus(m.deps, LICENSEE_ID);
-    expect(ready).toMatchObject({ state: "ready", portal_url: "https://ks-prairie-portal.azurestaticapps.net", email_sent: true });
+    expect(ready).toMatchObject({ state: "ready", portal_url: "https://prairie.portal.keystone.test", email_sent: true });
   });
 });
 
@@ -366,7 +387,7 @@ describe("service steps", () => {
     const l = { ...live, ops_key_encrypted: enc };
     const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const notSet = ctx(l, {}, () => new Response(JSON.stringify({ ok: false, error: "twilio_not_configured", message: "Twilio is not connected" }), { status: 503 }));
-    expect(await phoneNumbers(notSet)).toMatchObject({ kind: "blocked", message: expect.stringMatching(/TWILIO_ACCOUNT_SID/) });
+    expect(await phoneNumbers(notSet)).toMatchObject({ kind: "blocked", message: expect.stringMatching(/retry the twilio_settings step/) });
     const regulatory = ctx(l, {}, () => new Response(JSON.stringify({ ok: true, results: [{ kind: "main", status: "failed", error: "regulatory_requirement", message: "Twilio needs a registered business address" }] })));
     expect(await phoneNumbers(regulatory)).toMatchObject({ kind: "failed", error: expect.stringMatching(/registered business address/) });
     const old = ctx(l, {}, () => new Response("not found", { status: 404 }));

@@ -15,13 +15,13 @@ export type WorkspaceSummary =
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-export async function workspaceSummary(deps: Pick<Deps, "fetch">, l: Pick<LicenseeRow, "id" | "server_url" | "ops_key_encrypted">): Promise<WorkspaceSummary> {
+export async function workspaceSummary(deps: Pick<Deps, "fetch">, l: Pick<LicenseeRow, "id" | "server_url" | "ops_key_encrypted"> & { company_code?: string }): Promise<WorkspaceSummary> {
   if (!l.server_url) return { ok: false, message: "The licensee's server is not set up yet." };
   const key = opsKeyOf(l);
   if (!key) return { ok: false, message: "No ops key for this licensee, so its server cannot be asked." };
   try {
     const r = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/provision/connections`, {
-      headers: { "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning" },
+      headers: { "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning", ...(l.company_code ? { "X-KS-Tenant": l.company_code } : {}) },
       signal: AbortSignal.timeout(8_000),
     });
     if (r.status === 404) return { ok: false, message: "This licensee's server is on an older version that cannot report it yet." };

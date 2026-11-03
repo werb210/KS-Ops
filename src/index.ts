@@ -15,11 +15,23 @@ import { demoConfigured } from "./demo/config.js";
 import { smsConfigured } from "./lib/sms.js";
 import { bfCrmConfigured } from "./lib/bfCrm.js";
 import { qboMissing } from "./qbo/config.js";
+import { migrateControlDatabase } from "./tenants/migrate.js";
+import { sharedSetupMissing } from "./provisioning/config.js";
 
 async function main() {
   const pool = getPool();
   await runMigrations(pool);
   await seedKnowledgeBase(pool); // KS_OPS_KB_v1 - the starter help library, once
+  // KS_SHARED_HOSTING_v1 - the brokerage registry (ks_tenants in ks_control). A failure here must not stop KS-Ops: it is
+  // logged, and the provisioning steps that need the registry fail with the database's own error until it is fixed.
+  try {
+    const applied = await migrateControlDatabase();
+    if (applied === null) console.warn("[startup] KS_CONTROL_OWNER_DATABASE_URL not set: the brokerage registry is off and new brokerages cannot be provisioned.");
+  } catch (err) {
+    console.error("[startup] control database migrations failed", err instanceof Error ? err.message : String(err));
+  }
+  const sharedMissing = sharedSetupMissing();
+  if (sharedMissing.length) console.warn(`[startup] shared hosting not fully configured (missing ${sharedMissing.map((m) => m.key).join(", ")}): provisioning runs wait for setup.`);
 
   const deps: Deps = { db: pool, fetch, mailer: createMailer(fetch), stripe: realStripe, now: () => new Date() };
 

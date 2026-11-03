@@ -110,7 +110,7 @@ export async function pullUsageReport(
   try {
     const res = await deps.fetch(
       `${l.server_url.replace(/\/+$/, "")}/api/plan/usage-report?period=${encodeURIComponent(period)}`,
-      { headers: { "X-KS-Ops-Key": key, Accept: "application/json" }, signal: AbortSignal.timeout(20_000) },
+      { headers: { "X-KS-Ops-Key": key, Accept: "application/json", "X-KS-Tenant": l.company_code }, signal: AbortSignal.timeout(20_000) },
     );
     if (!res.ok) return { ok: false, error: `status ${res.status}` };
     body = await res.json();

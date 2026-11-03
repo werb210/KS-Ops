@@ -15,7 +15,7 @@ import type { Deps } from "../deps.js";
 import { salesEmail } from "../config.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { matchesHash, newSecret, sha256Hex } from "../lib/crypto.js";
-import { audit, getLicensee, rotateOpsKey, type LicenseeRow } from "../licensees/repo.js";
+import { audit, getLicensee, type LicenseeRow } from "../licensees/repo.js";
 import { allowedServerHostSuffixes } from "../config.js";
 import { autoProvisionEnabled, callbackBaseUrl, githubTokenConfigured, serviceSetupMissing, teardownEnabled, workflowSetupItems, type SetupItem } from "./config.js";
 import { SERVICE_EXECUTORS, type Executor, type StepOutcome } from "./executors.js";
@@ -23,10 +23,11 @@ import { describePlan, stepDef, stepsFor, WORKFLOW_FILES, type RunKind } from ".
 import type { ProvisioningStore, RunRow, StepRow } from "./store.js";
 import type { TwilioStore } from "../twilio/store.js";
 import type { TwilioHttp } from "../twilio/http.js";
-import { serverSettings } from "../twilio/account.js";
 import { twilioSummary } from "../twilio/view.js";
-import { workspaceAppSettings } from "../workspace/apps.js"; // KS_OPS_WORKSPACE_APPS
-import { workspaceSummary } from "../workspace/status.js";
+import { workspaceSummary } from "../workspace/status.js"; // KS_OPS_WORKSPACE_APPS
+import type { SharedDeps } from "../tenants/shared.js"; // KS_SHARED_HOSTING_v1
+import { ksDomain } from "../tenants/config.js";
+import { sharedSummary, stepPlainWords } from "./sharedView.js";
 
 export const WORKFLOW_TIMEOUT_MS = 4 * 60 * 60_000;
 export const CALLBACK_TOKEN_TTL_MS = WORKFLOW_TIMEOUT_MS + 30 * 60_000;
@@ -42,6 +43,7 @@ export type MachineDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now"> & {
   executors?: Record<string, Executor>;
   twilioStore?: TwilioStore; // KS_OPS_TWILIO_AUTO_v1 - tests replace them
   twilioHttp?: TwilioHttp;
+  shared?: SharedDeps; // KS_SHARED_HOSTING_v1 - the control database, the Postgres admin and the sites container
 };
 
 const isFinished = (s: StepRow) => s.status === "done" || s.status === "manual";
@@ -152,7 +154,7 @@ async function waitForSetup(deps: MachineDeps, run: RunRow, missing: SetupItem[]
         ...bodies([
           `${l ? `${l.company_name} (${l.company_code})` : "A licensee"} is ready to be set up, but automatic setup is not configured yet. Nothing has been created.`,
           "Still needed:\n" + missing.map((m, i) => `${i + 1}. ${m.label}`).join("\n"),
-          "See KS-Ops docs/AUTO_PROVISIONING.md. The setup starts by itself once these are in place (or press Retry on /ops/provisioning). Until then you can still run scripts/provision-licensee.sh by hand.",
+          "See KS-Ops docs/PROVISIONING.md. The setup starts by itself once these are in place (or press Retry on /ops/provisioning).",
         ]),
       },
       "provisioning setup notice",
@@ -252,7 +254,7 @@ async function advanceLocked(deps: MachineDeps, runId: string): Promise<RunRow |
     }
 
     if (run.dry_run && (def.where === "service" || !githubTokenConfigured(deps.env) || !callbackBaseUrl(deps.env))) {
-      const plan = describePlan(run.kind, l.company_code, run.region).filter((line) => line.startsWith(`${step.step}:`));
+      const plan = describePlan(run.kind, l.company_code, run.region, ksDomain(deps.env)).filter((line) => line.startsWith(`${step.step}:`));
       for (const line of plan) await deps.store.log(run.id, step.step, "info", `would: ${line}`);
       await deps.store.updateStep(run.id, step.step, { status: "done", finished_at: deps.now(), output: { dry_run: true } });
       continue;
@@ -410,7 +412,7 @@ export async function runForCallback(deps: MachineDeps, runId: string, token: un
   return matchesHash(token, run.callback_token_hash) ? run : null;
 }
 
-const OUTPUT_KEYS = ["server_url", "agent_url", "portal_url", "client_url", "resource_group", "deploy_client_id", "pull_requests", "deploys", "dry_run", "written", "not_set_up"];
+const OUTPUT_KEYS = ["pull_requests", "deploys", "dry_run"];
 
 function cleanOutput(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== "object") return {};
@@ -471,7 +473,6 @@ export async function handleCallback(deps: MachineDeps, run: RunRow, body: Callb
     const output = cleanOutput(body.output);
     await deps.store.updateStep(run.id, stepKey, { status: "done", finished_at: now, output, last_error: null });
     await deps.store.log(run.id, stepKey, "info", `done${message ? `: ${message}` : ""}`);
-    if (stepKey === "azure_resources" && !run.dry_run) await saveAddresses(deps, run, output);
     // Was this the last step the workflow was given? Then hand back to the worker straight away.
     await deps.store.updateRun(run.id, { next_attempt_at: now });
     return { ok: true };
@@ -482,66 +483,6 @@ export async function handleCallback(deps: MachineDeps, run: RunRow, body: Callb
     return { ok: true };
   }
   return { ok: false, status: 400, error: "unknown_status" };
-}
-
-async function saveAddresses(deps: MachineDeps, run: RunRow, output: Record<string, unknown>): Promise<void> {
-  const server = acceptableUrl(output.server_url, deps.env);
-  const portal = acceptableUrl(output.portal_url, deps.env);
-  const client = acceptableUrl(output.client_url, deps.env);
-  if (!server || !portal || !client) {
-    await deps.store.log(run.id, "azure_resources", "warn", "the reported addresses were not accepted (https on an allowed host); set them on the licensee by hand");
-    return;
-  }
-  await deps.db.query(
-    `UPDATE licensees SET server_url = $2, portal_url = $3, client_url = $4,
-            plan_sync_status = 'pending_sync', plan_sync_next_at = NULL, updated_at = now()
-      WHERE id = $1`,
-    [run.licensee_id, server, portal, client],
-  );
-  await audit(deps.db, "ks-ops provisioning", "licensee.addresses_set", run.licensee_id, { server_url: server, portal_url: portal, client_url: client, run_id: run.id });
-}
-
-/** The workflow's request for the licensee's ops key: a new key, made only while azure_resources is running. */
-export async function opsKeyForWorkflow(deps: MachineDeps, run: RunRow): Promise<{ ok: true; ops_key: string } | { ok: false; status: number; error: string }> {
-  if (run.dry_run) return { ok: false, status: 409, error: "dry_run" };
-  const step = (await deps.store.steps(run.id)).find((s) => s.step === "azure_resources");
-  if (!step || step.status !== "running") return { ok: false, status: 409, error: "not_now" };
-  const key = await rotateOpsKey(deps.db, run.licensee_id);
-  await audit(deps.db, "ks-ops provisioning", "licensee.ops_key_rotated", run.licensee_id, { run_id: run.id });
-  await deps.store.log(run.id, "azure_resources", "info", "new ops key handed to the workflow");
-  return { ok: true, ops_key: key };
-}
-
-/** KS_OPS_TWILIO_AUTO_v1 - the licensee's Twilio settings for its KS-server, handed only to the workflow while its
- *  twilio_settings step runs (like the ops key). The workflow writes them to the App Service and masks them. */
-export async function twilioSettingsForWorkflow(deps: MachineDeps, run: RunRow): Promise<{ ok: true; settings: Record<string, string> } | { ok: false; status: number; error: string }> {
-  if (run.dry_run) return { ok: false, status: 409, error: "dry_run" };
-  const step = (await deps.store.steps(run.id)).find((s) => s.step === "twilio_settings");
-  if (!step || step.status !== "running") return { ok: false, status: 409, error: "not_now" };
-  const l = await getLicensee(deps.db, run.licensee_id);
-  if (!l) return { ok: false, status: 404, error: "not_found" };
-  const r = await serverSettings(deps, l);
-  if (!r.ok) return { ok: false, status: 409, error: r.error };
-  await audit(deps.db, "ks-ops provisioning", "licensee.twilio_settings_handed_over", run.licensee_id, { run_id: run.id, names: Object.keys(r.settings) });
-  await deps.store.log(run.id, "twilio_settings", "info", `Twilio settings handed to the workflow: ${Object.keys(r.settings).join(", ")}`);
-  return r;
-}
-
-/** KS_OPS_WORKSPACE_APPS - Keystone's Microsoft 365 / Google app keys for the licensee's KS-server, handed only to the
- *  workflow while its workspace_apps step runs. What KS-Ops does not have yet is logged, not a failure: the copy works
- *  without them and the step can be retried once they are set. */
-export async function workspaceSettingsForWorkflow(deps: MachineDeps, run: RunRow): Promise<{ ok: true; settings: Record<string, string>; missing: string[] } | { ok: false; status: number; error: string }> {
-  if (run.dry_run) return { ok: false, status: 409, error: "dry_run" };
-  const step = (await deps.store.steps(run.id)).find((s) => s.step === "workspace_apps");
-  if (!step || step.status !== "running") return { ok: false, status: 409, error: "not_now" };
-  const r = workspaceAppSettings(deps.env);
-  const names = Object.keys(r.settings);
-  if (names.length) {
-    await audit(deps.db, "ks-ops provisioning", "licensee.workspace_settings_handed_over", run.licensee_id, { run_id: run.id, names });
-    await deps.store.log(run.id, "workspace_apps", "info", `Microsoft 365 / Google app settings handed to the workflow: ${names.join(", ")}`);
-  }
-  if (r.missing.length) await deps.store.log(run.id, "workspace_apps", "warn", `not set up on KS-Ops yet, so not written: ${r.missing.join("; ")}. Set them on KS-Ops, then Retry this step.`);
-  return { ok: true, ...r };
 }
 
 /** What the workflow needs to know about the licensee (nothing secret). */
@@ -561,6 +502,10 @@ export async function workflowContext(deps: MachineDeps, run: RunRow) {
     website: l.website ?? "",
     plan: l.plan,
     contact_email: l.contact_email,
+    // KS_SHARED_HOSTING_v1 - the brokerage's addresses, set by the tenant_registry step.
+    server_url: l.server_url ?? "",
+    portal_url: l.portal_url ?? "",
+    client_url: l.client_url ?? "",
   };
 }
 
@@ -601,20 +546,24 @@ export async function publicStatus(deps: Pick<MachineDeps, "db" | "store">, lice
   return { ...base, state: (attention ? "needs_attention" : "setting_up") as PublicState, steps: labels };
 }
 
-export async function runView(deps: Pick<MachineDeps, "db" | "store" | "fetch" | "env" | "twilioStore" | "twilioHttp">, run: RunRow, logLimit = 200) {
+export async function runView(deps: Pick<MachineDeps, "db" | "store" | "fetch" | "env" | "twilioStore" | "twilioHttp" | "shared">, run: RunRow, logLimit = 200) {
   const [steps, logs, l] = await Promise.all([deps.store.steps(run.id), deps.store.logs(run.id, logLimit), getLicensee(deps.db, run.licensee_id)]);
   const { callback_token_hash, ...rest } = run;
   return {
     ...rest,
     workflow_in_flight: Boolean(callback_token_hash),
     licensee: l ? { id: l.id, company_name: l.company_name, company_code: l.company_code, status: l.status, server_url: l.server_url, portal_url: l.portal_url, client_url: l.client_url } : null,
-    steps: steps.map((s) => ({ ...s, label: stepDef(run.kind, s.step)?.label ?? s.step, where: stepDef(run.kind, s.step)?.where ?? "service" })),
+    // KS_SHARED_HOSTING_v1 - each step's status in plain words ("plain"), for /ops/provisioning.
+    steps: steps.map((s) => ({ ...s, label: stepDef(run.kind, s.step)?.label ?? s.step, where: stepDef(run.kind, s.step)?.where ?? "service", plain: stepPlainWords(s) })),
     logs,
     // KS_OPS_TWILIO_AUTO_v1 - the sub-account and texting registration, in plain words.
     twilio: run.kind === "provision" && !run.dry_run ? await twilioSummary(deps as MachineDeps, run.licensee_id) : null,
     // KS_OPS_WORKSPACE_APPS - whether the brokerage has connected Microsoft 365 / Google (asked of its KS-server).
     // Asked only for the opened run (logLimit > 0), never for every row of the list.
     workspace: run.kind === "provision" && !run.dry_run && l && logLimit > 0 ? await workspaceSummary(deps as MachineDeps, l) : null,
+    // KS_SHARED_HOSTING_v1 - the database, registry entry, shared server and custom domains, with the DNS records and
+    // az commands for the domains. Only for the opened run.
+    shared: l && logLimit > 0 ? await sharedSummary(deps, run, l, steps) : null,
   };
 }
 

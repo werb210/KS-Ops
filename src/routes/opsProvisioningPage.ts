@@ -46,7 +46,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
 <body>
 <main>
   <h1>Provisioning</h1>
-  <p class="lead">Automatic setup of each licensee's own Keystone copy after payment or a staff free trial, and teardown after cancellation once the retention rules allow it.</p>
+  <p class="lead">Automatic setup of each brokerage on the shared Keystone server (its own database, registry entry and web apps) after payment or a staff free trial, and its removal after cancellation once the retention rules allow it. Open a run's log to see its database, addresses and custom domains.</p>
 
   <section id="signin">
     <h2>Sign in</h2>
@@ -60,7 +60,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   <div id="app" class="hidden">
     <section id="setupBox" class="hidden">
       <h2>Waiting for manual setup</h2>
-      <p>Automatic setup is not fully configured. Runs wait here and start by themselves once these are in place (see KS-Ops docs/AUTO_PROVISIONING.md):</p>
+      <p>Automatic setup is not fully configured. Runs wait here and start by themselves once these are in place (see KS-Ops docs/PROVISIONING.md):</p>
       <ul id="setupList" class="check"></ul>
     </section>
 
@@ -121,7 +121,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     tr.appendChild(el("td", null, s.label));
     var st = el("td"); st.appendChild(tag(s.status)); tr.appendChild(st);
     tr.appendChild(el("td", null, String(s.attempts)));
-    tr.appendChild(el("td", null, s.last_error || (s.done_by ? "done by " + s.done_by : "")));
+    tr.appendChild(el("td", null, s.plain || s.last_error || (s.done_by ? "done by " + s.done_by : "")));
     var act = el("td");
     if (run.status !== "done" && run.status !== "cancelled" && s.status !== "done" && s.status !== "manual") {
       var retry = el("button", { type: "button", "class": "quiet" }, "Retry step");
@@ -183,6 +183,31 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     d.appendChild(el("p", { "class": "hint" }, "Nothing to do here: the brokerage's admin connects Microsoft 365 in one click (Settings > Connections), and each person connects Google from My Profile." + (ws.broker ? "" : " This server does not use Keystone's sign-in redirect yet (retry the workspace_apps step).")));
     return d;
   }
+  // KS_SHARED_HOSTING_v1 - the brokerage on the shared server: its database, registry entry and custom domains.
+  function renderShared(sh) {
+    var d = el("div");
+    d.appendChild(el("h3", null, "Shared server"));
+    var ul = el("ul", { "class": "check" });
+    ul.appendChild(el("li", null, sh.database ? "Database " + sh.database.database + ", login role " + sh.database.role + " (only this role can connect)." : "This company code cannot be used on the shared server (2 to 31 lowercase letters, numbers or hyphens)."));
+    var reg = sh.registry.message;
+    if (sh.registry.state === "present") reg += " Server address: " + ((sh.registry.api_hosts || []).join(", ") || "none") + ". Staff portal: " + ((sh.registry.portal_hosts || []).join(", ") || "none") + ". Client app: " + ((sh.registry.client_hosts || []).join(", ") || "none") + ".";
+    ul.appendChild(el("li", null, reg));
+    d.appendChild(ul);
+    var cd = sh.custom_domains;
+    if (cd && (cd.message || cd.commands.length)) {
+      d.appendChild(el("h3", null, "Custom domains"));
+      d.appendChild(el("p", { "class": cd.configured ? "hint" : "msg bad" }, cd.message));
+      if (cd.dns.length) {
+        d.appendChild(el("p", null, "DNS records:"));
+        var dp = el("pre", { "class": "log" }); dp.textContent = cd.dns.join("\n"); d.appendChild(dp);
+      }
+      if (cd.commands.length) {
+        d.appendChild(el("p", null, "Then run (Azure CLI):"));
+        var cp = el("pre", { "class": "log" }); cp.textContent = cd.commands.join("\n"); d.appendChild(cp);
+      }
+    }
+    return d;
+  }
   function wsTag(s) {
     var c = s === "connected" ? "done" : s === "not_connected" || s === "not_available" ? "pending" : s === "partial" || s === "unreachable" || s === "needs_reconnect" ? "blocked" : "failed";
     return el("span", { "class": "tag s-" + c }, words(s));
@@ -201,12 +226,13 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     }
     var wrap = el("div", { "class": "scroll" });
     var t = el("table"); var th = el("tr");
-    ["Step", "Status", "Tries", "Details", ""].forEach(function (c) { th.appendChild(el("th", null, c)); });
+    ["Step", "Status", "Tries", "In plain words", ""].forEach(function (c) { th.appendChild(el("th", null, c)); });
     var thead = el("thead"); thead.appendChild(th); t.appendChild(thead);
     var tb = el("tbody"); run.steps.forEach(function (s) { tb.appendChild(stepRow(run, s)); }); t.appendChild(tb);
     wrap.appendChild(t); box.appendChild(wrap);
     if (run.twilio) box.appendChild(renderTwilio(run));
     if (full && full.workspace) box.appendChild(renderWorkspace(full.workspace));
+    if (full && full.shared) box.appendChild(renderShared(full.shared));
     var logBtn = el("button", { type: "button", "class": "quiet" }, open[run.id] ? "Hide log" : "Show log");
     logBtn.onclick = function () { open[run.id] = !open[run.id]; load(); };
     box.appendChild(logBtn);

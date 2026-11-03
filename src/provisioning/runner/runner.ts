@@ -1,11 +1,11 @@
 // KS_OPS_AUTO_PROVISION_v1 - the workflow side of automatic provisioning. Runs inside the KS-Ops GitHub Actions
-// workflows (provision-licensee.yml / teardown-licensee.yml) after `azure/login` signed in with the federated
-// credential. It does the Azure and GitHub steps and reports each one back to KS-Ops with the run's one-off token.
+// workflows (provision-licensee.yml / teardown-licensee.yml). KS_SHARED_HOSTING_v1 - it only does the GitHub steps for
+// the per-brokerage web builds (KS-Portal and KS-Client) and reports each one back to KS-Ops with the run's one-off
+// token; there is no Azure sign-in any more (the shared apps are made once by scripts/provision-shared.sh).
 //
 // Everything outside (az, gh, the GitHub REST API, KS-Ops) goes through RunnerDeps, so the unit tests replace it all.
 // Every step is safe to run again. With DRY_RUN=true nothing is called but KS-Ops: each step prints what it would do.
-import { WORKSPACE_SETTING_NAMES } from "../../workspace/apps.js";
-import { APP_REPOS, describePlan, ENVIRONMENT_SETTINGS, GENERATED_AGENT_SECRETS, GENERATED_SERVER_SECRETS, registryEntry, resourceNames, type RunKind } from "../steps.js";
+import { APP_REPOS, describePlan, ENVIRONMENT_SETTINGS, registryEntry, resourceNames, type RunKind } from "../steps.js";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 export type Exec = (cmd: string, args: string[], opts?: { env?: Record<string, string>; input?: string }) => Promise<ExecResult>;
@@ -45,6 +45,10 @@ export type Context = {
   website: string;
   plan: string;
   contact_email: string;
+  /** KS_SHARED_HOSTING_v1 - the brokerage's addresses (from the tenant_registry step). */
+  server_url: string;
+  portal_url: string;
+  client_url: string;
 };
 
 const GH = "https://api.github.com";
@@ -77,14 +81,9 @@ export function readConfig(env: Record<string, string | undefined>): RunnerConfi
 }
 
 /** What the workflow environment still lacks (keys from config.ts WORKFLOW_SETUP_LABELS). */
-export function preflightMissing(cfg: RunnerConfig, env: Record<string, string | undefined>): string[] {
-  const has = (k: string) => Boolean(String(env[k] ?? "").trim());
-  const missing: string[] = [];
-  for (const k of ["AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"]) if (!has(k)) missing.push(k);
-  if (!cfg.ghToken) missing.push("GITHUB_APP");
-  if (cfg.mode === "provision" && !has("OPENAI_API_KEY")) missing.push("OPENAI_API_KEY");
-  if (!missing.length && String(env.AZURE_LOGIN_OUTCOME ?? "success") !== "success") missing.push("AZURE_LOGIN");
-  return missing;
+export function preflightMissing(cfg: RunnerConfig, _env: Record<string, string | undefined> = {}): string[] {
+  // KS_SHARED_HOSTING_v1 - no Azure sign-in any more: only the GitHub credential for KS-Portal and KS-Client.
+  return cfg.ghToken ? [] : ["GITHUB_APP"];
 }
 
 async function ops(deps: RunnerDeps, cfg: RunnerConfig, method: string, path: string, body?: unknown): Promise<any> {
@@ -155,141 +154,40 @@ function ghOk(res: { status: number; json: any }, what: string): any {
   throw new StepError(`GitHub ${what}: ${res.status} ${String(res.json?.message ?? "").slice(0, 200)}`);
 }
 
-/** The licensee's resource addresses and deploy identity, read from Azure (so any step can run on its own). */
-export async function readResources(deps: RunnerDeps, code: string) {
-  const n = resourceNames(code);
-  const host = async (args: string[]) => `https://${await az(deps, args)}`;
-  const [server, agent, portal, client, account, identity] = await Promise.all([
-    host(["webapp", "show", "-g", n.resourceGroup, "-n", n.serverApp, "--query", "defaultHostName", "-o", "tsv"]),
-    host(["webapp", "show", "-g", n.resourceGroup, "-n", n.agentApp, "--query", "defaultHostName", "-o", "tsv"]),
-    host(["staticwebapp", "show", "-g", n.resourceGroup, "-n", n.portalSwa, "--query", "defaultHostname", "-o", "tsv"]),
-    host(["staticwebapp", "show", "-g", n.resourceGroup, "-n", n.clientSwa, "--query", "defaultHostname", "-o", "tsv"]),
-    az(deps, ["account", "show", "--query", "{t:tenantId,s:id}", "-o", "json"]),
-    az(deps, ["identity", "show", "-g", n.resourceGroup, "-n", n.deployIdentity, "--query", "clientId", "-o", "tsv"]),
-  ]);
-  const acc = JSON.parse(account) as { t: string; s: string };
-  return { server_url: server, agent_url: agent, portal_url: portal, client_url: client, tenant_id: acc.t, subscription_id: acc.s, deploy_client_id: identity };
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Provision steps
-
-export async function azureResources(deps: RunnerDeps, cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
-  const key = await ops(deps, cfg, "POST", "/ops-key");
-  const opsKey = String(key.ops_key ?? "");
-  if (!opsKey) throw new StepError("KS-Ops did not hand over an ops key");
-  mask(deps, opsKey);
-  const out = deps.tempFile("provision-output.json");
-  await run(deps, "bash", ["scripts/provision-licensee.sh", ctx.code, ctx.region], {
-    env: {
-      KS_OPS_URL: cfg.opsUrl,
-      KS_LICENSEE_ID: ctx.licensee_id,
-      KS_OPS_KEY: opsKey,
-      KS_PLAN: ctx.plan,
-      OPENAI_API_KEY: String(deps.env.OPENAI_API_KEY ?? ""),
-      DEPLOY_IDENTITY: "1",
-      DEPLOY_IDENTITY_REPOS: APP_REPOS.filter((r) => r.app === "server" || r.app === "agent").map((r) => `${cfg.owner}/${r.repo}`).join(","),
-      OUTPUT_JSON: out,
-      KS_NONINTERACTIVE: "1",
-    },
-  });
-  const parsed = JSON.parse(await deps.readFile(out)) as Record<string, string>;
-  const output: Record<string, unknown> = {};
-  for (const k of ["server_url", "agent_url", "portal_url", "client_url", "resource_group", "deploy_client_id"]) if (parsed[k]) output[k] = parsed[k];
-  if (!output.server_url || !output.portal_url || !output.client_url) throw new StepError("provision-licensee.sh did not report the addresses");
-  return output;
-}
-
-/** KS_OPS_TWILIO_AUTO_v1 - writes the licensee's Twilio settings (from KS-Ops, masked here) to its KS-server app. */
-export async function twilioSettings(deps: RunnerDeps, cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
-  const n = resourceNames(ctx.code);
-  const r = await ops(deps, cfg, "POST", "/twilio-settings");
-  const settings = (r?.settings ?? {}) as Record<string, string>;
-  const names = Object.keys(settings).filter((k) => /^(TWILIO_[A-Z_]+|KS_SERVER_URL)$/.test(k) && settings[k]);
-  for (const k of ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_API_KEY", "TWILIO_API_SECRET", "TWILIO_VOICE_APP_SID", "TWILIO_VERIFY_SERVICE_SID"]) {
-    if (!settings[k]) throw new StepError(`KS-Ops did not hand over ${k}`);
-  }
-  for (const k of names) if (/TOKEN|SECRET/.test(k)) mask(deps, settings[k]);
-  await az(deps, ["webapp", "config", "appsettings", "set", "-g", n.resourceGroup, "-n", n.serverApp, "--settings", ...names.map((k) => `${k}=${settings[k]}`), "-o", "none"]);
-  deps.log(`${n.serverApp}: Twilio settings written (${names.join(", ")})`);
-  return {};
-}
-
-/** KS_OPS_WORKSPACE_APPS - writes Keystone's Microsoft 365 / Google app keys (from KS-Ops, masked here) to the
- *  licensee's KS-server. Nothing to write (KS-Ops does not have them yet) is not a failure: the step says so. */
-export async function workspaceApps(deps: RunnerDeps, cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
-  const n = resourceNames(ctx.code);
-  const r = await ops(deps, cfg, "POST", "/workspace-settings");
-  const settings = (r?.settings ?? {}) as Record<string, string>;
-  const missing = Array.isArray(r?.missing) ? (r.missing as unknown[]).map(String) : [];
-  const names = Object.keys(settings).filter((k) => (WORKSPACE_SETTING_NAMES as readonly string[]).includes(k) && settings[k]);
-  for (const k of names) if (/SECRET/.test(k)) mask(deps, settings[k]);
-  if (names.length) {
-    await az(deps, ["webapp", "config", "appsettings", "set", "-g", n.resourceGroup, "-n", n.serverApp, "--settings", ...names.map((k) => `${k}=${settings[k]}`), "-o", "none"]);
-    deps.log(`${n.serverApp}: Microsoft 365 / Google app settings written (${names.join(", ")})`);
-  }
-  if (missing.length) deps.log(`not written (not set up on KS-Ops yet): ${missing.join("; ")}`);
-  return { written: names, not_set_up: missing };
-}
-
-export async function secrets(deps: RunnerDeps, _cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
-  const n = resourceNames(ctx.code);
-  const names = async (app: string) =>
-    new Set((await az(deps, ["webapp", "config", "appsettings", "list", "-g", n.resourceGroup, "-n", app, "--query", "[].name", "-o", "tsv"])).split(/\s+/).filter(Boolean));
-  const [server, agent] = await Promise.all([names(n.serverApp), names(n.agentApp)]);
-  const missing = [
-    ...GENERATED_SERVER_SECRETS.filter((k) => !server.has(k)).map((k) => `${n.serverApp}:${k}`),
-    ...GENERATED_AGENT_SECRETS.filter((k) => !agent.has(k)).map((k) => `${n.agentApp}:${k}`),
-  ];
-  if (missing.length) throw new StepError(`secrets missing from the app settings: ${missing.join(", ")} (retry azure_resources)`);
-  return {};
-}
-
-/** Variables for each repository's ks-<code> environment. */
-export function environmentVariables(ctx: Context, res: Awaited<ReturnType<typeof readResources>>): Record<string, Record<string, string>> {
-  const n = resourceNames(ctx.code);
-  const azure = { AZURE_CLIENT_ID: res.deploy_client_id, AZURE_TENANT_ID: res.tenant_id, AZURE_SUBSCRIPTION_ID: res.subscription_id };
+/** Variables for each repository's ks-<code> environment (the addresses come from KS-Ops: the brokerage's host names). */
+export function environmentVariables(ctx: Context): Record<string, Record<string, string>> {
   const optional = (v: Record<string, string>) => Object.fromEntries(Object.entries(v).filter(([, x]) => x));
+  const website = /^https:\/\//.test(ctx.website) ? ctx.website : "";
   return {
-    "KS-server": { ...azure, AZURE_WEBAPP_NAME: n.serverApp },
-    "KS-Agent": { ...azure, AZURE_WEBAPP_NAME: n.agentApp },
     "KS-Portal": {
-      VITE_API_BASE_URL: res.server_url,
-      VITE_APP_URL: res.portal_url,
-      VITE_CLIENT_APP_URL: res.client_url,
-      VITE_MSAL_REDIRECT_URI: res.portal_url,
-      ...optional({ VITE_COMPANY_NAME: ctx.company_name, VITE_ASSISTANT_NAME: ctx.assistant_name, VITE_WEBSITE_URL: /^https:\/\//.test(ctx.website) ? ctx.website : "" }),
+      VITE_API_BASE_URL: ctx.server_url,
+      VITE_APP_URL: ctx.portal_url,
+      VITE_CLIENT_APP_URL: ctx.client_url,
+      VITE_MSAL_REDIRECT_URI: ctx.portal_url,
+      ...optional({ VITE_COMPANY_NAME: ctx.company_name, VITE_ASSISTANT_NAME: ctx.assistant_name, VITE_WEBSITE_URL: website }),
     },
     "KS-Client": {
-      VITE_API_BASE_URL: res.server_url,
-      VITE_CLIENT_APP_URL: res.client_url,
-      ...optional({ VITE_COMPANY_NAME: ctx.company_name, VITE_WEBSITE_URL: /^https:\/\//.test(ctx.website) ? ctx.website : "" }),
+      VITE_API_BASE_URL: ctx.server_url,
+      VITE_CLIENT_APP_URL: ctx.client_url,
+      ...optional({ VITE_COMPANY_NAME: ctx.company_name, VITE_WEBSITE_URL: website }),
     },
   };
 }
 
+/** KS_SHARED_HOSTING_v1 - the web build settings only: the portal and client upload to blob with the repository-level
+ *  secret KS_SITES_STORAGE_CONNECTION_STRING, so no secret is written per brokerage any more. */
 export async function githubEnvironments(deps: RunnerDeps, cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
   const n = resourceNames(ctx.code);
-  const res = await readResources(deps, ctx.code);
-  const swa = async (name: string) => az(deps, ["staticwebapp", "secrets", "list", "-g", n.resourceGroup, "-n", name, "--query", "properties.apiKey", "-o", "tsv"]);
-  const [portalToken, clientToken] = await Promise.all([swa(n.portalSwa), swa(n.clientSwa)]);
-  mask(deps, portalToken);
-  mask(deps, clientToken);
-  const secretValues: Record<string, Record<string, string>> = {
-    "KS-Portal": { AZURE_STATIC_WEB_APPS_API_TOKEN: portalToken },
-    "KS-Client": { AZURE_STATIC_WEB_APPS_API_TOKEN: clientToken },
-  };
-  const vars = environmentVariables(ctx, res);
+  for (const k of ["server_url", "portal_url", "client_url"] as const) {
+    if (!/^https:\/\//.test(String(ctx[k] ?? ""))) throw new StepError(`KS-Ops has no ${k} for ${ctx.code} yet (set KS_DOMAIN on KS-Ops and retry the tenant_registry step)`);
+  }
+  const vars = environmentVariables(ctx);
   const ghEnv = { GH_TOKEN: cfg.ghToken };
   for (const repo of Object.keys(ENVIRONMENT_SETTINGS)) {
     const full = `${cfg.owner}/${repo}`;
     ghOk(await gh(deps, cfg, "PUT", `/repos/${full}/environments/${n.environment}`, {}), `create environment ${n.environment} in ${repo}`);
     for (const [name, value] of Object.entries(vars[repo] ?? {})) {
       await run(deps, "gh", ["variable", "set", name, "--env", n.environment, "--repo", full, "--body", value], { env: ghEnv });
-    }
-    for (const [name, value] of Object.entries(secretValues[repo] ?? {})) {
-      if (!value) throw new StepError(`no value for ${repo} secret ${name}`);
-      await run(deps, "gh", ["secret", "set", name, "--env", n.environment, "--repo", full], { env: ghEnv, input: value });
     }
     deps.log(`${repo}: environment ${n.environment} ready`);
   }
@@ -418,27 +316,14 @@ export async function githubEnvironmentsRemove(deps: RunnerDeps, cfg: RunnerConf
   return {};
 }
 
-export async function azureDelete(deps: RunnerDeps, _cfg: RunnerConfig, ctx: Context): Promise<Record<string, unknown>> {
-  const rg = resourceNames(ctx.code).resourceGroup;
-  if ((await az(deps, ["group", "exists", "-n", rg])) !== "true") return { resource_group: rg };
-  // Only a group provision-licensee.sh made for this very licensee is ever deleted.
-  const tag = await az(deps, ["group", "show", "-n", rg, "--query", "tags.\"keystone-licensee\"", "-o", "tsv"]);
-  if (tag !== ctx.code) throw new StepError(`resource group ${rg} is not tagged keystone-licensee=${ctx.code}; not deleting it`);
-  await az(deps, ["group", "delete", "-n", rg, "--yes"]);
-  if ((await az(deps, ["group", "exists", "-n", rg])) === "true") throw new StepError(`resource group ${rg} still exists after the delete`);
-  return { resource_group: rg };
-}
-
 // ---------------------------------------------------------------------------------------------------------------------
 
 type StepFn = (deps: RunnerDeps, cfg: RunnerConfig, ctx: Context) => Promise<Record<string, unknown>>;
 
 export const RUNNER_STEPS: Record<RunKind, Record<string, StepFn>> = {
+  // KS_SHARED_HOSTING_v1 - the database, registry, Twilio and Microsoft 365 / Google settings are KS-Ops service steps
+  // now; the workflow only does the per-brokerage web build parts in KS-Portal and KS-Client.
   provision: {
-    azure_resources: azureResources,
-    twilio_settings: twilioSettings, // KS_OPS_TWILIO_AUTO_v1
-    workspace_apps: workspaceApps, // KS_OPS_WORKSPACE_APPS
-    secrets,
     github_environments: githubEnvironments,
     deploy_registry: (d, c, x) => deployRegistry(d, c, x, true),
     deploy,
@@ -446,7 +331,6 @@ export const RUNNER_STEPS: Record<RunKind, Record<string, StepFn>> = {
   teardown: {
     deploy_registry_remove: (d, c, x) => deployRegistry(d, c, x, false),
     github_environments_remove: githubEnvironmentsRemove,
-    azure_delete: azureDelete,
   },
 };
 

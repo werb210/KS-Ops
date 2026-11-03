@@ -30,6 +30,34 @@ jobs:
       - name: Unit tests
         run: npm run test:ci
 
+  # KS_SHARED_HOSTING_v1 - the shared web host (web-host/, its own package and tests).
+  web-host:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web-host
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Use Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: "npm"
+          cache-dependency-path: web-host/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   # Integration tests against a real Postgres, with the schema built by the same migration runner the server uses on
   # startup. Any failure turns the job red.
   integration:
