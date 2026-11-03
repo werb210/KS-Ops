@@ -31,7 +31,7 @@
 #   ALLOW_MY_IP=1     allow this machine's public address on Postgres while the script runs (removed at the end), so
 #                     psql can make the roles. Otherwise run it from somewhere already allowed.
 #   CREATE_DEPLOY_SP=1  also create the service principal ks-shared-deploy (Website Contributor on ks-shared) for the
-#                     GitHub secret KS_SHARED_AZURE_CREDENTIALS (printed once, in the COPY THIS NOW block).
+#                     secret AZURE_CREDENTIALS in the GitHub environment ks-shared of KS-server, KS-Agent and KS-Ops (printed once, in the COPY THIS NOW block).
 #
 # Requires: az (signed in), psql, openssl, curl. No extension other than `vector` is ever allowed or made.
 set -euo pipefail
@@ -263,7 +263,7 @@ Keystone shared hosting is ready in resource group $RG.
 Next (docs/PROVISIONING.md, "What Todd sets up once"):
   - KS-server and KS-Agent repositories: deploy once to $SERVER_APP / $AGENT_APP (no per-brokerage matrix).
   - KS-Portal and KS-Client repositories: repository secret KS_SITES_STORAGE_CONNECTION_STRING (below).
-  - KS-Ops repository: secret KS_SHARED_AZURE_CREDENTIALS (below, with CREATE_DEPLOY_SP=1) for the web host deploy.
+  - KS-server, KS-Agent and KS-Ops: GitHub environment ks-shared, secret AZURE_CREDENTIALS (below, with CREATE_DEPLOY_SP=1) for the web host deploy.
   - KS-Ops app setting KS_DOMAIN = Keystone's domain for brokerage addresses (<code>.api.<domain> and so on).
 SUMMARY
 [[ -n "${NEW_PG_PASSWORD:-}" || -n "$OWNER_URL" || -z "$WROTE_KS_OPS" || -n "$DEPLOY_CREDS" ]] || exit 0
@@ -281,7 +281,7 @@ fi
 echo "  KS-Portal and KS-Client repository secret:"
 echo "    KS_SITES_STORAGE_CONNECTION_STRING=$SITES_CONN"
 if [[ -n "$DEPLOY_CREDS" ]]; then
-  echo "  KS-Ops repository secret KS_SHARED_AZURE_CREDENTIALS ="
+  echo "  GitHub environment ks-shared secret AZURE_CREDENTIALS (KS-server, KS-Agent, KS-Ops) ="
   echo "$DEPLOY_CREDS" | sed 's/^/    /'
 fi
 echo "---------------------------------------------------------------------------------------------------"

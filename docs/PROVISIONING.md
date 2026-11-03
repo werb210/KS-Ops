@@ -74,7 +74,7 @@ on startup (and `npm run migrate`), as the non-superuser owner. It is safe to ru
 3. **GitHub secrets.**
    - KS-Portal and KS-Client: repository secret `KS_SITES_STORAGE_CONNECTION_STRING` (printed by the script). Their
      deploy uploads each brokerage's `dist/` to `sites/<code>/portal/` or `sites/<code>/client/`.
-   - KS-Ops: repository secret `KS_SHARED_AZURE_CREDENTIALS` (the `ks-shared-deploy` JSON from `CREATE_DEPLOY_SP=1`). The
+   - KS-server, KS-Agent and KS-Ops: secret `AZURE_CREDENTIALS` in the GitHub environment `ks-shared` (the `ks-shared-deploy` JSON from `CREATE_DEPLOY_SP=1`). The
      "Deploy the shared web host" workflow uses it to deploy `web-host/` to `ks-shared-web`. Then run that workflow once
      (Actions > Deploy the shared web host > Run workflow).
    - KS-server and KS-Agent: their one shared deploy to `ks-shared-server` / `ks-shared-agent` (see those repositories).

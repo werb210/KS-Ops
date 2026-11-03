@@ -5,7 +5,7 @@ name: Deploy the shared web host
 # Runs when web-host/ changes on main (after its tests pass), or by hand.
 #
 # Repository settings:
-#   secret   KS_SHARED_AZURE_CREDENTIALS  JSON of a service principal with Website Contributor on the ks-shared
+#   secret   AZURE_CREDENTIALS in the GitHub environment 'ks-shared' (same name in KS-server and KS-Agent)  JSON of a service principal with Website Contributor on the ks-shared
 #                                         resource group (az ad sp create-for-rbac --json-auth; see docs/PROVISIONING.md)
 #   variable KS_SHARED_WEB_APP_NAME       optional, default ks-shared-web
 # App settings on ks-shared-web (set once by scripts/provision-shared.sh): KS_CONTROL_DATABASE_URL (ks_control_reader),
@@ -53,6 +53,7 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-24.04
+    environment: ks-shared
     defaults:
       run:
         working-directory: web-host
@@ -82,7 +83,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.KS_SHARED_AZURE_CREDENTIALS }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy to Azure
         uses: azure/webapps-deploy@v3
