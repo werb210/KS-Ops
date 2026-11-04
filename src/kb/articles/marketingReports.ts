@@ -47,7 +47,7 @@ Build workflows in a visual builder.
 - **Actions**: send a text or template email, create a task, set the owner, add a tag or a note, post to team chat, notify a client or staff member, wait, or branch on a condition.
 - **Describe it in a sentence** and AI drafts the workflow for you to check.
 
-Admins and the Marketing role edit automations; Staff can view them.
+Admins and the Marketing role edit automations; Brokers can view them.
 `,
   },
   {
@@ -109,7 +109,7 @@ Your brokerage has its own AI assistant, with the name you choose. It helps webs
 
 - **Visitors**: answers questions, gives a readiness score, lists the documents they'll need, captures the lead and hands over to a person.
 - **Clients**: application status, their to-do list, help with form fields and signatures.
-- **Staff**: pipeline questions, finding contacts, notes and tasks, email drafts, summaries, lender-match reasons and a daily briefing. It asks before sending anything.
+- **Broker**: pipeline questions, finding contacts, notes and tasks, email drafts, summaries, lender-match reasons and a daily briefing. It asks before sending anything.
 
 ## Train and tune it
 1. Open **Settings** > **AI Knowledge**.
