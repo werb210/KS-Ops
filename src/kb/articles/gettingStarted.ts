@@ -35,7 +35,7 @@ When you sign up on the Keystone website, you choose a company code, a plan, the
 
 ## What happens next
 1. **You pay the first invoice** through a secure Stripe page. Growth and Pro include a one-time onboarding fee; Starter has none.
-2. **Your copy is built.** Each brokerage gets its own server and database in Microsoft Azure, Canada Central. Your branding from sign-up is applied.
+2. **Your workspace is set up.** Each brokerage gets its own private database on Keystone's servers in Microsoft Azure, Canada Central. Your branding from sign-up is applied.
 3. **You get a welcome email** with your portal address and how to sign in. Your first admin account is the contact you gave at sign-up.
 4. **Your phone account is opened.** Keystone sets up your phone and texting account and starts the carrier registration for business texting. Texting can take a few business days to be approved.
 5. **You sign in** with a code sent to your mobile and follow [Welcome to Keystone: your first week](kb:welcome-to-keystone).
@@ -109,7 +109,7 @@ Only Admins can add or change users.
 1. Open **Settings** > **User Management**.
 2. Choose **Add user**.
 3. Enter their first and last name, work email and **mobile number** (they sign in with a code sent to it).
-4. Pick a role: **Admin**, **Staff** or **Marketing**. See [Roles explained](kb:roles-explained).
+4. Pick a role: **Admin**, **Broker** or **Marketing**. See [Roles explained](kb:roles-explained).
 5. Choose **Add user**. They can sign in straight away.
 
 ## Change or remove a user
@@ -123,7 +123,7 @@ When someone leaves, remove them on their last day. Their records, calls and not
   },
   {
     slug: "roles-explained",
-    title: "Roles explained: Admin, Staff, Marketing and Ops",
+    title: "Roles explained: Admin, Broker, Marketing and Ops",
     category: "Users and teams",
     audience: "all_staff",
     plans: [],
@@ -132,7 +132,7 @@ When someone leaves, remove them on their last day. Their records, calls and not
 Every user has one role. Your Admin sets it in **Settings** > **User Management**.
 
 - **Admin**: everything, including company settings, users, billing, phone lines, the phone menu, imports, exports and security.
-- **Staff**: the day-to-day work: pipeline, CRM, communications, calendar, lenders and reports. Staff can't change company settings.
+- **Broker**: the day-to-day work: pipeline, CRM, communications, calendar, lenders and reports. Brokers can't change company settings.
 - **Marketing**: marketing tools and reports. Up to three Marketing users can use the Marketing add-on's advanced tools.
 - **Ops**: a back-office role with the pipeline, calendar and reports.
 
