@@ -133,6 +133,7 @@ export const MARKETING_ADDON = {
     "Unlimited website lead forms, plus an AI chat widget and tracking script for your own website",
     "Full visitor history and session replay",
     "Full Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions",
+    "Landing pages with a lead form, built in the portal",
     "Lead scoring",
     "Subject-line A/B test and send-time choice",
     "Campaign report with applications and funded deals by campaign",
