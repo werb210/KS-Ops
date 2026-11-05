@@ -83,13 +83,14 @@ export function priceAnswer(): string {
   const lines = plans.map((p) => {
     const onboarding = p.onboarding_fee > 0 ? `, plus a one-time ${money(p.onboarding_fee)} onboarding fee` : "";
     const min = p.min_seats > 1 ? ` (at least ${p.min_seats} seats)` : "";
-    return `- **${p.name}**: ${money(p.seat_price_annual)} per seat a month billed yearly, or ${money(p.seat_price_monthly)} month to month${min}${onboarding}.`;
+    return `**${p.name}** is ${money(p.seat_price_annual)} per seat a month billed yearly, or ${money(p.seat_price_monthly)} month to month${min}${onboarding}.`;
   });
+  // One paragraph: the website's chat panel shows text as it comes and does not turn line breaks into a list.
   return [
-    "Keystone is priced per seat, in Canadian dollars:",
+    "Keystone is priced per seat, in Canadian dollars.",
     ...lines,
     `The optional ${MARKETING_ADDON.name} is ${money(dollars(MARKETING_ADDON.price_cents))} a month for the whole brokerage. Full details are on the [Pricing](/pricing) page.`,
-  ].join("\n");
+  ].join(" ");
 }
 
 export function salesSystemPrompt(): string {
