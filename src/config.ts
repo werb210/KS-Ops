@@ -18,11 +18,11 @@ export function publicSiteUrl(e: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function salesEmail(e: NodeJS.ProcessEnv = process.env): string {
-  return env("KS_SALES_EMAIL", e) || "keystone@boreal.financial";
+  return env("KS_SALES_EMAIL", e) || "sales@keystonecrm.online";
 }
 
 export function supportEmail(e: NodeJS.ProcessEnv = process.env): string {
-  return env("KS_SUPPORT_EMAIL", e) || salesEmail(e);
+  return env("KS_SUPPORT_EMAIL", e) || "support@keystonecrm.online";
 }
 
 export function workersEnabled(e: NodeJS.ProcessEnv = process.env): boolean {
