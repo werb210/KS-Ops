@@ -35,12 +35,17 @@ import { licenseeKbRouter } from "./routes/licenseeKb.js";
 import { opsMarketingRouter } from "./routes/opsMarketing.js"; // KS_OPS_PROSPECT_MARKETING_v1
 import { publicMarketingRouter } from "./routes/publicMarketing.js";
 
-/** CORS for a list of allowed origins read from env vars at request time. */
+/** KS_OPS_KEYSTONE_DOMAIN - Keystone's own website (keystonecrm.online) is always allowed on the website routes. */
+export const KEYSTONE_SITE_ORIGINS = ["https://www.keystonecrm.online", "https://keystonecrm.online"];
+
+/** CORS for a list of allowed origins read from env vars at request time (plus Keystone's site on PUBLIC_SITE_URL routes). */
 function corsFor(...envNames: string[]) {
   return cors({
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
-      cb(null, envNames.flatMap((n) => originList(n)).includes(origin.replace(/\/+$/, "")));
+      const allowed = envNames.flatMap((n) => originList(n));
+      if (envNames.includes("PUBLIC_SITE_URL")) allowed.push(...KEYSTONE_SITE_ORIGINS);
+      cb(null, allowed.includes(origin.replace(/\/+$/, "")));
     },
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
