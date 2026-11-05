@@ -170,6 +170,7 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "iphone_dialler", label: "iPhone dialler", plan: "starter" },
   // KS_OPS_PLAN_FIXES (Todd, Oct 26) - the iPad staff portal app on every plan; the Apple Watch app growth and up.
   { key: "ipad_app", label: "iPad staff portal app", plan: "starter" },
+  { key: "android_staff_app", label: "Android staff app (portal and phone)", plan: "starter" }, // KS_ANDROID_STAFF_v1 - same as KS-server and KS-Website
   // Inbox sync reads Outlook (Microsoft 365) only for now; Gmail sends only.
   { key: "office_sync", label: "Email sync: Outlook (Microsoft 365) inbox sync; Gmail sends only for now", plan: "starter" },
   { key: "ai_assistant", label: "AI assistant", plan: "starter" },
