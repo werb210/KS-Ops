@@ -388,3 +388,16 @@ in Stripe, open `https://<ks-ops host>/ops/quickbooks`, connect, and fill in the
   until they are, the shared server's Keystone-wide values apply.
 - **App store builds per brokerage** (branded iPhone, iPad and Android apps) are separate: KS-Client's "Build licensee
   apps" workflow (`docs/LICENSEE_APPS.md` in KS-Client).
+
+## Facebook and Instagram lead ads (KS_META_LEAD_ADS_v1)
+
+One Meta app for all of Keystone, created at developers.facebook.com with the Keystone business account.
+
+1. Create a **Business** app named "Keystone". Add the **Facebook Login for Business** and **Webhooks** products.
+2. Facebook Login > Settings > Valid OAuth Redirect URIs: `https://<KS-Ops address>/api/oauth/callback/meta`.
+3. Webhooks > Page > Subscribe to **leadgen**. Callback URL: `https://<KS-Ops address>/api/webhooks/meta/leadgen`. Verify token: a long random value.
+4. App Review: request **leads_retrieval**, **pages_manage_metadata**, **pages_show_list**, **pages_read_engagement** and **business_management** (Advanced access). Business verification is required first.
+5. KS-Ops settings: `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`.
+6. KS-server (shared app settings, Keystone-wide): `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_TOKEN_ENCRYPTION_KEY` (`openssl rand -base64 32`).
+
+Each brokerage then connects its Pages in Settings > Connections. Its KS-server registers the Pages here, and KS-Ops passes each lead webhook only to the brokerage that owns the Page.

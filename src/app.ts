@@ -27,6 +27,7 @@ import { provisioningPageRouter } from "./routes/opsProvisioningPage.js";
 import { provisioningCallbackRouter, publicProvisioningRouter } from "./routes/provisioningCallback.js";
 import { textingOptInRouter } from "./routes/textingOptIn.js"; // KS_OPS_TWILIO_AUTO_v1
 import { oauthBrokerRouter } from "./routes/oauthBroker.js"; // KS_OPS_WORKSPACE_APPS
+import { metaWebhookRouter } from "./routes/metaWebhook.js"; // KS_META_LEAD_ADS_v1
 import { opsKbRouter } from "./routes/opsKb.js"; // KS_OPS_KB_v1
 import { kbPageRouter } from "./routes/opsKbPage.js";
 import { publicAssistantRouter, publicKbRouter } from "./routes/publicKb.js";
@@ -67,6 +68,8 @@ export function createApp(deps: Deps) {
   app.use("/api/ops/stripe/webhook", stripeWebhookRouter(deps));
   // KS_OPS_PROSPECT_MARKETING_v1 - unsubscribe pages and the SendGrid Event Webhook (raw body): before the JSON parser.
   app.use("/api/public/marketing", publicMarketingRouter(deps));
+  // KS_META_LEAD_ADS_v1 - Facebook lead webhooks (raw body for the signature), passed on to each brokerage.
+  app.use("/api/webhooks/meta", metaWebhookRouter(deps));
 
   // The demo server's completion carries the sample lender package (a small PDF, base64).
   app.use("/api/demo/sessions", express.json({ limit: "16mb" }));
