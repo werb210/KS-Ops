@@ -48,8 +48,8 @@ again after a price changes.
 | `OPS_ADMIN_EMAILS` | recommended | comma-separated emails (case-insensitive) allowed into Keystone operations. Unset: any BF-Server Admin with an email (a warning is logged at startup). Accounts without an email (service principals) are always refused |
 | `OPS_ALLOWED_SERVER_HOST_SUFFIXES` | no | where a licensee's `server_url` may point (default `.azurewebsites.net,.azurestaticapps.net`; `*` allows any host). Server, client and portal addresses must be https |
 | `PENDING_SIGNUP_DAYS` | no | website sign-ups still unpaid after this many days are cancelled and their company code released (default 7) |
-| `KS_SALES_EMAIL` | no | sales inbox for sign-ups and payments (default `keystone@boreal.financial`) |
-| `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default: the sales inbox) |
+| `KS_SALES_EMAIL` | no | sales inbox for sign-ups and payments (default `sales@keystonecrm.online`) |
+| `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default `support@keystonecrm.online`) |
 | `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_SEND_AS` | no | email through Microsoft Graph |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
 | `DEMO_SMS_ENABLED` | no | `true` texts the demo link as well as emailing it. Off by default (the link is emailed only; the mobile number is still kept) |

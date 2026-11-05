@@ -79,7 +79,7 @@ workflow then ships the same build to the demo web app after it deploys the dev 
 | `KS_DEMO_OPS_KEY` | the same value as the demo server's `KS_OPS_KEY` (16+ characters; 32+ recommended) |
 | `KS_DEMO_PORTAL_URL` | the KS-Portal web address; the magic link opens `{KS_DEMO_PORTAL_URL}/demo#d=..&t=..`. It is also allowed by CORS on `/api/public/demo/*`. |
 | `PUBLIC_SITE_URL` | already set (the website); the sign-up form posts from there |
-| `KS_SALES_EMAIL` | where the sales notes go (default `keystone@boreal.financial`) |
+| `KS_SALES_EMAIL` | where the sales notes go (default `sales@keystonecrm.online`) |
 | `MS_GRAPH_*` or `SENDGRID_*` | already needed for KS-Ops email; without one, demo emails are only logged |
 | `DEMO_SMS_ENABLED` | `true` texts the demo link as well as emailing it. **Off by default**: the link is emailed only, and the mobile number is kept so sales can call |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `KS_SMS_FROM` (or `TWILIO_MESSAGING_SERVICE_SID`) | with `DEMO_SMS_ENABLED=true`, texts the demo link to the mobile number given on the sign-up form (Canadian/US numbers) |
