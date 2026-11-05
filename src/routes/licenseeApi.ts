@@ -14,6 +14,7 @@ import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OP
 import { machineDeps } from "../provisioning/index.js";
 import { futureGeneratedAt, storeUsageReport, usageReportSchema } from "../sync/usage.js";
 import { replaceStaffDirectory, staffDirectorySchema } from "../staffDirectory.js";
+import { registerPages } from "../meta/relay.js"; // KS_META_LEAD_ADS_v1
 import { checkEntries, checkSchema, optInSchema, replaceReport, reportSchema, setOptIn, withdraw, withdrawSchema } from "../watchlist.js";
 
 const requestSchema = z
@@ -101,6 +102,16 @@ export function licenseeApiRouter(deps: Deps): Router {
       if (r === "not_due") return res.status(409).json({ error: r, data_purge_on: dataPurgeOn(l) });
       if (r === "purged") await requestTeardownAfterPurge(machineDeps(deps), l.id, `ks-server:${l.company_code}`);
       return res.json({ ok: true, result: r });
+    }),
+  );
+
+  // KS_META_LEAD_ADS_v1 - the Facebook Pages this brokerage connected; their lead webhooks are passed on to it.
+  router.post(
+    "/:id/meta-pages",
+    auth,
+    h(async (req, res) => {
+      const stored = await registerPages(deps.db, req.licensee!.id, (req.body ?? {}).page_ids);
+      return res.json({ ok: true, stored });
     }),
   );
 

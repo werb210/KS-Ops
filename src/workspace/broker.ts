@@ -14,7 +14,7 @@
 // the code with this broker address as redirect_uri, as both providers require. KS-Ops never sees a token.
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type BrokerProvider = "microsoft" | "google";
+export type BrokerProvider = "microsoft" | "google" | "meta"; // KS_META_LEAD_ADS_v1 - Facebook Login for lead ads
 
 /** The flows each provider may forward, and where on the licensee's KS-server. */
 export const FLOW_PATHS: Record<BrokerProvider, Record<string, string>> = {
@@ -26,6 +26,9 @@ export const FLOW_PATHS: Record<BrokerProvider, Record<string, string>> = {
   google: {
     google: "/api/google/oauth/callback",
     "sso-google": "/api/auth/sso/google/callback",
+  },
+  meta: {
+    meta: "/api/integrations/meta/callback",
   },
 };
 
