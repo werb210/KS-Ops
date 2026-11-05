@@ -133,6 +133,7 @@ export const MARKETING_ADDON = {
     "Unlimited website lead forms, plus an AI chat widget and tracking script for your own website",
     "Full visitor history and session replay",
     "Full Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions",
+    "Landing pages with a lead form, built in the portal",
     "Lead scoring",
     "Subject-line A/B test and send-time choice",
     "Campaign report with applications and funded deals by campaign",
@@ -169,6 +170,7 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "iphone_dialler", label: "iPhone dialler", plan: "starter" },
   // KS_OPS_PLAN_FIXES (Todd, Oct 26) - the iPad staff portal app on every plan; the Apple Watch app growth and up.
   { key: "ipad_app", label: "iPad staff portal app", plan: "starter" },
+  { key: "android_staff_app", label: "Android staff app (portal and phone)", plan: "starter" }, // KS_ANDROID_STAFF_v1 - same as KS-server and KS-Website
   // Inbox sync reads Outlook (Microsoft 365) only for now; Gmail sends only.
   { key: "office_sync", label: "Email sync: Outlook (Microsoft 365) inbox sync; Gmail sends only for now", plan: "starter" },
   { key: "ai_assistant", label: "AI assistant", plan: "starter" },

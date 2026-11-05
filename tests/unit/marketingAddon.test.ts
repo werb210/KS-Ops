@@ -90,7 +90,7 @@ describe("catalogue", () => {
   it("lists the add-on, the signing allowance and each plan's marketing limits", () => {
     const p = publicPlans();
     expect(p.marketing_addon).toMatchObject({ key: "marketing", price: 49, per: "brokerage", extra_campaign_emails: 10000, included_in_trials: true });
-    expect(p.marketing_addon.adds).toHaveLength(10);
+    expect(p.marketing_addon.adds).toHaveLength(11);
     expect(p.signings).toEqual({ included: SIGNINGS.included, price: 2.5, per: "brokerage" });
     expect(p.plans.map((x) => x.marketing.campaign_emails)).toEqual([500, 1000, 2500]);
     expect(p.plans.map((x) => x.marketing.text_to_many)).toEqual([50, 250, 500]);
