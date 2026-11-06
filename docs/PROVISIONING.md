@@ -159,6 +159,7 @@ the page):
 | `github_environments`, `deploy_registry`, `deploy` | GitHub workflow | KS-Portal and KS-Client only: the `ks-<code>` environment (VITE_* variables), the `deploy/licensees.json` entry, the build and upload to `sites/<code>/` |
 | `custom_domains` | KS-Ops + a person | the DNS records and `az` commands on the page; done when every address answers over https. Skipped (and said so) without `KS_DOMAIN` |
 | `health`, `configure`, `admin_user`, `welcome_email` | KS-Ops | as before, against the brokerage's address (every call carries `X-KS-Tenant: <code>`) |
+| `licence_agreement`, `team_users`, `onboarding_email` | KS-Ops | KS_OPS_ONBOARDING_v1: wait for the signed licence agreement, create and invite the sign-up team (`POST /api/provision/users`), email the owner their onboarding contact (see AUTO_PROVISIONING.md) |
 | `twilio_voice`, `twilio_bundle`, `phone_numbers`, `texting_registration` | KS-Ops | as before |
 
 The registry's code rule allows 2 to 31 characters; a 32-character company code stops at `database` with a plain

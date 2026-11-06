@@ -8,7 +8,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../src/app.js";
 import type { Deps } from "../../src/deps.js";
-import { insertLicensee } from "../../src/licensees/repo.js";
+import { insertLicensee, newSignupToken } from "../../src/licensees/repo.js";
 import { machineDeps } from "../../src/provisioning/index.js";
 import { advanceRun } from "../../src/provisioning/machine.js";
 import { statusTokenFor } from "../../src/provisioning/statusToken.js";
@@ -25,7 +25,7 @@ import type { ExecCtx } from "../../src/provisioning/executors.js";
 
 let pool: pg.Pool;
 const dispatches: Array<{ url: string; inputs: Record<string, string> }> = [];
-const server = { planPuts: 0, admins: [] as any[], phone: [] as any[], texting: [] as any[], tenantCalls: [] as string[], tenantHeaders: [] as string[] };
+const server = { planPuts: 0, admins: [] as any[], users: [] as any[], phone: [] as any[], texting: [] as any[], tenantCalls: [] as string[], tenantHeaders: [] as string[] };
 const API = "https://acme.api.keystone.test";
 const twilio = new FakeTwilio();
 
@@ -57,6 +57,11 @@ const fetchImpl = vi.fn(async (url: string, init: RequestInit = {}) => {
   if (url === `${API}/api/provision/admin`) {
     server.admins.push(JSON.parse(String(init.body)));
     return jsonResponse({ ok: true, created: true, user_id: "u1" }, 201);
+  }
+  if (url === `${API}/api/provision/users`) { // KS_OPS_ONBOARDING_v1
+    const users = JSON.parse(String(init.body)).users as Array<{ email: string }>;
+    server.users.push(...users);
+    return jsonResponse({ ok: true, results: users.map((u, i) => ({ email: u.email, status: "created", user_id: `team-${i}` })) });
   }
   if (url === `${API}/api/provision/phone-numbers`) { // KS_OPS_PHONE_PROVISIONING
     server.phone.push(JSON.parse(String(init.body)));
@@ -136,7 +141,7 @@ describe("automatic provisioning", () => {
     const res = await request(app()).post("/api/ops/provisioning").set(staff()).send({ licensee_id: l.id });
     expect(res.status).toBe(201);
     runId = res.body.run.id;
-    expect(res.body.run.steps.map((s: any) => s.step)).toEqual(["twilio_account", "twilio_address", "database", "tenant_registry", "twilio_settings", "workspace_apps", "shared_server", "github_environments", "deploy_registry", "deploy", "custom_domains", "health", "configure", "admin_user", "welcome_email", "twilio_voice", "twilio_bundle", "phone_numbers", "texting_registration"]);
+    expect(res.body.run.steps.map((s: any) => s.step)).toEqual(["twilio_account", "twilio_address", "database", "tenant_registry", "twilio_settings", "workspace_apps", "shared_server", "github_environments", "deploy_registry", "deploy", "custom_domains", "health", "configure", "admin_user", "welcome_email", "licence_agreement", "team_users", "onboarding_email", "twilio_voice", "twilio_bundle", "phone_numbers", "texting_registration"]);
     await until(async () => dispatches.length > 0, "the dispatch");
     expect(dispatches[0].url).toBe("https://api.github.com/repos/werb210/KS-Ops/actions/workflows/provision-licensee.yml/dispatches");
     expect(dispatches[0].inputs).toMatchObject({ run_id: runId, code: "acme", steps: "github_environments,deploy_registry,deploy" });
@@ -209,6 +214,44 @@ describe("automatic provisioning", () => {
     for (const step of ["deploy_registry", "deploy"]) expect((await cb({ step, status: "done" })).status).toBe(200);
   });
 
+  // KS_OPS_ONBOARDING_v1 - the run waits for the licence agreement; the team is saved, then the owner signs.
+  it("waits for the licence agreement before inviting the team, and the roster can still be changed", async () => {
+    const md = machineDeps(deps);
+    await until(async () => {
+      await advanceRun(md, runId);
+      const steps = (await pool.query("SELECT step, status FROM provisioning_steps WHERE run_id = $1", [runId])).rows;
+      return steps.find((x) => x.step === "licence_agreement")?.status === "running";
+    }, "the agreement gate");
+    const l = (await pool.query("SELECT agreement_link_sent_at FROM licensees WHERE id = $1", [licenseeId])).rows[0];
+    expect(l.agreement_link_sent_at).toBeTruthy();
+    expect(mail.sent.find((m) => /^Please sign the Keystone Software Licence Agreement/.test(m.subject))?.to).toEqual(["ana@acme.example"]);
+    expect(server.users).toEqual([]);
+    const team = [
+      { full_name: "Bob Broker", email: "bob@acme.example", phone: "587 555 0101", role: "Broker" },
+      { full_name: "Mia Market", email: "mia@acme.example", phone: "15875550102", role: "Marketing" },
+    ];
+    await pool.query("UPDATE licensees SET seats = 3 WHERE id = $1", [licenseeId]); // the owner and two more
+    // Saved twice: the replace keeps one row per person (the unique indexes hold inside the one statement).
+    for (let i = 0; i < 2; i++) expect((await request(app()).put(`/api/ops/licensees/${licenseeId}/team`).set(staff()).send({ team })).status).toBe(200);
+    const rows = (await pool.query("SELECT position, email, phone_e164, role, is_owner FROM licensee_team WHERE licensee_id = $1 ORDER BY position", [licenseeId])).rows;
+    expect(rows).toEqual([
+      { position: 0, email: "ana@acme.example", phone_e164: "+14035550123", role: "Admin", is_owner: true },
+      { position: 1, email: "bob@acme.example", phone_e164: "+15875550101", role: "Broker", is_owner: false },
+      { position: 2, email: "mia@acme.example", phone_e164: "+15875550102", role: "Marketing", is_owner: false },
+    ]);
+    const tooMany = await request(app()).put(`/api/ops/licensees/${licenseeId}/team`).set(staff()).send({ team: [...team, { full_name: "Ex Tra", email: "x@acme.example", phone: "5875550103", role: "Broker" }] });
+    expect(tooMany.status).toBe(400);
+    // The owner signs on the website.
+    const token = await newSignupToken(pool, licenseeId);
+    const shown = (await request(app()).get(`/api/public/signup/${licenseeId}/agreement?token=${token}`)).body;
+    expect(shown.text).toContain("Acme Lending Inc.");
+    const signed = await request(app()).post(`/api/public/signup/${licenseeId}/agreement?token=${token}`).send({ signer_name: "Ana Acme", signer_title: "President", agree: true, sha256: shown.sha256 });
+    expect(signed.status).toBe(201);
+    const a = (await pool.query("SELECT signer_name, signer_title, signer_email, text_sha256, emailed_at FROM licence_agreements WHERE licensee_id = $1", [licenseeId])).rows[0];
+    expect(a).toMatchObject({ signer_name: "Ana Acme", signer_title: "President", signer_email: "ana@acme.example", text_sha256: shown.sha256 });
+    expect(a.emailed_at).toBeTruthy();
+  });
+
   it("KS-Ops finishes: health, plan push, admin user, sign-in email", async () => {
     const md = machineDeps(deps);
     const run = await until(async () => {
@@ -233,6 +276,16 @@ describe("automatic provisioning", () => {
     ]);
     expect(server.texting[0].registrations.find((r: any) => r.kind === "toll_free").message).toMatch(/approval pending with carriers/);
     expect(mail.sent.find((m) => /your Keystone system is ready/.test(m.subject))?.to).toEqual(["ana@acme.example"]);
+    // KS_OPS_ONBOARDING_v1 - the team made on the server and invited (not the owner), and the owner's onboarding email.
+    expect(server.users.map((u) => [u.email, u.role, u.phone])).toEqual([["bob@acme.example", "Broker", "+15875550101"], ["mia@acme.example", "Marketing", "+15875550102"]]);
+    expect(mail.sent.filter((m) => /invited you to Keystone/.test(m.subject)).map((m) => m.to[0])).toEqual(["bob@acme.example", "mia@acme.example"]);
+    const onboarding = mail.sent.filter((m) => /meet your onboarding contact/.test(m.subject));
+    expect(onboarding).toHaveLength(1);
+    expect(onboarding[0].text).toContain("one 30-minute kickoff call");
+    const invited = (await pool.query("SELECT count(*)::int AS n FROM licensee_team WHERE licensee_id = $1 AND invite_sent_at IS NOT NULL AND provisioned_at IS NOT NULL", [licenseeId])).rows[0];
+    expect(invited.n).toBe(2);
+    // Locked now: changes go through the brokerage's own portal.
+    expect((await request(app()).put(`/api/ops/licensees/${licenseeId}/team`).set(staff()).send({ team: [] })).status).toBe(409);
     const l = (await pool.query("SELECT status FROM licensees WHERE id = $1", [licenseeId])).rows[0];
     expect(l.status).toBe("active");
     // The token stops working once the run is done.

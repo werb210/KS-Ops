@@ -12,6 +12,8 @@ import { opsAuthRouter } from "./routes/opsAuth.js";
 import { opsLicenseesRouter } from "./routes/opsLicensees.js";
 import { opsSupportRouter } from "./routes/opsSupport.js";
 import { publicRouter } from "./routes/public.js";
+import { publicOnboardingRouter } from "./routes/publicOnboarding.js"; // KS_OPS_ONBOARDING_v1
+import { opsOnboardingRouter } from "./routes/opsOnboarding.js";
 import { stripeWebhookRouter } from "./routes/stripeWebhook.js";
 import { demoOpsRouter, demoPublicRouter } from "./routes/demo.js";
 import { opsQuickbooksRouter, qboCallbackRouter, qboPageRouter } from "./routes/opsQuickbooks.js";
@@ -91,7 +93,7 @@ export function createApp(deps: Deps) {
   // KS_OPS_KB_v1 - public help articles and Keystone Maya for prospects (the website's assistant).
   app.use("/api/public/kb", corsFor("PUBLIC_SITE_URL"), publicKbRouter(deps));
   app.use("/api/public/assistant", corsFor("PUBLIC_SITE_URL"), publicAssistantRouter(deps));
-  app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps), publicBetaRouter(deps), publicProvisioningRouter(deps));
+  app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps), publicBetaRouter(deps), publicProvisioningRouter(deps), publicOnboardingRouter(deps));
   // KS_OPS_AUTO_PROVISION_v1 - the provisioning workflow in GitHub Actions reports back with its run's one-off token.
   app.use("/api/provisioning/callback", provisioningCallbackRouter(deps));
   app.use("/api/oauth/callback", oauthBrokerRouter(deps)); // KS_OPS_WORKSPACE_APPS - Keystone's one OAuth redirect address
@@ -108,6 +110,7 @@ export function createApp(deps: Deps) {
   app.use("/api/ops/quickbooks/oauth/callback", qboCallbackRouter(deps));
   app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps), opsTrialsRouter(deps), opsBetaRouter(deps), opsProvisioningRouter(deps));
   app.use("/api/ops", requireStaff, opsKbRouter(deps)); // KS_OPS_KB_v1
+  app.use("/api/ops", requireStaff, opsOnboardingRouter(deps)); // KS_OPS_ONBOARDING_v1 - sign-up team and licence agreement
   app.use("/api/ops", requireStaff, opsMarketingRouter(deps)); // KS_OPS_PROSPECT_MARKETING_v1
   // The QuickBooks and free-trial ops pages (they hold no data; their calls need a staff token).
   app.use("/ops/quickbooks", qboPageRouter());

@@ -80,6 +80,10 @@ export type LicenseeRow = {
   admin_trial_pro_until?: Date | null;
   admin_trial_ended_at?: Date | null;
   admin_trial_end_reason?: string | null;
+  /** KS_OPS_ONBOARDING_v1 - the agreement link and its one reminder, and the owner's onboarding email. */
+  agreement_link_sent_at?: Date | null;
+  agreement_reminder_sent_at?: Date | null;
+  onboarding_email_sent_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 };
