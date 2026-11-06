@@ -18,6 +18,7 @@ import { CODE_MESSAGES, codeProblem, crossFieldErrors, normalizeCode, signupSche
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
 import { BrandScanError, scanBrand } from "../lib/brandScan.js";
+import { parseTeam, replaceTeam } from "../onboarding/team.js"; // KS_OPS_ONBOARDING_v1
 
 const limited = (limit: number, windowMs: number) => limiter(limit, windowMs);
 
@@ -88,8 +89,15 @@ export function publicRouter(deps: Deps): Router {
         console.warn(`[signup] honeypot filled from ${clientIp(req)}`);
         return res.status(400).json({ errors: { form: "We could not accept this sign-up. Please try again." } });
       }
+      // KS_OPS_ONBOARDING_v1 - the team roster (owner first, at most one person per seat) is checked with the form.
+      const team = parseTeam(body.team, { contact_name: String(body.contact_name ?? ""), contact_email: String(body.contact_email ?? ""), contact_phone: String(body.contact_phone ?? "") }, Number(body.seats) || 1);
+      const teamErrors = team.ok ? {} : Object.fromEntries(Object.entries(team.errors).filter(([k]) => k.startsWith("team")));
       const parsed = parseBody(signupSchema, body, crossFieldErrors);
-      if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
+      if (!parsed.ok) return res.status(400).json({ errors: { ...teamErrors, ...parsed.errors } });
+      if (!team.ok) {
+        // The owner's own mobile must be a Canadian or US mobile (the owner signs in with it, like the rest of the team).
+        return res.status(400).json({ errors: team.errors });
+      }
       const input = parsed.data;
       // KS_OPS_v13_LOGO - an uploaded logo is checked before anything is saved.
       let logo: CheckedLogo | null = null;
@@ -157,9 +165,11 @@ export function publicRouter(deps: Deps): Router {
         await deps.db.query("UPDATE licensees SET logo_url = $2, updated_at = now() WHERE id = $1", [l.id, url]);
         l = { ...l, logo_url: url };
       }
+      await replaceTeam(deps.db, l.id, team.members);
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
         payment_method: l.payment_method, marketing_addon: input.marketing_addon === true, logo_uploaded: Boolean(logo), ip: clientIp(req),
+        team_size: team.members.length,
       });
       await crmLicenseeCreated(deps, l);
 

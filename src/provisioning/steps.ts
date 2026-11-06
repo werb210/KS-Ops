@@ -34,6 +34,11 @@ export const PROVISION_STEPS: readonly StepDef[] = [
   { key: "configure", where: "service", label: "Push the plan, branding and feature flags, and set the status", publicLabel: "Applying your plan and branding" },
   { key: "admin_user", where: "service", label: "Create the licensee's admin user on the shared server", publicLabel: "Creating your admin account" },
   { key: "welcome_email", where: "service", label: "Email the admin their sign-in link", publicLabel: "Sending your sign-in details" },
+  // KS_OPS_ONBOARDING_v1 - the team is only invited once the licence agreement is signed; then the owner's onboarding
+  // email. Before the phone lines, so a number waiting for Twilio never holds up the team or the onboarding contact.
+  { key: "licence_agreement", where: "service", label: "Wait for the owner to sign the Keystone Software Licence Agreement (link emailed, one reminder after 24 hours)", publicLabel: "Waiting for your signed licence agreement" },
+  { key: "team_users", where: "service", label: "Create the sign-up team on the shared server and email each person (not the owner) their invite and quick guide", publicLabel: "Inviting your team" },
+  { key: "onboarding_email", where: "service", label: "Email the owner their onboarding contact and how to book the Teams setup session (by support level)", publicLabel: "Sending your onboarding details" },
   // KS_OPS_PHONE_PROVISIONING - last, so a number that cannot be bought yet never holds up the sign-in email.
   { key: "twilio_voice", where: "service", label: "Point the dialler's Twilio app at the brokerage's server address", publicLabel: "Setting up your phone lines" },
   { key: "twilio_bundle", where: "service", label: "Regulatory bundle for buying numbers, when Twilio's rules ask for one (waits for Twilio's approval)", publicLabel: "Setting up your phone lines" },
@@ -159,6 +164,9 @@ export function describePlan(kind: RunKind, code: string, _region: string = DEFA
     "configure: status provisioning -> trial (staff free trial) or active, then PUT /api/plan (plan, branding, add-ons, beta flags)",
     "admin_user: POST /api/provision/admin on the brokerage's server address (the contact's email and mobile, role Admin)",
     "welcome_email: email the contact the staff portal link, the company code and how to sign in",
+    "licence_agreement: wait until the owner has signed the Keystone Software Licence Agreement on the website (link emailed if not sent after payment, one reminder after 24 hours)",
+    "team_users: POST /api/provision/users on the brokerage's server address with the sign-up roster (not the owner), then email each of them their invite and quick guide",
+    "onboarding_email: email the owner from support, introducing their onboarding contact and the Teams setup session for their support level (KS_ONBOARDING_BOOKING_URL)",
     "twilio_voice: set the TwiML app's voice URL to <server>/api/webhooks/twilio/voice/twiml",
     "twilio_bundle: read Twilio's rules (Regulations API) for the licensee's country and number types; make and submit a regulatory bundle only when one is required, then wait for approval",
     "phone_numbers: POST /api/provision/phone-numbers on the brokerage's server address (area code from the contact's phone, province or state from the address): a local business line on every plan and a toll-free line on Growth and Pro, bought into the licensee's Twilio account with its voice and SMS webhooks set",

@@ -15,6 +15,7 @@ import type { SharedDeps } from "../tenants/shared.js"; // KS_SHARED_HOSTING_v1
 import { SHARED_EXECUTORS, envOf, NO_DOMAIN_MESSAGE, sharedOf } from "./sharedSteps.js";
 import { ksDomain, sharedAgentUrl, tenantKeySetting } from "../tenants/config.js";
 import { setTenantStatus, tenantStatusFor } from "../tenants/repo.js";
+import { ONBOARDING_EXECUTORS } from "./onboardingSteps.js"; // KS_OPS_ONBOARDING_v1
 
 export type StepOutcome =
   | { kind: "done"; output?: Record<string, unknown>; message?: string }
@@ -335,6 +336,7 @@ export const SERVICE_EXECUTORS: Record<string, Executor> = {
   retention_gate: retentionGate,
   finish: finishTeardown,
   ...SHARED_EXECUTORS, // KS_SHARED_HOSTING_v1
+  ...ONBOARDING_EXECUTORS, // KS_OPS_ONBOARDING_v1
 };
 
 /** Re-reads the licensee (steps change it). */

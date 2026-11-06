@@ -49,7 +49,11 @@ again after a price changes.
 | `OPS_ALLOWED_SERVER_HOST_SUFFIXES` | no | where a licensee's `server_url` may point (default `.azurewebsites.net,.azurestaticapps.net`; `*` allows any host). Server, client and portal addresses must be https |
 | `PENDING_SIGNUP_DAYS` | no | website sign-ups still unpaid after this many days are cancelled and their company code released (default 7) |
 | `KS_SALES_EMAIL` | no | sales inbox for sign-ups and payments (default `sales@keystonecrm.online`) |
-| `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default `support@keystonecrm.online`) |
+| `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default `support@keystonecrm.online`); also the From and reply-to address of the team invites and the owner's onboarding email (with SendGrid it must be a verified sender) |
+| `KS_ONBOARDING_BOOKING_URL` | recommended | KS_OPS_ONBOARDING_v1: the https booking page for the owner's Microsoft Teams setup session (e.g. a Microsoft Bookings page). Unset: the onboarding email asks the owner to reply to book |
+| `KS_ONBOARDING_CONTACT_NAME` | no | the person introduced as the onboarding contact (default `Todd Werboweski`) |
+| `KS_SUPPORT_PHONE` | no | Keystone's support line, shown in the onboarding emails when set. Never a person's own mobile |
+| `KS_LICENSOR_LEGAL_NAME` | no | the company named as licensor in the licence agreement (default `2630108 Alberta Ltd.`) |
 | `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_SEND_AS` | no | email through Microsoft Graph |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
 | `DEMO_SMS_ENABLED` | no | `true` texts the demo link as well as emailing it. Off by default (the link is emailed only; the mobile number is still kept) |

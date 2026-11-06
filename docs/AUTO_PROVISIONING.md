@@ -40,6 +40,9 @@ Staff "Start" on /ops/provisioning ┘          │
                    configure            status provisioning -> active (or trial), plan + branding + flags pushed
                    admin_user           POST /api/provision/admin on the brokerage's address
                    welcome_email        sign-in link emailed to the contact
+                   licence_agreement    waits for the owner's click-to-sign licence agreement (link + one reminder after 24 h)
+                   team_users           POST /api/provision/users with the sign-up roster; each person (not the owner) emailed an invite
+                   onboarding_email     the owner's onboarding email from support: Todd + Teams session by support level
                    twilio_voice         the dialler app's voice URL -> the brokerage's address
                    twilio_bundle        a regulatory bundle only if Twilio's rules ask for one (waits for approval)
                    phone_numbers        POST /api/provision/phone-numbers: business line (+ toll-free on Growth/Pro) via Twilio
@@ -205,3 +208,30 @@ see PROVISIONING.md. `OPS_ALLOWED_SERVER_HOST_SUFFIXES` includes `.<KS_DOMAIN>` 
 - **Email sending from their domain** and any SPF/DKIM records.
 - A step that keeps failing: read the log, fix the cause, then **Retry step**, or do it by hand and **Mark done
   manually** (with a note).
+
+## Sign-up team, licence agreement and onboarding emails (KS_OPS_ONBOARDING_v1)
+
+- **Team roster.** At sign-up, after the seats, the owner lists each person: full name, email, Canadian or US mobile
+  (stored as E.164; a leading 1 on 11 digits is the country code) and role Broker, Marketing or Admin. The owner is row 1
+  and an Admin; the list never has more people than seats. It is kept in `licensee_team` and can be changed from the
+  owner's emailed link (`/signup/team` on the website) or by staff on `/ops/provisioning` (Team and licence agreement),
+  until `team_users` starts. If `team_users` fails (for example the server refused someone), the roster opens again:
+  fix it, then press Retry step. Nobody created or invited before is created or invited twice.
+- **Licence agreement.** The website shows the Keystone Software Licence Agreement rendered for the licensee (company,
+  legal name, plan, seats, add-ons, support level, price) right after the order is placed, before Stripe. The owner types
+  their full name and title and ticks "I agree"; `licence_agreements` keeps the signer, email, IP, browser, time, version
+  and a SHA-256 of the exact text, and a signed copy (HTML) goes to the owner and sales. Unsigned at payment: the welcome
+  email carries the link; `licence_agreement` waits (checked hourly), sending the link if it was never sent and one
+  reminder 24 hours later. It never fails by itself; staff can "Mark done manually" for a paper agreement.
+  **The wording is a template pending legal review** (`src/onboarding/agreement.ts`); changing it means a new
+  `AGREEMENT_VERSION`.
+- **Invites.** `team_users` creates everyone except the owner on the shared server (`POST /api/provision/users`, KS-server
+  `KS_SERVER_PROVISION_TEAM_USERS_v1`) and emails each an invite from support: portal link, sign-in by a code texted to
+  their mobile, a quick guide (pipeline and applications, documents, lender submission, dialler, marketing for the
+  Marketing role, Maya) and the set-up wizard that opens on first sign-in.
+- **Owner onboarding email.** `onboarding_email` sends once, from `KS_SUPPORT_EMAIL`, introducing the onboarding contact
+  (`KS_ONBOARDING_CONTACT_NAME`, default Todd Werboweski) and the Microsoft Teams session for the support level: Email
+  one 30-minute kickoff, Priority one 60-minute session, Premium two 60-minute sessions, Dedicated a dedicated plan (the
+  contact gets in touch). The booking link is `KS_ONBOARDING_BOOKING_URL`; unset, the owner is asked to reply to book.
+  Only the support mailbox and `KS_SUPPORT_PHONE` (when set) are ever given as contact details.
+- Runs started before these steps existed have no rows for them and finish as before.

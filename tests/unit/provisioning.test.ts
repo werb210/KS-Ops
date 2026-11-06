@@ -29,6 +29,9 @@ const okExecutors = (): Record<string, Executor> => ({
   admin_user: vi.fn(async () => ({ kind: "done" as const, output: { created: true } })),
   welcome_email: vi.fn(async () => ({ kind: "done" as const })),
   phone_numbers: vi.fn(async () => ({ kind: "done" as const })), // KS_OPS_PHONE_PROVISIONING
+  licence_agreement: vi.fn(async () => ({ kind: "done" as const })), // KS_OPS_ONBOARDING_v1 (tested in onboarding.test.ts)
+  team_users: vi.fn(async () => ({ kind: "done" as const })),
+  onboarding_email: vi.fn(async () => ({ kind: "done" as const })),
 });
 
 /** Plays the workflow: reports every step it was given as done. */
