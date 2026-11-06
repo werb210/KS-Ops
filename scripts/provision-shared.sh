@@ -114,11 +114,13 @@ else
     --admin-user "$PG_ADMIN" --admin-password "$PG_ADMIN_PASSWORD" \
     --public-access None --yes --only-show-errors -o none
 fi
+# Newer az versions create the server without public access; firewall rules need it on.
+az postgres flexible-server update -g "$RG" -n "$PG" --public-access Enabled --only-show-errors -o none
 PG_HOST="$(az postgres flexible-server show -g "$RG" -n "$PG" --query fullyQualifiedDomainName -o tsv)"
 # The only extension Keystone uses.
 az postgres flexible-server parameter set -g "$RG" -s "$PG" --name azure.extensions --value VECTOR --only-show-errors -o none
-if exists az postgres flexible-server db show -g "$RG" -s "$PG" -d "$CONTROL_DB"; then echo "database $CONTROL_DB exists"; else
-  az postgres flexible-server db create -g "$RG" -s "$PG" -d "$CONTROL_DB" --only-show-errors -o none
+if exists az postgres flexible-server db show -g "$RG" -s "$PG" -n "$CONTROL_DB"; then echo "database $CONTROL_DB exists"; else
+  az postgres flexible-server db create -g "$RG" -s "$PG" -n "$CONTROL_DB" --only-show-errors -o none
 fi
 
 say "Postgres firewall: the shared apps and KS-Ops only"
@@ -130,25 +132,27 @@ all_ips() {
 APP_IPS="$(all_ips | sort -u)"
 [[ -n "$APP_IPS" ]] || { echo "Could not read the apps' outbound addresses." >&2; exit 1; }
 [[ -n "${KS_OPS_APP:-}" && -n "${KS_OPS_RG:-}" ]] || echo "Note: KS_OPS_APP / KS_OPS_RG not given, so KS-Ops's outbound addresses are not allowed yet (it needs Postgres to set up brokerages)."
+EXISTING_RULES="$(az postgres flexible-server firewall-rule list -g "$RG" -s "$PG" --query '[].name' -o tsv --only-show-errors)"
 while read -r IP; do
   [[ -n "$IP" ]] || continue
-  az postgres flexible-server firewall-rule create -g "$RG" -n "$PG" --rule-name "ks-app-${IP//./-}" \
+  grep -qx "ks-app-${IP//./-}" <<<"$EXISTING_RULES" && continue
+  az postgres flexible-server firewall-rule create -g "$RG" -s "$PG" -n "ks-app-${IP//./-}" \
     --start-ip-address "$IP" --end-ip-address "$IP" --only-show-errors -o none
 done <<<"$APP_IPS"
-for RULE in $(az postgres flexible-server firewall-rule list -g "$RG" -n "$PG" --query "[].name" -o tsv --only-show-errors); do
+for RULE in $(az postgres flexible-server firewall-rule list -g "$RG" -s "$PG" --query "[].name" -o tsv --only-show-errors); do
   if [[ "$RULE" == ks-app-* ]] && ! grep -qx "${RULE#ks-app-}" <<<"$(tr '.' '-' <<<"$APP_IPS")"; then
-    az postgres flexible-server firewall-rule delete -g "$RG" -n "$PG" --rule-name "$RULE" --yes --only-show-errors -o none
+    az postgres flexible-server firewall-rule delete -g "$RG" -s "$PG" -n "$RULE" --yes --only-show-errors -o none
     echo "removed rule $RULE"
   elif [[ "$RULE" != ks-app-* && "$RULE" != ks-operator ]]; then
-    az postgres flexible-server firewall-rule delete -g "$RG" -n "$PG" --rule-name "$RULE" --yes --only-show-errors -o none
+    az postgres flexible-server firewall-rule delete -g "$RG" -s "$PG" -n "$RULE" --yes --only-show-errors -o none
     echo "removed rule $RULE"
   fi
 done
 if [[ "${ALLOW_MY_IP:-}" == "1" ]]; then
   MY_IP="$(curl -fsS https://api.ipify.org)"
-  az postgres flexible-server firewall-rule create -g "$RG" -n "$PG" --rule-name ks-operator \
+  az postgres flexible-server firewall-rule create -g "$RG" -s "$PG" -n ks-operator \
     --start-ip-address "$MY_IP" --end-ip-address "$MY_IP" --only-show-errors -o none
-  trap 'az postgres flexible-server firewall-rule delete -g "$RG" -n "$PG" --rule-name ks-operator --yes --only-show-errors -o none || true' EXIT
+  trap 'az postgres flexible-server firewall-rule delete -g "$RG" -s "$PG" -n ks-operator --yes --only-show-errors -o none || true' EXIT
   echo "allowed this machine ($MY_IP) until the script ends"
 fi
 
@@ -172,9 +176,9 @@ if [[ -n "${PG_ADMIN_PASSWORD:-}" ]]; then
     psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -v pw="$OWNER_PW" <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ks_control_owner') AS found \gset owner_
 \if :owner_found
-ALTER ROLE ks_control_owner WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';
+ALTER ROLE ks_control_owner WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD :'pw';
 \else
-CREATE ROLE ks_control_owner WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';
+CREATE ROLE ks_control_owner WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD :'pw';
 \endif
 SQL
     OWNER_URL="postgresql://ks_control_owner:${OWNER_PW}@${PG_HOST}:5432/${CONTROL_DB}?sslmode=require"
@@ -184,9 +188,9 @@ SQL
     psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -q -v pw="$READER_PW" <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ks_control_reader') AS found \gset reader_
 \if :reader_found
-ALTER ROLE ks_control_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';
+ALTER ROLE ks_control_reader WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD :'pw';
 \else
-CREATE ROLE ks_control_reader WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'pw';
+CREATE ROLE ks_control_reader WITH LOGIN NOCREATEDB NOCREATEROLE PASSWORD :'pw';
 \endif
 SQL
     READER_URL="postgresql://ks_control_reader:${READER_PW}@${PG_HOST}:5432/${CONTROL_DB}?sslmode=require"
