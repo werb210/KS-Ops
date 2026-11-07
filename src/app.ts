@@ -36,6 +36,9 @@ import { publicAssistantRouter, publicKbRouter } from "./routes/publicKb.js";
 import { licenseeKbRouter } from "./routes/licenseeKb.js";
 import { opsMarketingRouter } from "./routes/opsMarketing.js"; // KS_OPS_PROSPECT_MARKETING_v1
 import { publicMarketingRouter } from "./routes/publicMarketing.js";
+import { licenseePortingRouter } from "./routes/licenseePorting.js"; // KS_OPS_NUMBER_PORTING_v1
+import { opsPortingRouter } from "./routes/opsPorting.js";
+import { portingPageRouter } from "./routes/opsPortingPage.js";
 
 /** KS_OPS_KEYSTONE_DOMAIN - Keystone's own website (keystonecrm.online) is always allowed on the website routes. */
 export const KEYSTONE_SITE_ORIGINS = ["https://www.keystonecrm.online", "https://keystonecrm.online"];
@@ -82,6 +85,8 @@ export function createApp(deps: Deps) {
   app.use("/api/demo/sessions", express.json({ limit: "16mb" }));
   // KS_OPS_KB_v1 - article images (PNG or JPG up to 2 MB, sent as base64).
   app.use("/api/ops/kb/images", express.json({ limit: "4mb" }));
+  // KS_OPS_NUMBER_PORTING_v1 - a transfer request carries the recent bill (up to 7 MB, sent as base64).
+  app.use("/api/licensees/:id/port-requests", express.json({ limit: "12mb" }));
   app.use(express.json({ limit: "1mb" }));
 
   // The self-serve demo: sign-up from the website, the magic link from the demo portal, progress from the demo server.
@@ -102,6 +107,7 @@ export function createApp(deps: Deps) {
   app.use("/api/staff-directory", cors({ origin: "*", methods: ["POST"], allowedHeaders: ["Content-Type"] }), staffDirectoryRouter(deps));
   app.use("/api/licensees", licenseeApiRouter(deps), licenseeBetaRouter(deps));
   app.use("/api/licensees", licenseeKbRouter(deps)); // KS_OPS_KB_v1 - the portal's Help Center and Ask Maya
+  app.use("/api/licensees", licenseePortingRouter(deps)); // KS_OPS_NUMBER_PORTING_v1 - "Keep your existing phone number"
   app.use("/api/ops", corsFor("OPS_ALLOWED_ORIGINS"));
   app.use("/api/ops/auth", opsAuthRouter(deps));
   // KS_OPS_v13_PRESENTER - a signed link to the staff presenter-mode demo (the staff portal's "Start sales demo").
@@ -112,12 +118,14 @@ export function createApp(deps: Deps) {
   app.use("/api/ops", requireStaff, opsKbRouter(deps)); // KS_OPS_KB_v1
   app.use("/api/ops", requireStaff, opsOnboardingRouter(deps)); // KS_OPS_ONBOARDING_v1 - sign-up team and licence agreement
   app.use("/api/ops", requireStaff, opsMarketingRouter(deps)); // KS_OPS_PROSPECT_MARKETING_v1
+  app.use("/api/ops", requireStaff, opsPortingRouter(deps)); // KS_OPS_NUMBER_PORTING_v1 - number transfers
   // The QuickBooks and free-trial ops pages (they hold no data; their calls need a staff token).
   app.use("/ops/quickbooks", qboPageRouter());
   app.use("/ops/trials", trialsPageRouter());
   app.use("/ops/beta", betaPageRouter()); // KS_OPS_BETA_v1
   app.use("/ops/provisioning", provisioningPageRouter()); // KS_OPS_AUTO_PROVISION_v1
   app.use("/ops/kb", kbPageRouter()); // KS_OPS_KB_v1
+  app.use("/ops/porting", portingPageRouter()); // KS_OPS_NUMBER_PORTING_v1
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "not_found" }));
 
