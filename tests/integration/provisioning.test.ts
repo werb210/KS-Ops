@@ -318,7 +318,8 @@ describe("automatic provisioning", () => {
     // KS_SHARED_HOSTING_v1 - the database, registry entry and custom domains, in plain words, with the commands.
     expect(one.body.run.steps.find((x: any) => x.step === "database").plain).toBe("Done.");
     expect(one.body.run.shared).toMatchObject({ database: { database: "ks_acme", role: "ks_acme_app" }, registry: { state: "present", status: "active" }, custom_domains: { configured: true, domain: "keystone.test" } });
-    expect(one.body.run.shared.custom_domains.commands[0]).toBe("az webapp config hostname add -g ks-shared --webapp-name ks-shared-server --hostname acme.api.keystone.test");
+    expect(one.body.run.shared.custom_domains.commands[0]).toBe("gh api repos/werb210/KS-Ops/contents/scripts/bind-brokerage-domains.sh -q .content | base64 -d > ~/bind.sh && bash ~/bind.sh acme");
+    expect(one.body.run.shared.custom_domains.commands[1]).toBe("az webapp config hostname add -g ks-shared --webapp-name ks-shared-server --hostname acme.api.keystone.test");
     const env = tenantEnv((await getTenant(control, "acme"))!, KEY);
     const shown = JSON.stringify(one.body.run);
     for (const k of ["JWT_SECRET", "OTP_HASH_SALT", "KS_OPS_KEY", "TWILIO_AUTH_TOKEN"]) expect(shown).not.toContain(env[k]);

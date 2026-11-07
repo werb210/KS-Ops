@@ -337,7 +337,7 @@ describe("what /ops/provisioning shows", () => {
       registry: { state: "present", api_hosts: ["prairie.api.keystone.test"] },
       custom_domains: { configured: true, domain: "keystone.test" },
     });
-    expect(v.shared!.custom_domains.commands).toHaveLength(9);
+    expect(v.shared!.custom_domains.commands).toHaveLength(10);
     expect(JSON.stringify(v)).not.toMatch(/v1:[A-Za-z0-9+/=]+:/); // nothing encrypted (or decrypted) is shown
 
     const none = machine(licensee(), {}, configuredEnv({ KS_DOMAIN: "" }));
