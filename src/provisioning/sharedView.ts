@@ -77,10 +77,16 @@ export async function sharedSummary(
       domain,
       message: done
         ? "Every address answers over https with its own certificate."
-        : "Add these DNS records at the DNS provider for " + domain + ", then run the commands (signed in to Azure with the Keystone subscription). The custom_domains step checks every 15 minutes and finishes by itself.",
+        : "Paste the first command into Azure Cloud Shell (Keystone subscription): with " + domain + " on Azure DNS it adds the DNS records, host names and certificates for all three addresses. The records and commands below are the same work done by hand. The custom_domains step checks every 15 minutes and finishes by itself.",
       dns: dnsRecords(bindings),
-      commands: azCommands(bindings),
+      // KS_DNS_AZURE_v1 - scripts/bind-brokerage-domains.sh does all of it in one paste.
+      commands: [oneCommand(code), ...azCommands(bindings)],
     };
   }
   return { database, registry, custom_domains };
+}
+
+/** KS_DNS_AZURE_v1 - the one Cloud Shell paste that connects a brokerage's three addresses (scripts/bind-brokerage-domains.sh). */
+export function oneCommand(code: string): string {
+  return `gh api repos/werb210/KS-Ops/contents/scripts/bind-brokerage-domains.sh -q .content | base64 -d > ~/bind.sh && bash ~/bind.sh ${code}`;
 }
