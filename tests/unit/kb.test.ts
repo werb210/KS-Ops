@@ -147,9 +147,9 @@ describe("website assistant inputs", () => {
 describe("the starter library", () => {
   const slugs = new Set(STARTER_ARTICLES.map((a) => a.slug));
 
-  it("has 40 to 62 unique articles covering every area", () => {
+  it("has 40 to 64 unique articles covering every area", () => {
     expect(STARTER_ARTICLES.length).toBeGreaterThanOrEqual(40);
-    expect(STARTER_ARTICLES.length).toBeLessThanOrEqual(62);
+    expect(STARTER_ARTICLES.length).toBeLessThanOrEqual(64);
     expect(slugs.size).toBe(STARTER_ARTICLES.length);
     const cats = new Set(STARTER_ARTICLES.map((a) => a.category));
     for (const c of ["Getting started", "Users and teams", "Branding", "Client app and applications", "Pipeline", "Documents and OCR",

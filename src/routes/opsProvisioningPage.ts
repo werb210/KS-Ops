@@ -46,7 +46,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
 <body>
 <main>
   <h1>Provisioning</h1>
-  <p class="lead">Automatic setup of each brokerage on the shared Keystone server (its own database, registry entry and web apps) after payment or a staff free trial, and its removal after cancellation once the retention rules allow it. Open a run's log to see its database, addresses and custom domains.</p>
+  <p class="lead">Automatic setup of each brokerage on the shared Keystone server (its own database, registry entry and web apps) after payment or a staff free trial, and its removal after cancellation once the retention rules allow it. Open a run's log to see its database, addresses and custom domains. Brokerages keeping their existing phone numbers: <a href="/ops/porting">Number transfers</a>.</p>
 
   <section id="signin">
     <h2>Sign in</h2>

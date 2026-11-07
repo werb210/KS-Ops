@@ -53,6 +53,7 @@ again after a price changes.
 | `KS_ONBOARDING_BOOKING_URL` | recommended | KS_OPS_ONBOARDING_v1: the https booking page for the owner's Microsoft Teams setup session (e.g. a Microsoft Bookings page). Unset: the onboarding email asks the owner to reply to book |
 | `KS_ONBOARDING_CONTACT_NAME` | no | the person introduced as the onboarding contact (default `Todd Werboweski`) |
 | `KS_SUPPORT_PHONE` | no | Keystone's support line, shown in the onboarding emails when set. Never a person's own mobile |
+| `KS_PORT_RELEASE_GRACE_DAYS` | no | KS_OPS_NUMBER_PORTING_v1: days the temporary Keystone number keeps working after a brokerage's own number finishes transferring in (default 7, at most 90). The owner is told to turn off call forwarding before then |
 | `KS_LICENSOR_LEGAL_NAME` | no | the company named as licensor in the licence agreement (default `2630108 Alberta Ltd.`) |
 | `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_SEND_AS` | no | email through Microsoft Graph |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
@@ -202,10 +203,23 @@ live licensees (`trial`, `active`, `past_due`) with a server address are returne
   by OTHER opted-in licensees only. No personal data is ever sent or stored, only hashes
 - `POST /api/licensees/:id/purged` — the server reports a cancelled licensee's data was deleted (accepted on or after
   the purge date, 409 before)
+- KS_OPS_NUMBER_PORTING_v1 "Keep your existing phone number" (relayed by KS-server's `/api/port-requests`; bodies carry
+  the carrier account number and PIN, which are stored encrypted with `OPS_ENCRYPTION_KEY` and never logged):
+  `POST /api/licensees/:id/port-requests` (create; the bill as base64, PDF/PNG/JPG up to 7 MB),
+  `POST .../port-requests/list`, `POST .../port-requests/:rid/loa`, `.../sign`, `.../forwarding`, `.../cancel`
 - Usage reports with `generated_at` more than 5 minutes in the future are refused (400). Overage is billed from
   KS-Ops's own plan and seats (pooled, with the trial bonus during a trial), not from the report's `overage`.
 
 **Staff (BF staff portal, KS silo)** — `Authorization: Bearer <token>`
+- KS_OPS_NUMBER_PORTING_v1 number transfers, on the page `/ops/porting`: `GET /api/ops/porting?status=`,
+  `GET /api/ops/porting/:id` (the Twilio checklist, account number and PIN in clear; audited), `GET .../bill`,
+  `GET .../loa` (signed letter, HTML), `POST .../status { status, foc_date?, reason?, twilio_port_sid?, twilio_reference? }`.
+  Statuses: draft -> ready_to_submit (letter signed) -> submitted -> carrier_approval_pending -> scheduled (FOC date)
+  -> completed / rejected (reason) / cancelled. Each change emails the owner from the support address; "approve the
+  carrier's text" also texts the owner when `TWILIO_*`/`KS_SMS_FROM` are set. Submitting with a letter over 30 days old
+  sends it back to the brokerage to sign again. Completed calls the brokerage's `POST /api/provision/ported-numbers`,
+  which attaches the number and releases the temporary number after `KS_PORT_RELEASE_GRACE_DAYS`; texting is then
+  registered through `src/twilio/texting.ts` (toll-free verification, US A2P 10DLC; Canadian numbers need none).
 - `POST /api/ops/auth/exchange { bfToken }` — Admin users only; returns `{ token, expires_in, user }` (1 hour).
   `GET /api/ops/auth/me` returns who the token belongs to.
 - `GET /api/ops/licensees` (`?status=&q=`), `POST /api/ops/licensees`, `GET /api/ops/licensees/:id`,

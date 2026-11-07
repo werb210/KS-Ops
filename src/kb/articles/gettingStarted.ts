@@ -14,7 +14,7 @@ Keystone is your brokerage's own CRM and loan-origination system: a staff portal
 ## The first week, in order
 1. **Brand it.** Add your logo, colours and font. See [Brand your portal and client app](kb:brand-your-portal).
 2. **Check your team.** The people you listed at sign-up are invited for you; each signs in with a code sent to their mobile. Add more any time. See [Add users and choose their roles](kb:add-users-and-roles).
-3. **Get your phone number.** Pick a local business number in a few clicks. See [Get your phone numbers](kb:get-phone-numbers).
+3. **Get your phone number.** Pick a local business number in a few clicks, or keep a number you already have: forward it to your new Keystone number while it transfers so no calls are missed. See [Get your phone numbers](kb:get-phone-numbers) and [Keeping your existing phone number](kb:keep-your-existing-number).
 4. **Connect email and calendar.** Each person connects Microsoft 365 or Google. See [Connect your email and calendar](kb:connect-email-and-calendar).
 5. **Add your lenders.** Your own lenders and their products drive matching. See [Add lenders and their products](kb:add-lenders-and-products).
 6. **Bring your data over.** Import from HubSpot, Salesforce, Pipedrive or a spreadsheet. See [Import your data](kb:import-from-hubspot-salesforce-pipedrive).
