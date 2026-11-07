@@ -92,6 +92,8 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   var $ = function (id) { return document.getElementById(id); };
   var token = "";
   try { token = sessionStorage.getItem(KEY) || ""; } catch (e) { token = ""; }
+  // KS_OPS_PORTAL_HANDOFF_v1 - the BF staff portal opens this page with #token=<staff token>: kept in this tab only, removed from the address bar.
+  try { var hm = /(?:^#|&)token=([^&]+)/.exec(location.hash || ""); if (hm) { token = decodeURIComponent(hm[1]); sessionStorage.setItem(KEY, token); history.replaceState(null, "", location.pathname + location.search); } } catch (e) {}
   var open = {};
   var drafts = {}; // KS_OPS_ONBOARDING_v1 - unsaved team edits by licensee id (auto refresh waits while there are any)
   function show(el, text, ok) { el.textContent = text; el.className = "msg " + (ok ? "ok" : "bad"); }
