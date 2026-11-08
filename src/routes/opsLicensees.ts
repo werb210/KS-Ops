@@ -19,6 +19,11 @@ import { addonsOf, BRAND_PUSH_FIELDS, isServiceStatus, pushPlan, recordPlanChang
 import { crmLicenseeCreated, crmLicenseeStatus, crmLicenseeUpdated } from "../crm/triggers.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 import { biConfig, linkPgi, queuePgiBackfill } from "../sync/pgiLink.js";
+import { ensureQaLogin } from "../tenants/qaLogin.js"; // KS_OPS_QA_LOGIN_v1
+import { defaultShared } from "../tenants/shared.js";
+import { tenantKeySetting } from "../tenants/config.js";
+import { tenantKey } from "../tenants/crypto.js";
+import { reloadTenants } from "../tenants/sharedServer.js";
 
 export const OPS_KEY_MESSAGE =
   "Copy this key now - it will not be shown again. Set it as KS_OPS_KEY in the licensee's server settings.";
@@ -436,5 +441,25 @@ export function opsLicenseesRouter(deps: Deps): Router {
     }),
   );
 
-  return router;
+    // KS_OPS_QA_LOGIN_v1 - the QA sign-in code of a TEST brokerage (never a real one), for the end-to-end test: sign in
+  // to its portal or client app with any NXX-555-0100..0199 number (the owner's is contact_phone) and this code.
+  router.post(
+    "/licensees/:id/qa-login",
+    h(async (req, res) => {
+      const l = await load(String(req.params.id));
+      if (!l) return res.status(404).json(notFound);
+      if (!(l as { test_brokerage?: boolean }).test_brokerage) {
+        return res.status(409).json({ error: "not_a_test_brokerage", message: "QA sign-in is only for licensees marked as a test brokerage." });
+      }
+      const key = tenantKey(tenantKeySetting());
+      if (!key) return res.status(503).json({ error: "not_configured", message: "KS_TENANT_KEY is not set on KS-Ops." });
+      const code = await ensureQaLogin(defaultShared().control(), key, l.company_code);
+      const reload = await reloadTenants(deps.fetch);
+      await audit(deps.db, actorOf(req), "licensee.qa_login", l.id, { reloaded: reload.ok });
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ code, owner_phone: l.contact_phone, phones: "any NXX-555-0100 to 0199", server_reloaded: reload.ok, portal_url: l.portal_url, client_url: l.client_url, server_url: l.server_url });
+    }),
+  );
+
+return router;
 }

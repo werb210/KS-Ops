@@ -21,6 +21,7 @@ import { bindingsFor, hostsNotReady } from "../tenants/domains.js";
 import { deleteTenant, getTenant, mergeHosts, mergeTenantEnv, saveTenantDatabase, saveTenantHosts, tenantDatabaseUrl, type TenantRow } from "../tenants/repo.js";
 import { defaultShared, type SharedDeps } from "../tenants/shared.js";
 import { migrateTenant, reloadTenants } from "../tenants/sharedServer.js";
+import { ensureQaLogin, qaSettings } from "../tenants/qaLogin.js"; // KS_OPS_QA_LOGIN_v1
 import { GENERATED_SECRETS } from "./steps.js";
 
 const MIN = 60_000;
@@ -167,7 +168,9 @@ export const tenantRegistry: Executor = async (ctx) => {
       KS_CLIENT_URL: a.client_url,
       CLIENT_URL: a.client_url,
       MAYA_URL: sharedAgentUrl(e),
+      ...qaSettings(Boolean(l.test_brokerage)), // KS_OPS_QA_LOGIN_v1
     };
+    if (l.test_brokerage) await ensureQaLogin(control, key, l.company_code);
     const envNow = await mergeTenantEnv(control, key, l.company_code, current);
 
     // The addresses KS-Ops calls the brokerage on (plan push, admin user, phone numbers, ...).
