@@ -147,9 +147,14 @@ describe("website assistant inputs", () => {
 describe("the starter library", () => {
   const slugs = new Set(STARTER_ARTICLES.map((a) => a.slug));
 
-  it("has 40 to 64 unique articles covering every area", () => {
-    expect(STARTER_ARTICLES.length).toBeGreaterThanOrEqual(40);
-    expect(STARTER_ARTICLES.length).toBeLessThanOrEqual(64);
+  // KS_OPS_KB_v5 - one article per feature: the library grew from 63 to about 200.
+  it("has 150 to 400 unique articles covering every area", () => {
+    expect(STARTER_ARTICLES.length).toBeGreaterThanOrEqual(150);
+    expect(STARTER_ARTICLES.length).toBeLessThanOrEqual(400);
+    for (const a of STARTER_ARTICLES) {
+      expect(a.summary.length, a.slug).toBeLessThanOrEqual(200);
+      expect(a.body.trim().length, a.slug).toBeGreaterThan(80);
+    }
     expect(slugs.size).toBe(STARTER_ARTICLES.length);
     const cats = new Set(STARTER_ARTICLES.map((a) => a.category));
     for (const c of ["Getting started", "Users and teams", "Branding", "Client app and applications", "Pipeline", "Documents and OCR",

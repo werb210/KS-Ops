@@ -4,7 +4,7 @@
 import type { Q } from "../db.js";
 import { STARTER_ARTICLES, type SeedArticle } from "./articles/index.js";
 
-export const SEED_VERSION = 4; // KS_OPS_KB_v2 - v2 refreshes untouched articles' text (Broker role, shared hosting); v3 sign-up team and licence agreement (KS_OPS_ONBOARDING_v1); v4 keeping your existing number (KS_OPS_NUMBER_PORTING_v1)
+export const SEED_VERSION = 5; // KS_OPS_KB_v2 - v2 refreshes untouched articles' text (Broker role, shared hosting); v3 sign-up team and licence agreement (KS_OPS_ONBOARDING_v1); v4 keeping your existing number (KS_OPS_NUMBER_PORTING_v1); v5 one article per feature (KS_OPS_KB_v5)
 
 export async function seedKnowledgeBase(db: Q, articles: SeedArticle[] = STARTER_ARTICLES, version = SEED_VERSION): Promise<number> {
   const done = await db.query("SELECT 1 FROM kb_seed_runs WHERE version = $1", [version]);
