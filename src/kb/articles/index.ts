@@ -14,6 +14,10 @@ import { PHONE } from "./phone.js";
 import { MARKETING_AND_REPORTS } from "./marketingReports.js";
 import { PLANS_AND_BILLING } from "./plansBilling.js";
 import { SECURITY_AND_DATA } from "./securityData.js";
+import { FEATURES_CLIENT } from "./featuresClient.js"; // KS_OPS_KB_v5 - one article per feature
+import { FEATURES_UNDERWRITING } from "./featuresUnderwriting.js";
+import { FEATURES_WORK } from "./featuresWork.js";
+import { FEATURES_ADMIN } from "./featuresAdmin.js";
 
 export type SeedArticle = {
   slug: string;
@@ -35,4 +39,8 @@ export const STARTER_ARTICLES: SeedArticle[] = [
   ...MARKETING_AND_REPORTS,
   ...PLANS_AND_BILLING,
   ...SECURITY_AND_DATA,
+  ...FEATURES_CLIENT,
+  ...FEATURES_UNDERWRITING,
+  ...FEATURES_WORK,
+  ...FEATURES_ADMIN,
 ];
