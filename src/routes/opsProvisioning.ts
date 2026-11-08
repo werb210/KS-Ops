@@ -28,7 +28,11 @@ import { twilioSummary } from "../twilio/view.js";
 import { linesFrom, pushTexting, submitTexting } from "../twilio/texting.js";
 import { twilioOf } from "../twilio/account.js";
 import { audit } from "../licensees/repo.js";
-import { twilioSettings, workspaceApps } from "../provisioning/sharedSteps.js";
+import { identitySettings, twilioSettings, workspaceApps } from "../provisioning/sharedSteps.js";
+import { mergeTenantEnv } from "../tenants/repo.js";
+import { defaultShared } from "../tenants/shared.js";
+import { tenantKeySetting } from "../tenants/config.js";
+import { tenantKey } from "../tenants/crypto.js";
 import { reloadTenants } from "../tenants/sharedServer.js";
 import type { ExecCtx } from "../provisioning/executors.js";
 
@@ -147,6 +151,16 @@ export function opsProvisioningRouter(deps: Deps, md: MachineDeps = machineDeps(
       for (const [k, fn] of [["twilio_settings", twilioSettings], ["workspace_apps", workspaceApps]] as const) {
         const r = await fn(ctx(k));
         results[k] = r.kind === "done" ? { ok: true, message: r.message } : { ok: false, message: "error" in r ? r.error : r.message };
+      }
+      // KS_OPS_TENANT_IDENTITY_v1 - the brokerage's name, address and time zone too.
+      const key = tenantKey(tenantKeySetting(md.env ?? process.env));
+      if (key) {
+        try {
+          await mergeTenantEnv((md.shared ?? defaultShared()).control(), key, l.company_code, identitySettings(l));
+          results.identity = { ok: true };
+        } catch (err) {
+          results.identity = { ok: false, message: err instanceof Error ? err.message : String(err) };
+        }
       }
       const reload = await reloadTenants(md.fetch, md.env);
       await audit(deps.db, actorOf(req), "licensee.tenant_settings_refreshed", l.id, { results });
