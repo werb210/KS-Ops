@@ -209,7 +209,14 @@ const PHONE_TWILIO_SETUP = "The brokerage's server has no Twilio settings yet: r
  * signs the webhooks) and is safe to ask again. Twilio not connected there yet: blocked with what to do, retried every
  * 6 hours. A Twilio address / bundle requirement: failed with the explanation (emailed to sales). Other errors: retried.
  */
+/** KS_OPS_TEST_BROKERAGE_v1 - a test brokerage buys no numbers and registers nothing with carriers. */
+export function testBrokerageSkip(l: { test_brokerage?: boolean | null }, what: string): StepOutcome | null {
+  return l.test_brokerage ? { kind: "done", output: { skipped: "test_brokerage" }, message: `skipped: test brokerage (no ${what})` } : null;
+}
+
 export const phoneNumbers: Executor = async (ctx) => {
+  const skip = testBrokerageSkip(ctx.licensee, "phone numbers bought");
+  if (skip) return skip;
   const l = ctx.licensee;
   const key = opsKeyOf(l);
   if (!l.server_url || !key) return { kind: "failed", error: "No server address or ops key on the licensee." };
@@ -272,6 +279,8 @@ export const twilioAccount: Executor = async (ctx) => fromTwilio(ctx, await ensu
 export const twilioAddress: Executor = async (ctx) => fromTwilio(ctx, await ensureAddress(ctx.deps, ctx.licensee, twilioLog(ctx)));
 export const twilioVoice: Executor = async (ctx) => fromTwilio(ctx, await pointVoiceApp(ctx.deps, ctx.licensee));
 export const twilioBundle: Executor = async (ctx) => {
+  const skip = testBrokerageSkip(ctx.licensee, "regulatory bundle");
+  if (skip) return skip;
   const started = ctx.step.started_at ? new Date(ctx.step.started_at) : null;
   // The bundle waits up to 14 days for Twilio; ensureBundle decides when to give up.
   return fromTwilio(ctx, await ensureBundle(ctx.deps, ctx.licensee, started, twilioLog(ctx)), 15 * DAY);
@@ -280,6 +289,8 @@ export const twilioBundle: Executor = async (ctx) => {
 /** Submits texting registration and pushes the status to the licensee's server. Done once submitted: approval by the
  *  carriers takes days and is followed by the worker, never holding the run. */
 export const textingRegistration: Executor = async (ctx) => {
+  const skip = testBrokerageSkip(ctx.licensee, "texting registration");
+  if (skip) return skip;
   const lines = linesFrom(ctx.outputs.phone_numbers?.results);
   const rows = await submitTexting(ctx.deps, ctx.licensee, lines, (m) => ctx.log(m));
   for (const r of rows) await ctx.log(`texting: ${plainStatus(r)}`, r.status === "needs_info" || r.status === "rejected" ? "warn" : "info");
