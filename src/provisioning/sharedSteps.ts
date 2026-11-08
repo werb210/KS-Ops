@@ -29,6 +29,34 @@ const CALL_LIMIT_MS = 30 * MIN;
 
 export const envOf = (ctx: Pick<ExecCtx, "deps">): NodeJS.ProcessEnv => ctx.deps.env ?? process.env;
 export const sharedOf = (ctx: Pick<ExecCtx, "deps">): SharedDeps => ctx.deps.shared ?? defaultShared();
+
+// KS_OPS_TENANT_IDENTITY_v1 - the brokerage's own name, legal name, country, address and time zone go into its shared
+// server settings (KS-server reads KS_COMPANY_NAME etc. as its defaults). Without them every new brokerage's client
+// app and emails said "Keystone Demo Brokerage".
+const PROVINCE_ZONES: Record<string, string> = {
+  AB: "America/Edmonton", BC: "America/Vancouver", SK: "America/Regina", MB: "America/Winnipeg", ON: "America/Toronto",
+  QC: "America/Toronto", NB: "America/Moncton", NS: "America/Halifax", PE: "America/Halifax", NL: "America/St_Johns",
+  YT: "America/Whitehorse", NT: "America/Yellowknife", NU: "America/Iqaluit",
+};
+type IdentitySource = {
+  company_name?: string | null; legal_name?: string | null; country?: string | null; province_state?: string | null;
+  address_line1?: string | null; address_line2?: string | null; city?: string | null; postal_code?: string | null;
+  mailing_address?: string | null; assistant_name?: string | null;
+};
+export function identitySettings(l: IdentitySource): Record<string, string> {
+  const t = (v: unknown) => String(v ?? "").trim();
+  const prov = t(l.province_state).toUpperCase();
+  const address = t(l.mailing_address) || [t(l.address_line1), t(l.address_line2), t(l.city), [prov, t(l.postal_code)].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const out: Record<string, string> = {
+    KS_COMPANY_NAME: t(l.company_name),
+    KS_LEGAL_NAME: t(l.legal_name),
+    KS_COUNTRY: t(l.country).toUpperCase() || "CA",
+    KS_MAILING_ADDRESS: address,
+    KS_ASSISTANT_NAME: t(l.assistant_name),
+  };
+  if ((out.KS_COUNTRY === "CA" || !out.KS_COUNTRY) && PROVINCE_ZONES[prov]) out.KS_TIME_ZONE = PROVINCE_ZONES[prov];
+  return out;
+}
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 800);
 
 function waitOrFail(ctx: ExecCtx, limitMs: number, retryMs: number, message: string): StepOutcome {
@@ -169,6 +197,7 @@ export const tenantRegistry: Executor = async (ctx) => {
       CLIENT_URL: a.client_url,
       MAYA_URL: sharedAgentUrl(e),
       ...qaSettings(Boolean(l.test_brokerage)), // KS_OPS_QA_LOGIN_v1
+      ...identitySettings(l), // KS_OPS_TENANT_IDENTITY_v1
     };
     if (l.test_brokerage) await ensureQaLogin(control, key, l.company_code);
     const envNow = await mergeTenantEnv(control, key, l.company_code, current);
