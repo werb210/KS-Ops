@@ -193,7 +193,7 @@ describe("registry cache", () => {
     expect(await reg.lookup("northwind.portal.keystone.test")).toEqual({ code: "northwind", app: "portal", status: "active" });
     expect(await reg.lookup("prairie.app.keystone.test")).toEqual({ code: "prairie", app: "client", status: "trial" });
     expect(q.query).toHaveBeenCalledTimes(1);
-    expect(q.query.mock.calls[0]).toEqual(["SELECT code, status, portal_hosts, client_hosts FROM ks_tenants", []]);
+    expect(q.query.mock.calls[0]).toEqual(["SELECT code, status, portal_hosts, client_hosts, api_hosts FROM ks_tenants", []]);
     t = 61_000;
     q.query.mockRejectedValueOnce(new Error("connection reset"));
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -209,5 +209,30 @@ describe("registry cache", () => {
     expect((await request(server).get("/").set("Host", "northwind.portal.keystone.test")).status).toBe(503);
     expect(err).toHaveBeenCalled();
     err.mockRestore();
+  });
+});
+
+// KS_SHARED_APP_BUILD_v1
+describe("shared app build", () => {
+  const rows = [{ code: "acme", status: "active", portal_hosts: ["acme.portal.keystone.test"], client_hosts: ["acme.app.keystone.test"], api_hosts: ["acme.api.keystone.test"] }];
+  const shared = () => fakeStore({ "_shared/portal/index.html": "shared portal", "_shared/client/index.html": "shared client", "_shared/portal/assets/app-abcdef12.js": "js" });
+  const mk = (store = shared()) => {
+    const handler = createHandler({ registry: { lookup: async (h) => buildHostMap(rows).get(h) ?? null }, store });
+    return createServer((req, res) => void handler(req, res));
+  };
+  it("serves the shared build to a brokerage without its own build", async () => {
+    expect((await request(mk()).get("/").set("Host", "acme.portal.keystone.test")).text).toBe("shared portal");
+    expect((await request(mk()).get("/settings/team").set("Host", "acme.app.keystone.test")).text).toBe("shared client");
+    expect((await request(mk()).get("/assets/app-abcdef12.js").set("Host", "acme.portal.keystone.test")).text).toBe("js");
+  });
+  it("prefers the brokerage's own build when it has one", async () => {
+    const store = fakeStore({ "_shared/portal/index.html": "shared portal", "acme/portal/index.html": "own portal" });
+    expect((await request(mk(store)).get("/").set("Host", "acme.portal.keystone.test")).text).toBe("own portal");
+  });
+  it("tells the app its brokerage and addresses at /ks-config.js", async () => {
+    const r = await request(mk()).get("/ks-config.js").set("Host", "acme.portal.keystone.test");
+    expect(r.headers["content-type"]).toContain("javascript");
+    expect(r.headers["cache-control"]).toBe("no-store");
+    expect(r.text).toBe('window.__KS_CONFIG__={"code":"acme","app":"portal","server_url":"https://acme.api.keystone.test","portal_url":"https://acme.portal.keystone.test","client_url":"https://acme.app.keystone.test"};');
   });
 });

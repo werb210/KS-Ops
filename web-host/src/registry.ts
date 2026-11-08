@@ -3,7 +3,9 @@
 // refresh fails the last good list is kept (and the failure logged), so a database blip never takes the sites down.
 
 export type App = "portal" | "client";
-export type Site = { code: string; app: App; status: string };
+// KS_SHARED_APP_BUILD_v1 - urls: the brokerage's own addresses, for /ks-config.js (only when the registry row has them).
+export type SiteUrls = { server_url: string; portal_url: string; client_url: string };
+export type Site = { code: string; app: App; status: string; urls?: SiteUrls };
 export type Query = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
 
 /** Host names as the registry stores them: lowercase, no port. */
@@ -11,11 +13,14 @@ export function normalHost(raw: string | undefined): string {
   return String(raw ?? "").trim().toLowerCase().replace(/:\d+$/, "").replace(/\.$/, "");
 }
 
-export function buildHostMap(rows: Array<{ code: string; status: string; portal_hosts: string[] | null; client_hosts: string[] | null }>): Map<string, Site> {
+const httpsOf = (hosts: string[] | null | undefined) => (hosts && hosts[0] ? `https://${normalHost(hosts[0])}` : "");
+
+export function buildHostMap(rows: Array<{ code: string; status: string; portal_hosts: string[] | null; client_hosts: string[] | null; api_hosts?: string[] | null }>): Map<string, Site> {
   const map = new Map<string, Site>();
   for (const r of rows) {
-    for (const h of r.portal_hosts ?? []) map.set(normalHost(h), { code: r.code, app: "portal", status: r.status });
-    for (const h of r.client_hosts ?? []) if (!map.has(normalHost(h))) map.set(normalHost(h), { code: r.code, app: "client", status: r.status });
+    const urls = r.api_hosts && r.api_hosts.length ? { urls: { server_url: httpsOf(r.api_hosts), portal_url: httpsOf(r.portal_hosts), client_url: httpsOf(r.client_hosts) } } : {};
+    for (const h of r.portal_hosts ?? []) map.set(normalHost(h), { code: r.code, app: "portal", status: r.status, ...urls });
+    for (const h of r.client_hosts ?? []) if (!map.has(normalHost(h))) map.set(normalHost(h), { code: r.code, app: "client", status: r.status, ...urls });
   }
   return map;
 }
@@ -31,7 +36,7 @@ export function cachedRegistry(q: Query, opts: { ttlMs?: number; now?: () => num
 
   const refresh = async () => {
     try {
-      const r = await q.query("SELECT code, status, portal_hosts, client_hosts FROM ks_tenants", []);
+      const r = await q.query("SELECT code, status, portal_hosts, client_hosts, api_hosts FROM ks_tenants", []);
       map = buildHostMap(r.rows);
       loadedAt = now();
     } catch (err) {
