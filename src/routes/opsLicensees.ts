@@ -27,7 +27,7 @@ const PATCH_COLUMNS = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
-  "onboarding_fee_paid", "payment_method",
+  "onboarding_fee_paid", "payment_method", "test_brokerage",
   "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
   "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
 ] as const;

@@ -66,6 +66,7 @@ export type LicenseeRow = {
   /** The payment method KS-Ops last made the Stripe customer's default for invoices (from the subscription). */
   stripe_default_payment_method?: string | null;
   onboarding_fee_paid: boolean;
+  test_brokerage?: boolean; // KS_OPS_TEST_BROKERAGE_v1
   plan_sync_status: string;
   plan_sync_error: string | null;
   plan_sync_attempts: number;
@@ -150,6 +151,7 @@ export const INSERTABLE = [
   "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
   "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
   "addons", // KS_OPS_MARKETING_ADDON - the Marketing add-on chosen at sign-up
+  "test_brokerage", // KS_OPS_TEST_BROKERAGE_v1
 ] as const;
 
 export async function insertLicensee(db: Q, fields: Partial<Record<(typeof INSERTABLE)[number], unknown>>): Promise<LicenseeRow> {

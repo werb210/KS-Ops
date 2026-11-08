@@ -419,6 +419,7 @@ export const staffCreateSchema = z
     plan: planSchema,
     billing: intervalSchema.optional(),
     billing_interval: intervalSchema.optional(),
+    test_brokerage: z.boolean().optional(), // KS_OPS_TEST_BROKERAGE_v1
     support_level: supportSchema.default("email"),
     seats: seatsSchema,
     country: z.enum(["CA", "US"], { error: "Choose Canada or the United States." }).default("CA"),
@@ -501,6 +502,7 @@ export const staffPatchSchema = z
     font_family: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), fontSchema])),
     assistant_name: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(40).nullable()),
     onboarding_fee_paid: z.boolean(),
+    test_brokerage: z.boolean(), // KS_OPS_TEST_BROKERAGE_v1
     // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.
     addons: z
       .object({
