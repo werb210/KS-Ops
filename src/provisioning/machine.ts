@@ -579,7 +579,7 @@ export async function runView(deps: Pick<MachineDeps, "db" | "store" | "fetch" |
 export { stepsFor };
 
 /** KS_SHARED_APP_BUILD_v1 - on when KS_SHARED_APP_BUILD is "true", "1" or "on". */
-export function sharedAppBuild(env: NodeJS.ProcessEnv | undefined): boolean {
+export function sharedAppBuild(env: NodeJS.ProcessEnv | undefined = process.env): boolean {
   const v = String(env?.KS_SHARED_APP_BUILD ?? "").trim().toLowerCase();
   return v === "true" || v === "1" || v === "on";
 }
