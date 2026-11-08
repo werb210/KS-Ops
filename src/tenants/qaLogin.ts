@@ -7,8 +7,9 @@ import { mergeTenantEnv, getTenant, tenantEnv } from "./repo.js";
 
 export const QA_PHONE_RE = /^\+1[2-9]\d{2}55501\d{2}$/;
 
+// 6 digits: the portal and client app code boxes take exactly 6.
 export function newQaCode(): string {
-  return String(randomInt(10_000_000, 100_000_000));
+  return String(randomInt(100_000, 1_000_000));
 }
 
 /** The settings a brokerage gets for its test flag (merged into its ks_tenants env). */
@@ -18,9 +19,10 @@ export function qaSettings(testBrokerage: boolean): Record<string, string> {
 
 /** Make sure a test brokerage has its QA code; returns it. */
 export async function ensureQaLogin(control: Q, key: Buffer, code: string): Promise<string> {
-  await mergeTenantEnv(control, key, code, { KS_TEST_BROKERAGE: "true", KS_QA_LOGIN_CODE: newQaCode() }, { keep: true });
   const row = await getTenant(control, code);
   const env = row ? tenantEnv(row, key) : {};
-  if (env.KS_TEST_BROKERAGE !== "true") await mergeTenantEnv(control, key, code, { KS_TEST_BROKERAGE: "true" });
-  return String(env.KS_QA_LOGIN_CODE ?? "");
+  const current = String(env.KS_QA_LOGIN_CODE ?? "");
+  const qa = /^[0-9]{6}$/.test(current) ? current : newQaCode(); // an older 8-digit code is replaced
+  await mergeTenantEnv(control, key, code, { KS_TEST_BROKERAGE: "true", KS_QA_LOGIN_CODE: qa });
+  return qa;
 }

@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { newQaCode, QA_PHONE_RE, qaSettings } from "../../src/tenants/qaLogin.js";
 
 describe("QA sign-in settings", () => {
-  it("makes an 8-digit random code", () => {
+  it("makes a 6-digit random code", () => {
     const a = newQaCode();
-    expect(a).toMatch(/^[0-9]{8}$/);
+    expect(a).toMatch(/^[0-9]{6}$/);
     expect(new Set(Array.from({ length: 20 }, newQaCode)).size).toBeGreaterThan(1);
   });
   it("flags only test brokerages", () => {
