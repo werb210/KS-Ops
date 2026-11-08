@@ -260,6 +260,15 @@ async function advanceLocked(deps: MachineDeps, runId: string): Promise<RunRow |
       continue;
     }
 
+    // KS_SHARED_APP_BUILD_v1 - with the shared portal/client build (KS_SHARED_APP_BUILD=true) a brokerage needs no
+    // GitHub environment, registry entry or web build of its own: the shared web host serves the shared build at its
+    // addresses.
+    if (def.where === "workflow" && run.kind === "provision" && sharedAppBuild(deps.env)) {
+      await deps.store.log(run.id, step.step, "info", "not needed: every brokerage uses the shared portal and client build");
+      await deps.store.updateStep(run.id, step.step, { status: "done", finished_at: deps.now(), output: { skipped: "shared_app_build" } });
+      continue;
+    }
+
     if (def.where === "workflow") {
       const dispatchedAt = run.workflow_dispatched_at ? new Date(run.workflow_dispatched_at).getTime() : 0;
       const inFlight = dispatchedAt && run.workflow_steps.includes(step.step);
@@ -568,3 +577,9 @@ export async function runView(deps: Pick<MachineDeps, "db" | "store" | "fetch" |
 }
 
 export { stepsFor };
+
+/** KS_SHARED_APP_BUILD_v1 - on when KS_SHARED_APP_BUILD is "true", "1" or "on". */
+export function sharedAppBuild(env: NodeJS.ProcessEnv | undefined): boolean {
+  const v = String(env?.KS_SHARED_APP_BUILD ?? "").trim().toLowerCase();
+  return v === "true" || v === "1" || v === "on";
+}

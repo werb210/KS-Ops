@@ -44,6 +44,8 @@ export const MIME: Record<string, string> = {
 
 export const YEAR = "public, max-age=31536000, immutable";
 export const NO_CACHE = "no-cache";
+/** KS_SHARED_APP_BUILD_v1 - the blob folder of the shared builds. */
+export const SHARED = "_shared";
 
 /** A content-hashed build file (Vite: name-<8+ chars of hash>.ext), safe to cache for a year. */
 export function isHashedAsset(path: string): boolean {
@@ -98,8 +100,8 @@ export function createHandler(deps: HostDeps) {
   const ttl = deps.configTtlMs ?? 60_000;
   const configs = new Map<string, { at: number; cfg: SwaConfig }>();
 
-  async function configFor(site: Site): Promise<SwaConfig> {
-    const key = `${site.code}/${site.app}`;
+  async function configFor(site: Site, base: string): Promise<SwaConfig> {
+    const key = base.replace(/\/$/, "");
     const hit = configs.get(key);
     if (hit && now() - hit.at < ttl) return hit.cfg;
     let cfg = EMPTY_CONFIG;
@@ -111,6 +113,26 @@ export function createHandler(deps: HostDeps) {
     }
     configs.set(key, { at: now(), cfg });
     return cfg;
+  }
+
+  // KS_SHARED_APP_BUILD_v1 - one shared build per app (sites/_shared/<app>/) serves every brokerage that has no build of
+  // its own (sites/<code>/<app>/index.html). Whether a brokerage has its own build is checked once a minute.
+  const own = new Map<string, { at: number; has: boolean }>();
+  async function baseFor(site: Site): Promise<string> {
+    const key = `${site.code}/${site.app}`;
+    const hit = own.get(key);
+    if (hit && now() - hit.at < ttl) return hit.has ? `${key}/` : `${SHARED}/${site.app}/`;
+    let has = false;
+    try {
+      const f = await deps.store.get(`${key}/index.html`, { head: true });
+      has = Boolean(f);
+      f?.body?.destroy();
+    } catch (err) {
+      console.error("[web-host] own build check failed", key, err instanceof Error ? err.message : String(err));
+      has = hit?.has ?? false;
+    }
+    own.set(key, { at: now(), has });
+    return has ? `${key}/` : `${SHARED}/${site.app}/`;
   }
 
   return async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -132,12 +154,20 @@ export function createHandler(deps: HostDeps) {
       if (!site) return page(res, 404, "Not found", "There is no Keystone site at this address.", head);
       if (site.status === "cancelled") return page(res, 410, "Closed", "This Keystone site has closed.", head);
 
+      // KS_SHARED_APP_BUILD_v1 - the brokerage's own addresses for the shared build (read before the app starts).
+      if (url.split("?")[0] === "/ks-config.js") {
+        const body = `window.__KS_CONFIG__=${JSON.stringify({ code: site.code, app: site.app, ...(site.urls ?? {}) }).replace(/</g, "\\u003c")};`;
+        res.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(body) });
+        res.end(head ? undefined : body);
+        return;
+      }
+
       const p = safePath(url);
       if (!p.ok) return page(res, 400, "Bad request", "That address is not valid.", head);
       if (/(^|\/)staticwebapp\.config\.json$/i.test(p.rel)) return page(res, 404, "Not found", "There is no such page.", head);
 
-      const cfg = await configFor(site);
-      const base = `${site.code}/${site.app}/`;
+      const base = await baseFor(site);
+      const cfg = await configFor(site, base);
       const wanted = p.rel === "" || p.rel.endsWith("/") ? `${p.rel}index.html` : p.rel;
       let servedPath = `/${wanted}`;
       let file = await deps.store.get(base + wanted, { head });
