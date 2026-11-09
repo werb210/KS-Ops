@@ -38,6 +38,7 @@ export type LicenseeRow = {
   client_url: string | null;
   portal_url: string | null;
   logo_url: string | null;
+  favicon_url?: string | null; // KS_OPS_SIGNUP_FAVICON_v1
   primary_color: string | null;
   /** KS_OPS_v13_BRAND - accent (secondary) and optional background / surface colours. */
   accent_color?: string | null;

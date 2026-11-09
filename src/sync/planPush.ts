@@ -57,7 +57,7 @@ export function planPushBody(
  * page (KS-server applyOpsBranding): the admin's own edits win. Unset fields go as "" (no choice). Servers that do
  * not know the field ignore it.
  */
-export const BRAND_PUSH_FIELDS = ["primary_color", "accent_color", "background_color", "font_family", "logo_url"] as const;
+export const BRAND_PUSH_FIELDS = ["primary_color", "accent_color", "background_color", "font_family", "logo_url", "favicon_url"] as const; // favicon_url: KS_OPS_SIGNUP_FAVICON_v1
 export function brandingOf(l: Partial<Record<(typeof BRAND_PUSH_FIELDS)[number], string | null>>): Record<(typeof BRAND_PUSH_FIELDS)[number], string> {
   return Object.fromEntries(BRAND_PUSH_FIELDS.map((f) => [f, String(l[f] ?? "").trim()])) as Record<(typeof BRAND_PUSH_FIELDS)[number], string>;
 }
