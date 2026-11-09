@@ -25,7 +25,7 @@ describe("plan push", () => {
     expect(init.method).toBe("PUT");
     expect((init.headers as Record<string, string>)["X-KS-Ops-Key"]).toBe("ksops_abc");
     expect(JSON.parse(String(init.body))).toEqual({ plan: "pro", extra_storage_blocks: 2, status: "active", addons: { bank_connect: false, marketing: false }, beta_features: [],
-      branding: { primary_color: "", accent_color: "", background_color: "", font_family: "", logo_url: "" } });
+      branding: { primary_color: "", accent_color: "", background_color: "", font_family: "", logo_url: "", favicon_url: "" } });
     expect(d.calls.some((c) => /plan_sync_status = 'synced'/.test(c.sql))).toBe(true);
     expect(d.calls.some((c) => /UPDATE plan_changes SET status = 'pushed'/.test(c.sql))).toBe(true);
   });
@@ -36,7 +36,7 @@ describe("plan push", () => {
     await pushPlan({ db: db(row), fetch: f as unknown as typeof fetch, now: () => NOW }, row.id);
     const [, init] = (f.mock.calls[0] as unknown) as [string, RequestInit];
     expect(JSON.parse(String(init.body)).branding).toEqual({
-      primary_color: "#7A1F3D", accent_color: "#0E6655", background_color: "", font_family: "Lato", logo_url: "https://ops.example/api/public/logos/abcdefghijklmnop",
+      primary_color: "#7A1F3D", accent_color: "#0E6655", background_color: "", font_family: "Lato", logo_url: "https://ops.example/api/public/logos/abcdefghijklmnop", favicon_url: "",
     });
   });
 

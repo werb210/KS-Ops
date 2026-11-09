@@ -60,3 +60,44 @@ export async function logoByKey(db: Q, key: string): Promise<{ content_type: str
 }
 
 export const logoPath = (key: string) => `/api/public/logos/${encodeURIComponent(key)}`;
+
+// KS_OPS_SIGNUP_FAVICON_v1 - the sign-up favicon: PNG, SVG or ICO, at most 500 KB, kept like the logo.
+export type FaviconType = "image/png" | "image/svg+xml" | "image/x-icon";
+export type CheckedFavicon = { contentType: FaviconType; data: Buffer; filename: string | null };
+
+export function checkFavicon(input: LogoInput): { ok: true; favicon: CheckedFavicon } | { ok: false; error: string } {
+  const b64 = String(input.data_base64 ?? "").replace(/^data:[^;,]+;base64,/, "").replace(/\s+/g, "");
+  if (!b64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return { ok: false, error: "The favicon file could not be read. Try a PNG, SVG or ICO." };
+  const data = Buffer.from(b64, "base64");
+  if (!data.length) return { ok: false, error: "The favicon file is empty." };
+  if (data.length > MAX_LOGO_BYTES) return { ok: false, error: "The favicon is too large. Use a file under 500 KB." };
+  const isIco = data.length >= 4 && data[0] === 0 && data[1] === 0 && data[2] === 1 && data[3] === 0;
+  const sniffed = isIco ? "image/x-icon" : sniffLogo(data);
+  if (!sniffed || sniffed === "image/jpeg") return { ok: false, error: "Use a PNG, SVG or ICO file for the favicon." };
+  if (sniffed === "image/svg+xml" && SVG_UNSAFE.test(data.toString("utf8"))) {
+    return { ok: false, error: "This SVG contains scripts or links we can't accept. Export it again as a plain SVG or a PNG." };
+  }
+  const filename = input.filename ? String(input.filename).replace(/[^A-Za-z0-9._ ()-]/g, "_").slice(0, 150) : null;
+  return { ok: true, favicon: { contentType: sniffed as FaviconType, data, filename } };
+}
+
+export async function saveFavicon(db: Q, licenseeId: string, favicon: CheckedFavicon): Promise<string> {
+  const key = newSecret(18);
+  const r = await db.query(
+    `INSERT INTO licensee_favicons (licensee_id, favicon_key, content_type, data, filename)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (licensee_id) DO UPDATE SET favicon_key = EXCLUDED.favicon_key, content_type = EXCLUDED.content_type,
+       data = EXCLUDED.data, filename = EXCLUDED.filename, updated_at = now()
+     RETURNING favicon_key`,
+    [licenseeId, key, favicon.contentType, favicon.data, favicon.filename],
+  );
+  return String(r.rows[0]?.favicon_key ?? key);
+}
+
+export async function faviconByKey(db: Q, key: string): Promise<{ content_type: string; data: Buffer } | null> {
+  if (!/^[A-Za-z0-9_-]{16,64}$/.test(key)) return null;
+  const r = await db.query("SELECT content_type, data FROM licensee_favicons WHERE favicon_key = $1", [key]);
+  return (r.rows[0] as { content_type: string; data: Buffer } | undefined) ?? null;
+}
+
+export const faviconPath = (key: string) => `/api/public/favicons/${encodeURIComponent(key)}`;

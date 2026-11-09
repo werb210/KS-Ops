@@ -361,6 +361,15 @@ export const signupSchema = z
       })
       .optional()
       .nullable(),
+    // KS_OPS_SIGNUP_FAVICON_v1 - an uploaded favicon (PNG, SVG or ICO, base64), checked in lib/logo.ts.
+    favicon_file: z
+      .object({
+        content_type: z.string().max(100),
+        data_base64: z.string().max(800_000, "The favicon is too large. Use a file under 500 KB."),
+        filename: z.string().max(200).optional(),
+      })
+      .optional()
+      .nullable(),
     assistant_name: optionalText("Assistant name", 40),
     accept_terms: z.literal(true, { error: "Please accept the terms of service." }),
     accept_privacy: z.literal(true, { error: "Please accept the privacy policy." }),

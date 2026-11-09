@@ -2,6 +2,7 @@
 import { Router, type Request } from "express";
 import { isProduction, opsPublicUrl, salesEmail, signupTurnstileOptional } from "../config.js";
 import { checkLogo, logoByKey, logoPath, saveLogo, type CheckedLogo } from "../lib/logo.js";
+import { checkFavicon, faviconByKey, faviconPath, saveFavicon, type CheckedFavicon } from "../lib/logo.js"; // KS_OPS_SIGNUP_FAVICON_v1
 import type { Deps } from "../deps.js";
 import { BillingNotConfigured } from "../billing/stripeClient.js";
 import { createCheckout } from "../billing/billing.js";
@@ -106,6 +107,13 @@ export function publicRouter(deps: Deps): Router {
         if (!checked.ok) return res.status(400).json({ errors: { logo_file: checked.error } });
         logo = checked.logo;
       }
+      // KS_OPS_SIGNUP_FAVICON_v1
+      let favicon: CheckedFavicon | null = null;
+      if ((input as { favicon_file?: unknown }).favicon_file) {
+        const checked = checkFavicon((input as { favicon_file: { content_type: string; data_base64: string; filename?: string } }).favicon_file);
+        if (!checked.ok) return res.status(400).json({ errors: { favicon_file: checked.error } });
+        favicon = checked.favicon;
+      }
       if (await codeTaken(deps.db, input.company_code)) {
         return res.status(409).json({ errors: { company_code: "taken" } });
       }
@@ -165,6 +173,12 @@ export function publicRouter(deps: Deps): Router {
         await deps.db.query("UPDATE licensees SET logo_url = $2, updated_at = now() WHERE id = $1", [l.id, url]);
         l = { ...l, logo_url: url };
       }
+      if (favicon) { // KS_OPS_SIGNUP_FAVICON_v1
+        const key = await saveFavicon(deps.db, l.id, favicon);
+        const url = `${opsPublicUrl(`${req.protocol}://${req.get("host") ?? ""}`)}${faviconPath(key)}`;
+        await deps.db.query("UPDATE licensees SET favicon_url = $2, updated_at = now() WHERE id = $1", [l.id, url]);
+        l = { ...l, favicon_url: url } as typeof l;
+      }
       await replaceTeam(deps.db, l.id, team.members);
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
@@ -213,6 +227,22 @@ export function publicRouter(deps: Deps): Router {
   );
 
   // KS_OPS_v13_LOGO - an uploaded logo. Public (it is shown in the apps); served as an image only, never as a page.
+  // KS_OPS_SIGNUP_FAVICON_v1
+  router.get(
+    "/favicons/:key",
+    limited(300, 60_000),
+    h(async (req, res) => {
+      const f = await faviconByKey(deps.db, String(req.params.key));
+      if (!f) return res.status(404).json({ error: "not_found" });
+      res.setHeader("Content-Type", f.content_type);
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      return res.send(Buffer.from(f.data));
+    }),
+  );
+
   router.get(
     "/logos/:key",
     limited(300, 60_000),
