@@ -46,7 +46,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
 <body>
 <main>
   <h1>Provisioning</h1>
-  <p class="lead">Automatic setup of each licensee's own Keystone copy after payment or a staff free trial, and teardown after cancellation once the retention rules allow it.</p>
+  <p class="lead">Automatic setup of each brokerage on the shared Keystone server (its own database, registry entry and web apps) after payment or a staff free trial, and its removal after cancellation once the retention rules allow it. Open a run's log to see its database, addresses and custom domains. Brokerages keeping their existing phone numbers: <a href="/ops/porting">Number transfers</a>.</p>
 
   <section id="signin">
     <h2>Sign in</h2>
@@ -60,7 +60,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   <div id="app" class="hidden">
     <section id="setupBox" class="hidden">
       <h2>Waiting for manual setup</h2>
-      <p>Automatic setup is not fully configured. Runs wait here and start by themselves once these are in place (see KS-Ops docs/AUTO_PROVISIONING.md):</p>
+      <p>Automatic setup is not fully configured. Runs wait here and start by themselves once these are in place (see KS-Ops docs/PROVISIONING.md):</p>
       <ul id="setupList" class="check"></ul>
     </section>
 
@@ -92,7 +92,10 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   var $ = function (id) { return document.getElementById(id); };
   var token = "";
   try { token = sessionStorage.getItem(KEY) || ""; } catch (e) { token = ""; }
+  // KS_OPS_PORTAL_HANDOFF_v1 - the BF staff portal opens this page with #token=<staff token>: kept in this tab only, removed from the address bar.
+  try { var hm = /(?:^#|&)token=([^&]+)/.exec(location.hash || ""); if (hm) { token = decodeURIComponent(hm[1]); sessionStorage.setItem(KEY, token); history.replaceState(null, "", location.pathname + location.search); } } catch (e) {}
   var open = {};
+  var drafts = {}; // KS_OPS_ONBOARDING_v1 - unsaved team edits by licensee id (auto refresh waits while there are any)
   function show(el, text, ok) { el.textContent = text; el.className = "msg " + (ok ? "ok" : "bad"); }
   function el(tag, attrs, text) { var e = document.createElement(tag); if (attrs) Object.keys(attrs).forEach(function (k) { e.setAttribute(k, attrs[k]); }); if (text !== undefined) e.textContent = text; return e; }
   function api(method, path, body) {
@@ -121,7 +124,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     tr.appendChild(el("td", null, s.label));
     var st = el("td"); st.appendChild(tag(s.status)); tr.appendChild(st);
     tr.appendChild(el("td", null, String(s.attempts)));
-    tr.appendChild(el("td", null, s.last_error || (s.done_by ? "done by " + s.done_by : "")));
+    tr.appendChild(el("td", null, s.plain || s.last_error || (s.done_by ? "done by " + s.done_by : "")));
     var act = el("td");
     if (run.status !== "done" && run.status !== "cancelled" && s.status !== "done" && s.status !== "manual") {
       var retry = el("button", { type: "button", "class": "quiet" }, "Retry step");
@@ -183,9 +186,80 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     d.appendChild(el("p", { "class": "hint" }, "Nothing to do here: the brokerage's admin connects Microsoft 365 in one click (Settings > Connections), and each person connects Google from My Profile." + (ws.broker ? "" : " This server does not use Keystone's sign-in redirect yet (retry the workspace_apps step).")));
     return d;
   }
+  // KS_SHARED_HOSTING_v1 - the brokerage on the shared server: its database, registry entry and custom domains.
+  function renderShared(sh) {
+    var d = el("div");
+    d.appendChild(el("h3", null, "Shared server"));
+    var ul = el("ul", { "class": "check" });
+    ul.appendChild(el("li", null, sh.database ? "Database " + sh.database.database + ", login role " + sh.database.role + " (only this role can connect)." : "This company code cannot be used on the shared server (2 to 31 lowercase letters, numbers or hyphens)."));
+    var reg = sh.registry.message;
+    if (sh.registry.state === "present") reg += " Server address: " + ((sh.registry.api_hosts || []).join(", ") || "none") + ". Staff portal: " + ((sh.registry.portal_hosts || []).join(", ") || "none") + ". Client app: " + ((sh.registry.client_hosts || []).join(", ") || "none") + ".";
+    ul.appendChild(el("li", null, reg));
+    d.appendChild(ul);
+    var cd = sh.custom_domains;
+    if (cd && (cd.message || cd.commands.length)) {
+      d.appendChild(el("h3", null, "Custom domains"));
+      d.appendChild(el("p", { "class": cd.configured ? "hint" : "msg bad" }, cd.message));
+      if (cd.dns.length) {
+        d.appendChild(el("p", null, "DNS records:"));
+        var dp = el("pre", { "class": "log" }); dp.textContent = cd.dns.join("\\n"); d.appendChild(dp);
+      }
+      if (cd.commands.length) {
+        d.appendChild(el("p", null, "Then run (Azure CLI):"));
+        var cp = el("pre", { "class": "log" }); cp.textContent = cd.commands.join("\\n"); d.appendChild(cp);
+      }
+    }
+    return d;
+  }
   function wsTag(s) {
     var c = s === "connected" ? "done" : s === "not_connected" || s === "not_available" ? "pending" : s === "partial" || s === "unreachable" || s === "needs_reconnect" ? "blocked" : "failed";
     return el("span", { "class": "tag s-" + c }, words(s));
+  }
+  // KS_OPS_ONBOARDING_v1 - the sign-up team (one person per line) and the licence agreement.
+  function teamLine(p) { return [p.full_name, p.email, p.phone, p.role].join(", "); }
+  function renderOnboarding(run, ob) {
+    var box = el("div");
+    box.appendChild(el("h3", null, "Team and licence agreement"));
+    var a = ob.agreement || {};
+    box.appendChild(el("p", null, a.signed
+      ? "Licence agreement signed by " + a.signed.signer_name + " (" + a.signed.signer_title + ") on " + when(a.signed.signed_at) + ", version " + a.signed.version + (a.ip ? ", from " + a.ip : "") + "."
+      : "Licence agreement not signed yet." + (a.link_sent_at ? " Link emailed " + when(a.link_sent_at) + "." : "") + (a.reminder_sent_at ? " Reminder emailed " + when(a.reminder_sent_at) + "." : "")));
+    if (ob.onboarding_email_sent_at) box.appendChild(el("p", { "class": "hint" }, "Owner onboarding email sent " + when(ob.onboarding_email_sent_at) + "."));
+    var t = el("table"); var hr = el("tr");
+    ["Name", "Email", "Mobile", "Role", "On the server", "Invite"].forEach(function (c) { hr.appendChild(el("th", null, c)); });
+    var thead = el("thead"); thead.appendChild(hr); t.appendChild(thead);
+    var tb = el("tbody");
+    (ob.team || []).forEach(function (p) {
+      var tr = el("tr");
+      [p.full_name + (p.is_owner ? " (owner)" : ""), p.email, p.phone, p.role, p.provisioned_at ? when(p.provisioned_at) : "-", p.is_owner ? "sign-in email" : (p.invite_sent_at ? when(p.invite_sent_at) : "-")].forEach(function (v) { tr.appendChild(el("td", null, v)); });
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); var wrap = el("div", { "class": "scroll" }); wrap.appendChild(t); box.appendChild(wrap);
+    box.appendChild(el("p", { "class": "hint" }, (ob.team || []).length + " of " + ob.seats + " seat(s) used."));
+    if (ob.locked) { box.appendChild(el("p", { "class": "hint" }, "The team has been created on the brokerage's server; change people from the brokerage's portal (Settings > Users).")); return box; }
+    var id = run.licensee_id;
+    var others = (ob.team || []).filter(function (p) { return !p.is_owner; });
+    box.appendChild(el("label", { "for": "team-" + id }, "Team (not the owner): one person per line as name, email, mobile, role (Broker, Marketing or Admin)"));
+    var ta = el("textarea", { id: "team-" + id, rows: "4" });
+    ta.value = drafts[id] !== undefined ? drafts[id] : others.map(teamLine).join("\\n");
+    ta.oninput = function () { drafts[id] = ta.value; };
+    box.appendChild(ta);
+    var msg = el("div", { "class": "hidden" });
+    var save = el("button", { type: "button" }, "Save team");
+    save.onclick = function () {
+      var rows = ta.value.split("\\n").map(function (line) { return line.trim(); }).filter(Boolean).map(function (line) {
+        var parts = line.split(",").map(function (x) { return x.trim(); });
+        return { full_name: parts[0] || "", email: parts[1] || "", phone: parts[2] || "", role: parts[3] || "Broker" };
+      });
+      save.disabled = true;
+      api("PUT", "/licensees/" + id + "/team", { team: rows }).then(function () { delete drafts[id]; return load(); })
+        .catch(function (e) { if (e.message !== "unauthorized") show(msg, e.message, false); })
+        .then(function () { save.disabled = false; });
+    };
+    var undo = el("button", { type: "button", "class": "quiet" }, "Discard changes");
+    undo.onclick = function () { delete drafts[id]; load(); };
+    box.appendChild(save); box.appendChild(undo); box.appendChild(msg);
+    return box;
   }
   function renderRun(run, full) {
     var box = el("div", { "class": "run" });
@@ -201,12 +275,14 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
     }
     var wrap = el("div", { "class": "scroll" });
     var t = el("table"); var th = el("tr");
-    ["Step", "Status", "Tries", "Details", ""].forEach(function (c) { th.appendChild(el("th", null, c)); });
+    ["Step", "Status", "Tries", "In plain words", ""].forEach(function (c) { th.appendChild(el("th", null, c)); });
     var thead = el("thead"); thead.appendChild(th); t.appendChild(thead);
     var tb = el("tbody"); run.steps.forEach(function (s) { tb.appendChild(stepRow(run, s)); }); t.appendChild(tb);
     wrap.appendChild(t); box.appendChild(wrap);
     if (run.twilio) box.appendChild(renderTwilio(run));
     if (full && full.workspace) box.appendChild(renderWorkspace(full.workspace));
+    if (full && full.shared) box.appendChild(renderShared(full.shared));
+    if (full && full.onboarding) box.appendChild(renderOnboarding(run, full.onboarding));
     var logBtn = el("button", { type: "button", "class": "quiet" }, open[run.id] ? "Hide log" : "Show log");
     logBtn.onclick = function () { open[run.id] = !open[run.id]; load(); };
     box.appendChild(logBtn);
@@ -233,7 +309,9 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
       var box = $("runs"); box.innerHTML = "";
       if (!r.runs.length) box.appendChild(el("p", null, "No runs yet."));
       return Promise.all(r.runs.map(function (run) {
-        return open[run.id] ? api("GET", "/provisioning/runs/" + run.id).then(function (d) { return [run, Object.assign({}, d.run, { status_page: d.status_page })]; }) : Promise.resolve([run, null]);
+        if (!open[run.id]) return Promise.resolve([run, null]);
+        var ob = run.kind === "provision" ? api("GET", "/licensees/" + run.licensee_id + "/onboarding").catch(function () { return null; }) : Promise.resolve(null);
+        return Promise.all([api("GET", "/provisioning/runs/" + run.id), ob]).then(function (x) { return [run, Object.assign({}, x[0].run, { status_page: x[0].status_page, onboarding: x[1] })]; });
       })).then(function (pairs) { pairs.forEach(function (p) { box.appendChild(renderRun(p[0], p[1])); }); });
     });
   }
@@ -261,7 +339,7 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   $("refresh").onclick = function () { load().catch(function () {}); };
   $("signout").onclick = function () { signOut(""); };
   if (token) load().catch(function () {});
-  setInterval(function () { if (token && !document.hidden) load().catch(function () {}); }, 15000);
+  setInterval(function () { if (token && !document.hidden && !Object.keys(drafts).length) load().catch(function () {}); }, 15000);
 })();
 </script>
 </body>

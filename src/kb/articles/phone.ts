@@ -16,6 +16,9 @@ Keystone sets up your phone account for you. Admins pick the numbers in **Settin
 2. Choose **Get a number**. Keystone suggests an area code from your main line, phone or address; you can change it.
 3. Pick one of the numbers shown. It is bought and set up for calls and texts straight away.
 
+## Keep a number you already have
+You can transfer a number you use today instead. See [Keeping your existing phone number](kb:keep-your-existing-number).
+
 ## Which lines your plan includes
 - **Business line**: every plan.
 - **Toll-free line**: Growth and Pro.
@@ -26,6 +29,56 @@ Keystone sets up your phone account for you. Admins pick the numbers in **Settin
 - **Release number** lets one go after a grace period. Choose **Keep** during the grace period to cancel. Admins are told either way.
 
 > Calls and texts use your pooled minutes and texts. See [Allowances, usage and overage](kb:allowances-usage-and-overage).
+`,
+  },
+  {
+    // KS_OPS_NUMBER_PORTING_v1
+    slug: "keep-your-existing-number",
+    title: "Keeping your existing phone number",
+    category: "Phone",
+    audience: "admins",
+    plans: [],
+    summary: "Transfer (port) a number you already use into Keystone, and forward it so no calls are missed while it moves.",
+    body: `
+Everyone on your team already has a new Keystone number. If you or a broker would rather keep a number you use today, Keystone can transfer it (this is called porting). Local business lines, mobile numbers and toll-free numbers can all be transferred.
+
+## Before you start
+Have your current carrier's latest bill in front of you. You need:
+- **The account number** and, if your account has one, **the PIN or passcode**.
+- **The name on the account** and **the service address** exactly as they appear on the bill. The carrier rejects the transfer if they do not match.
+- **A copy of the bill** (PDF or a photo of the first page).
+
+## Ask for the transfer
+1. Open **Set-up** > **Your phone numbers**, or **Settings** > **Phone lines** > **Keep your existing number**. Only Admins can do this.
+2. For each person, choose **Use the new Keystone number** (nothing more to do) or **Keep my existing number**.
+3. For a number you keep, choose who it belongs to (a person, or the main line), the current carrier, the number type and enter the account details. Upload the bill.
+4. Read and sign the **letter of authorization**. It lets Keystone's phone partner move the number for you. The carrier needs it signed within the last 30 days; if a transfer waits longer, you are asked to sign again.
+
+Your account number and PIN are stored encrypted and only shown masked. Keystone support uses them only to submit the transfer.
+
+## Forward your old number now
+Transfers take up to four weeks. So that no calls are missed, forward the old number to your temporary Keystone number straight away:
+- **Most landlines:** dial \`*72\` followed by the Keystone number. To stop, dial \`*73\`.
+- **Bell, Rogers and Telus mobiles (and most others):** dial \`**21*\` then the Keystone number then \`#\`. To stop, dial \`##21#\`.
+- **Office phone systems (VoIP or PBX):** set forwarding in your phone system's settings, or ask your provider.
+
+Then call your old number from another phone to check it rings in Keystone, and tick **Test it** on the page.
+
+> Texts cannot be forwarded. They keep going to the old phone until the transfer is done.
+
+## What happens next
+- Keystone support submits the transfer to the carrier, usually within one business day. You get an email at every step.
+- **Approve the carrier's text.** Near the end your current carrier may text the number asking you to approve the transfer. Reply to approve it **within 90 minutes**, or the carrier rejects it and the transfer starts over.
+- When the carrier sets the date, you are emailed it. On that day the number moves to Keystone.
+
+## When it is done
+- The number rings in Keystone and becomes that person's own line (or your main line), and calls from the dialler show it as the caller ID.
+- **Turn off the forwarding** on the old phone (\`*73\` or \`##21#\`).
+- The temporary Keystone number keeps working for 7 days, then it is given back.
+- Canadian local and mobile numbers can text straight away. US numbers and toll-free numbers need carrier approval to text first; Keystone submits it for you. See [Business texting registration](kb:texting-registration).
+
+## If the carrier rejects it
+You get an email with the reason. The usual cause is an account number, PIN, name or address that does not match the bill exactly. Reply to the email and Keystone support helps you fix it and send it again; your number keeps working with your current carrier meanwhile.
 `,
   },
   {

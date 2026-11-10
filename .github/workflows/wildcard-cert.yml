@@ -1,0 +1,91 @@
+name: Wildcard certificate
+
+# KS_WILDCARD_DOMAINS_v1 - one Let's Encrypt certificate for *.api.<domain>, *.portal.<domain> and *.app.<domain>,
+# bound on ks-shared-server and ks-shared-web, so every brokerage's three addresses have https with no per-brokerage
+# step. Issued with a DNS challenge in the Azure DNS zone (scripts/wildcard-setup.sh gives the deploy identity DNS Zone
+# Contributor there), renewed when fewer than 30 days remain. Runs weekly; also by hand (Actions > Run workflow).
+#
+# Credentials: secret AZURE_CREDENTIALS in the GitHub environment ks-shared (the ks-shared-deploy service principal,
+# --sdk-auth JSON) - the same one the shared deploys use.
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Issue a new certificate even when the current one is not close to expiring
+        required: false
+        default: "false"
+        type: string
+
+concurrency:
+  group: wildcard-cert
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  certificate:
+    runs-on: ubuntu-24.04
+    environment: ks-shared
+    env:
+      RG: ks-shared
+      DOMAIN: ${{ vars.KS_DOMAIN || 'keystonecrm.online' }}
+      SERVER_APP: ks-shared-server
+      WEB_APP: ks-shared-web
+    steps:
+      - name: Azure sign-in
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Is a new certificate needed?
+        id: need
+        run: |
+          exp=$(az webapp config ssl list -g "$RG" --query "[?contains(join(',', hostNames), '*.api.$DOMAIN')].expirationDate | sort(@) | [-1]" -o tsv)
+          echo "current certificate expires: ${exp:-none}"
+          need=true
+          if [ -n "$exp" ] && [ "${{ inputs.force }}" != "true" ]; then
+            left=$(( ( $(date -d "$exp" +%s) - $(date +%s) ) / 86400 ))
+            echo "days left: $left"
+            [ "$left" -gt 30 ] && need=false
+          fi
+          echo "need=$need" >> "$GITHUB_OUTPUT"
+
+      - name: Issue the certificate (Let's Encrypt, DNS challenge in Azure DNS)
+        if: steps.need.outputs.need == 'true'
+        env:
+          CREDS: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          export AZUREDNS_SUBSCRIPTIONID=$(jq -r .subscriptionId <<<"$CREDS")
+          export AZUREDNS_TENANTID=$(jq -r .tenantId <<<"$CREDS")
+          export AZUREDNS_APPID=$(jq -r .clientId <<<"$CREDS")
+          export AZUREDNS_CLIENTSECRET=$(jq -r .clientSecret <<<"$CREDS")
+          echo "::add-mask::$AZUREDNS_CLIENTSECRET"
+          git clone --depth 1 https://github.com/acmesh-official/acme.sh.git /tmp/acme
+          cd /tmp/acme && ./acme.sh --install --home "$HOME/.acme" --accountemail "support@$DOMAIN" --nocron >/dev/null
+          "$HOME/.acme/acme.sh" --home "$HOME/.acme" --server letsencrypt --issue --dns dns_azure \
+            -d "*.api.$DOMAIN" -d "*.portal.$DOMAIN" -d "*.app.$DOMAIN" --keylength 2048
+          dir="$HOME/.acme/*.api.${DOMAIN}"
+          PW=$(openssl rand -hex 24); echo "::add-mask::$PW"
+          # App Service accepts the classic PKCS#12 encryption (3DES / SHA-1 MAC).
+          openssl pkcs12 -export -out /tmp/wildcard.pfx -inkey $dir/*.api.${DOMAIN}.key -in $dir/fullchain.cer \
+            -passout "pass:$PW" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+          echo "PFX_PASSWORD=$PW" >> "$GITHUB_ENV"
+
+      - name: Upload and bind on the shared apps
+        if: steps.need.outputs.need == 'true'
+        run: |
+          thumb=$(az webapp config ssl upload -g "$RG" -n "$SERVER_APP" --certificate-file /tmp/wildcard.pfx --certificate-password "$PFX_PASSWORD" --query thumbprint -o tsv)
+          rm -f /tmp/wildcard.pfx
+          echo "uploaded certificate $thumb"
+          az webapp config ssl bind -g "$RG" -n "$SERVER_APP" --ssl-type SNI --certificate-thumbprint "$thumb" --hostname "*.api.$DOMAIN" -o none
+          az webapp config ssl bind -g "$RG" -n "$WEB_APP" --ssl-type SNI --certificate-thumbprint "$thumb" --hostname "*.portal.$DOMAIN" -o none
+          az webapp config ssl bind -g "$RG" -n "$WEB_APP" --ssl-type SNI --certificate-thumbprint "$thumb" --hostname "*.app.$DOMAIN" -o none
+          echo "### Wildcard certificate bound" >> "$GITHUB_STEP_SUMMARY"
+          echo "*.api / *.portal / *.app.$DOMAIN - thumbprint $thumb" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Nothing to do
+        if: steps.need.outputs.need != 'true'
+        run: echo "The current certificate has more than 30 days left." >> "$GITHUB_STEP_SUMMARY"

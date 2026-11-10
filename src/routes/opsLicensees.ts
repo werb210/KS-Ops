@@ -19,6 +19,11 @@ import { addonsOf, BRAND_PUSH_FIELDS, isServiceStatus, pushPlan, recordPlanChang
 import { crmLicenseeCreated, crmLicenseeStatus, crmLicenseeUpdated } from "../crm/triggers.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 import { biConfig, linkPgi, queuePgiBackfill } from "../sync/pgiLink.js";
+import { ensureQaLogin } from "../tenants/qaLogin.js"; // KS_OPS_QA_LOGIN_v1
+import { defaultShared } from "../tenants/shared.js";
+import { tenantKeySetting } from "../tenants/config.js";
+import { tenantKey } from "../tenants/crypto.js";
+import { reloadTenants } from "../tenants/sharedServer.js";
 
 export const OPS_KEY_MESSAGE =
   "Copy this key now - it will not be shown again. Set it as KS_OPS_KEY in the licensee's server settings.";
@@ -27,7 +32,7 @@ const PATCH_COLUMNS = [
   "company_name", "legal_name", "company_code", "contact_name", "contact_email", "contact_phone", "country",
   "province_state", "mailing_address", "website", "status", "plan", "billing_interval", "support_level", "seats",
   "extra_storage_blocks", "server_url", "client_url", "portal_url", "logo_url", "primary_color", "assistant_name",
-  "onboarding_fee_paid", "payment_method",
+  "onboarding_fee_paid", "payment_method", "test_brokerage",
   "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
   "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
 ] as const;
@@ -42,6 +47,7 @@ function pricingView(l: LicenseeRow) {
     seats: dollars(c.seats_cents),
     support: dollars(c.support_cents),
     storage: dollars(c.storage_cents),
+    marketing_addon: dollars(c.marketing_addon_cents), // KS_OPS_MARKETING_ADDON
     mrr: dollars(c.recurring_cents),
     onboarding_fee: dollars(onboardingFeeCents(l.plan)),
   };
@@ -93,7 +99,11 @@ export function opsLicenseesRouter(deps: Deps): Router {
             seats: v.seats,
             extra_storage_blocks: v.extra_storage_blocks,
             status: v.status,
-            mrr: v.mrr,
+            test_brokerage: Boolean((v as any).test_brokerage), // KS_OPS_TEST_BROKERAGE_v1
+            // A cancelled licensee earns nothing; its plan price stays as plan_mrr. The list showed $357 MRR for a
+            // cancelled licensee.
+            mrr: v.status === "cancelled" ? 0 : v.mrr,
+            plan_mrr: v.mrr,
             trial: row.last_report_trial ?? null,
             plan_sync_status: v.plan_sync_status,
             server_url: v.server_url,
@@ -273,7 +283,8 @@ export function opsLicenseesRouter(deps: Deps): Router {
         planPush = await pushPlan(deps, l.id, actor);
       }
       let billingSync: string | null = null;
-      if (["plan", "billing_interval", "seats", "support_level", "extra_storage_blocks"].some((c) => changed.includes(c as any))) {
+      // KS_OPS_MARKETING_ADDON - switching the Marketing add-on on or off adds or removes its line on the subscription.
+      if (["plan", "billing_interval", "seats", "support_level", "extra_storage_blocks"].some((c) => changed.includes(c as any)) || addonsChanged.includes("marketing")) {
         try {
           billingSync = await syncSubscription(deps, next);
         } catch (err) {
@@ -430,5 +441,25 @@ export function opsLicenseesRouter(deps: Deps): Router {
     }),
   );
 
-  return router;
+    // KS_OPS_QA_LOGIN_v1 - the QA sign-in code of a TEST brokerage (never a real one), for the end-to-end test: sign in
+  // to its portal or client app with any NXX-555-0100..0199 number (the owner's is contact_phone) and this code.
+  router.post(
+    "/licensees/:id/qa-login",
+    h(async (req, res) => {
+      const l = await load(String(req.params.id));
+      if (!l) return res.status(404).json(notFound);
+      if (!(l as { test_brokerage?: boolean }).test_brokerage) {
+        return res.status(409).json({ error: "not_a_test_brokerage", message: "QA sign-in is only for licensees marked as a test brokerage." });
+      }
+      const key = tenantKey(tenantKeySetting());
+      if (!key) return res.status(503).json({ error: "not_configured", message: "KS_TENANT_KEY is not set on KS-Ops." });
+      const code = await ensureQaLogin(defaultShared().control(), key, l.company_code);
+      const reload = await reloadTenants(deps.fetch);
+      await audit(deps.db, actorOf(req), "licensee.qa_login", l.id, { reloaded: reload.ok });
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ code, owner_phone: l.contact_phone, phones: "any NXX-555-0100 to 0199", server_reloaded: reload.ok, portal_url: l.portal_url, client_url: l.client_url, server_url: l.server_url });
+    }),
+  );
+
+return router;
 }

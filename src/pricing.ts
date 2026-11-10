@@ -81,7 +81,72 @@ export const SUPPORT: Record<SupportLevel, SupportDef> = {
 };
 
 export const STORAGE_BLOCK = { gb: 50, price_cents: 1000 };
-export const OVERAGE_CENTS = { minute: 4, text: 3 };
+// KS_OPS_MARKETING_ADDON - signings over the 4 included are $2.50 each; with the Marketing add-on, campaign emails over
+// the allowance are $10 for each 10,000 (or part). Both go on the next month's bill.
+export const OVERAGE_CENTS = { minute: 4, text: 3, signing: 250, campaign_email_block: 1000, id_check: 400 };
+// KS_OPS_KYC - ID and selfie verification (Entrust IDV): each completed vendor check is counted by the licensee's server
+// (usage report id_checks). Some are included each month per brokerage (not per seat); each one over is $4.00 on the
+// next bill. Never blocked. Mirrors KS-server src/plans/idChecks.ts. Starter has no ID verification (growth and up).
+export const ID_CHECKS = { included: { starter: 0, growth: 10, pro: 30 } as Record<"starter" | "growth" | "pro", number>, trial_included: 5, overage_cents: 400 };
+
+/** ID checks over the month's included number. During a trial at least the trial's few are included. */
+export function idCheckOverage(plan: "starter" | "growth" | "pro", trial: boolean, used: number): { id_checks: number; included: number } {
+  const included = trial ? Math.max(ID_CHECKS.trial_included, ID_CHECKS.included[plan]) : ID_CHECKS.included[plan];
+  return { id_checks: Math.max(0, Math.floor(Number(used) || 0) - included), included };
+}
+
+// KS_OPS_MARKETING_ADDON (Todd, Oct 26) - mirrors KS-server src/plans/marketing.ts. Every plan markets to its own
+// client list at these limits; the Marketing add-on ($49 a month, flat, one per brokerage, any plan; Pro does not
+// include it) raises them and adds the advanced tools. Both trials include the add-on.
+export type MarketingLimits = {
+  campaign_emails: number;
+  text_to_many: number;
+  /** null = unlimited */
+  sequences: number | null;
+  /** null = full history */
+  visitor_history_days: number | null;
+  /** null = unlimited */
+  lead_forms: number | null;
+};
+export const MARKETING_LIMITS: Record<Plan, MarketingLimits> = {
+  starter: { campaign_emails: 500, text_to_many: 50, sequences: 2, visitor_history_days: 30, lead_forms: 1 },
+  growth: { campaign_emails: 1000, text_to_many: 250, sequences: 5, visitor_history_days: 90, lead_forms: 1 },
+  pro: { campaign_emails: 2500, text_to_many: 500, sequences: 10, visitor_history_days: 365, lead_forms: 1 },
+};
+export const MARKETING_ADDON = {
+  key: "marketing",
+  name: "Marketing add-on",
+  price_cents: 4900,
+  extra_campaign_emails: 10_000,
+  campaign_email_block: 10_000,
+  bonus_marketing_texts: 1000,
+  text_to_many: 1000,
+  sequences: null,
+  visitor_history_days: null,
+  lead_forms: null,
+  marketing_seats: 3,
+  adds: [
+    "10,000 campaign emails a month on top of your plan's, then $10 per 10,000 on next month's bill",
+    "1,000 bonus marketing texts a month",
+    "Send one text to up to 1,000 people at a time",
+    "Unlimited sequences running at once",
+    "Unlimited website lead forms, plus an AI chat widget and tracking script for your own website",
+    "Full visitor history and session replay",
+    "Full Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions",
+    "Landing pages with a lead form, built in the portal",
+    "Lead scoring",
+    "Subject-line A/B test and send-time choice",
+    "Campaign report with applications and funded deals by campaign",
+  ],
+} as const;
+/** E-signing: 4 signings a month in every subscription, whatever the plan or seats. A signing is one signature request
+ *  sent to one signer. Never blocked; each one over is $2.50. */
+export const SIGNINGS = { included: 4, overage_cents: 250 };
+
+/** Has this licensee bought the Marketing add-on (switched on at sign-up or by Keystone staff)? */
+export function hasMarketingAddon(l: { addons?: Record<string, boolean> | null } | null | undefined): boolean {
+  return l?.addons?.marketing === true;
+}
 // KS_OPS_v14_TRIAL_RULES - the in-app Pro trial is offered on Starter AND Growth (Todd, Oct 24; was Starter only).
 // allowance_from: the trial's call and text allowance is still Starter's plus the bonus (unchanged), and never less
 // than the brokerage's own plan gives.
@@ -96,12 +161,16 @@ export const TRIAL = {
 
 /** Features per plan; each plan includes the ones before it. Mirrors KS-server src/plans/catalogue.ts. */
 export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }> = [
+  // KS_OPS_MARKETING_ADDON - the same keys, labels, plan levels and order as KS-server src/plans/catalogue.ts (the
+  // website's drift test compares all three). Marketing on every plan; visitor tracking on every plan (history by plan);
+  // session replay Growth and up; the full Google Ads tools Pro. Fraud: starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
   { key: "contacts", label: "Contacts", plan: "starter" },
   { key: "pipeline", label: "Pipeline", plan: "starter" },
   { key: "client_portal", label: "Branded client portal and application wizard", plan: "starter" },
   { key: "iphone_dialler", label: "iPhone dialler", plan: "starter" },
   // KS_OPS_PLAN_FIXES (Todd, Oct 26) - the iPad staff portal app on every plan; the Apple Watch app growth and up.
   { key: "ipad_app", label: "iPad staff portal app", plan: "starter" },
+  { key: "android_staff_app", label: "Android staff app (portal and phone)", plan: "starter" }, // KS_ANDROID_STAFF_v1 - same as KS-server and KS-Website
   // Inbox sync reads Outlook (Microsoft 365) only for now; Gmail sends only.
   { key: "office_sync", label: "Email sync: Outlook (Microsoft 365) inbox sync; Gmail sends only for now", plan: "starter" },
   { key: "ai_assistant", label: "AI assistant", plan: "starter" },
@@ -113,6 +182,12 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // Custom fields on contacts, companies and applications, every plan (KS-server v20).
   { key: "custom_fields", label: "Custom fields", plan: "starter" },
   { key: "call_recording", label: "Call recording on every plan (playback on Growth and Pro)", plan: "starter" },
+  { key: "marketing", label: "Marketing to your own client list: email and text campaigns, sequences, templates and a website lead form", plan: "starter" },
+  { key: "ads_results", label: "Google Ads and LinkedIn Ads results, Google Analytics connection", plan: "starter" },
+  // KS_BROKER_TOOLS - broker deal tools 1-3, every plan.
+  { key: "funding_conditions", label: "Funding conditions checklist", plan: "starter" },
+  { key: "sales_tax", label: "Canadian sales tax in quotes and calculators", plan: "starter" },
+  { key: "invoice_reading", label: "Vendor invoice reading (vendor, line items, taxes, serial numbers and VINs)", plan: "starter" },
   { key: "call_recording_playback", label: "Call recording playback", plan: "growth" },
   // Teams and record visibility (all / team / own), growth and up (KS-server v20).
   { key: "teams", label: "Teams and record visibility", plan: "growth" },
@@ -125,16 +200,38 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   { key: "referrer_portal", label: "Referrer portal", plan: "growth" },
   { key: "broker_portal", label: "Broker portal", plan: "growth" },
   { key: "full_reports", label: "Reports", plan: "growth" },
-  { key: "visitor_tracking", label: "Website visitor tracking", plan: "growth" },
+  { key: "visitor_tracking", label: "Website visitor tracking (30 days on Starter, 90 days on Growth, 12 months on Pro)", plan: "starter" },
+  { key: "session_replay", label: "Session replay of website visits", plan: "growth" },
   { key: "toll_free_number", label: "Toll-free number", plan: "growth" },
   // The post-funding survey and review request, growth and up (KS-server settings pack).
   { key: "nps_survey", label: "Post-funding survey and review requests", plan: "growth" },
+  { key: "payment_links", label: "Payment links and bank debit for fees (your own Stripe account)", plan: "growth" },
+  { key: "call_scripts", label: "Call scripts (playbooks)", plan: "growth" },
+  { key: "custom_pipelines", label: "Extra pipelines with custom stages (Growth 3, Pro unlimited)", plan: "growth" },
+  // KS_OPS_KYC - ID and selfie verification of applicants and guarantors, growth and up (some checks included; see ID_CHECKS).
+  { key: "id_verification", label: "ID and selfie verification of applicants and guarantors (some checks included each month)", plan: "growth" },
+  // KS_OPS_QUOTES_FORECAST - quotes for the client and the revenue forecast, growth and up (mirrors KS-server).
+  { key: "quotes", label: "Quotes: compare lender offers for the client, branded PDF and acceptance in the client app", plan: "growth" },
+  { key: "forecasting", label: "Revenue forecast: weighted pipeline, commit and best case per rep and team, against goals", plan: "growth" },
+  // KS_ACTIVE_CONTRACTS - funded facilities as contracts, renewal engine, commission tracking (KS-server).
+  { key: "active_contracts", label: "Active contracts: renewals, re-engagement queues and commission tracking", plan: "growth" },
+  // Lender API connections: send the lender package by API, sync status, offers and conditions back (KS-server lender API).
+  { key: "lender_api", label: "Lender API connections (submit by API, sync status, offers and conditions)", plan: "growth" },
+  { key: "credit_lines", label: "Approved credit lines per client: limit, used, available and expiry reminders", plan: "growth" },
+  { key: "rate_cards", label: "Rate cards and deal structuring: payment options across lenders side by side, with sales tax", plan: "growth" },
+  { key: "credit_scorecards", label: "Credit scorecards and pre-decision rules: grade, rule hits and lender ranking on each application", plan: "growth" },
+  { key: "contract_templates", label: "Contracts from Word templates: merge fields, Word and PDF, sent for e-signature", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
-  { key: "ad_attribution", label: "Ad attribution", plan: "pro" },
+  { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
   { key: "sso", label: "Single sign-on", plan: "pro" },
   // Outgoing webhooks and Zapier Catch Hook triggers, pro (KS-server v20).
   { key: "webhooks", label: "Webhooks and Zapier", plan: "pro" },
+  { key: "call_queues", label: "Call queues", plan: "pro" },
+  { key: "vendor_portal", label: "Vendor and dealer portal: point-of-sale quotes, apply links, deal status, invoice upload and vendor fees", plan: "pro" },
+  // Custom roles from a permission matrix (view/create/edit/delete/export per area, own/team/all records), pro (KS-server custom roles).
+  { key: "custom_roles", label: "Custom roles and permissions", plan: "pro" },
+  // KS_BROKER_TOOLS - Vendor and dealer portal, pro.
   // Fraud protection (matches KS-server src/plans/catalogue.ts): starter 1, 2, 4, 5; growth adds 6, 7, 8; pro all 15.
   // No bank connect / Flinks in Keystone: bank_connect and fraud_3 are gone; the other keys keep their numbers.
   { key: "fraud_1", label: "Document tamper scan", plan: "starter" },
@@ -183,8 +280,14 @@ export type ChargeInput = {
   seats: number;
   support_level: SupportLevel;
   extra_storage_blocks?: number;
+  /** KS_OPS_MARKETING_ADDON - { marketing: true } = the Marketing add-on is on the subscription. */
+  addons?: Record<string, boolean> | null;
   overage_minutes?: number;
   overage_texts?: number;
+  overage_signings?: number;
+  overage_campaign_email_blocks?: number;
+  /** KS_OPS_KYC - ID checks over the month's included number. */
+  overage_id_checks?: number;
 };
 
 export type ChargeBreakdown = {
@@ -194,24 +297,34 @@ export type ChargeBreakdown = {
   support_cents: number;
   support_extra_seats: number;
   storage_cents: number;
+  /** KS_OPS_MARKETING_ADDON - the Marketing add-on, flat per brokerage (0 when not bought). */
+  marketing_addon_cents: number;
   overage_minutes_cents: number;
   overage_texts_cents: number;
+  overage_signings_cents: number;
+  overage_campaign_emails_cents: number;
+  /** KS_OPS_KYC */
+  overage_id_checks_cents: number;
   overage_cents: number;
-  /** Recurring part only (seats + support + storage): the licensee's MRR. */
+  /** Recurring part only (seats + support + storage + Marketing add-on): the licensee's MRR. */
   recurring_cents: number;
   total_cents: number;
 };
 
-/** One month's charge: seats x seat price + support (+ extra seats) + extra storage x $10 + overage. */
+/** One month's charge: seats x seat price + support (+ extra seats) + extra storage x $10 + the Marketing add-on + overage. */
 export function monthlyCharge(i: ChargeInput): ChargeBreakdown {
   const seats = billableSeats(i.plan, i.seats);
   const seatPrice = SEAT_PRICE_CENTS[i.plan][i.billing_interval];
   const seatsCents = seats * seatPrice;
   const support = supportCents(i.support_level, seats);
   const storage = whole(i.extra_storage_blocks) * STORAGE_BLOCK.price_cents;
+  const marketing = hasMarketingAddon(i) ? MARKETING_ADDON.price_cents : 0;
   const om = whole(i.overage_minutes) * OVERAGE_CENTS.minute;
   const ot = whole(i.overage_texts) * OVERAGE_CENTS.text;
-  const recurring = seatsCents + support + storage;
+  const os = whole(i.overage_signings) * OVERAGE_CENTS.signing;
+  const oe = whole(i.overage_campaign_email_blocks) * OVERAGE_CENTS.campaign_email_block;
+  const oi = whole(i.overage_id_checks) * OVERAGE_CENTS.id_check; // KS_OPS_KYC
+  const recurring = seatsCents + support + storage + marketing;
   return {
     billable_seats: seats,
     seat_price_cents: seatPrice,
@@ -219,11 +332,15 @@ export function monthlyCharge(i: ChargeInput): ChargeBreakdown {
     support_cents: support,
     support_extra_seats: supportExtraSeats(i.support_level, seats),
     storage_cents: storage,
+    marketing_addon_cents: marketing,
     overage_minutes_cents: om,
     overage_texts_cents: ot,
-    overage_cents: om + ot,
+    overage_signings_cents: os,
+    overage_campaign_emails_cents: oe,
+    overage_id_checks_cents: oi,
+    overage_cents: om + ot + os + oe + oi,
     recurring_cents: recurring,
-    total_cents: recurring + om + ot,
+    total_cents: recurring + om + ot + os + oe + oi,
   };
 }
 
@@ -256,7 +373,9 @@ export function publicPlans() {
       onboarding_fee: dollars(ONBOARDING_FEE_CENTS[key]),
       min_seats: MIN_SEATS[key],
       max_seats: MAX_SEATS,
-      allowances: { ...ALLOWANCES[key] },
+      // KS_OPS_MARKETING_ADDON - campaign emails and signings are per brokerage, not per seat.
+      allowances: { ...ALLOWANCES[key], campaign_emails: MARKETING_LIMITS[key].campaign_emails, signings: SIGNINGS.included },
+      marketing: { ...MARKETING_LIMITS[key] },
       features: featuresFor(key),
     })),
     support_levels: SUPPORT_LEVELS.map((key) => {
@@ -273,7 +392,33 @@ export function publicPlans() {
       };
     }),
     extra_storage: { block_gb: STORAGE_BLOCK.gb, price: dollars(STORAGE_BLOCK.price_cents), max_blocks: MAX_STORAGE_BLOCKS },
-    overage: { minute: dollars(OVERAGE_CENTS.minute), text: dollars(OVERAGE_CENTS.text) },
+    overage: {
+      minute: dollars(OVERAGE_CENTS.minute),
+      text: dollars(OVERAGE_CENTS.text),
+      signing: dollars(OVERAGE_CENTS.signing),
+      campaign_email_block: dollars(OVERAGE_CENTS.campaign_email_block),
+      campaign_email_block_size: MARKETING_ADDON.campaign_email_block,
+      id_check: dollars(OVERAGE_CENTS.id_check), // KS_OPS_KYC
+    },
+    // KS_OPS_KYC - ID checks included each month per brokerage, by plan, and during the trial.
+    id_checks: { included: { ...ID_CHECKS.included }, trial_included: ID_CHECKS.trial_included, price: dollars(ID_CHECKS.overage_cents) },
+    // KS_OPS_MARKETING_ADDON - sold at sign-up; Keystone staff can switch it on or off.
+    marketing_addon: {
+      key: MARKETING_ADDON.key,
+      name: MARKETING_ADDON.name,
+      price: dollars(MARKETING_ADDON.price_cents),
+      per: "brokerage",
+      extra_campaign_emails: MARKETING_ADDON.extra_campaign_emails,
+      bonus_marketing_texts: MARKETING_ADDON.bonus_marketing_texts,
+      text_to_many: MARKETING_ADDON.text_to_many,
+      sequences: MARKETING_ADDON.sequences,
+      visitor_history_days: MARKETING_ADDON.visitor_history_days,
+      lead_forms: MARKETING_ADDON.lead_forms,
+      marketing_seats: MARKETING_ADDON.marketing_seats,
+      included_in_trials: true,
+      adds: [...MARKETING_ADDON.adds],
+    },
+    signings: { included: SIGNINGS.included, price: dollars(SIGNINGS.overage_cents), per: "brokerage" },
     trial: { ...TRIAL, for: [...TRIAL.for] },
     currency: CURRENCY,
   };
@@ -299,6 +444,7 @@ const perInterval = (monthlyCents: number, b: BillingInterval) => (b === "annual
 export function priceKey(kind: "seat", plan: Plan, b: BillingInterval): string;
 export function priceKey(kind: "support" | "support_extra_seat", level: SupportLevel, b: BillingInterval): string;
 export function priceKey(kind: "storage_block", b: BillingInterval): string;
+export function priceKey(kind: "marketing_addon", b: BillingInterval): string;
 export function priceKey(kind: "onboarding", plan: Plan): string;
 export function priceKey(kind: string, a: string, b?: string): string {
   return [kind, a, b].filter(Boolean).join(":");
@@ -340,6 +486,15 @@ export function stripePriceSpecs(): PriceSpec[] {
         });
       }
     }
+    // KS_OPS_MARKETING_ADDON - $49 a month flat (annual: 12 x, like every recurring price).
+    specs.push({
+      key: priceKey("marketing_addon", b),
+      product_key: "marketing_addon",
+      product_name: "Keystone Marketing add-on",
+      nickname: `Marketing add-on (${b})`,
+      unit_amount: perInterval(MARKETING_ADDON.price_cents, b),
+      recurring: intervalOf(b),
+    });
     specs.push({
       key: priceKey("storage_block", b),
       product_key: "storage_block",
@@ -367,7 +522,7 @@ export function stripePriceSpecs(): PriceSpec[] {
 export type LineItem = { price_key: string; quantity: number };
 
 /** The subscription items for a licensee (no onboarding fee, no overage). */
-export function subscriptionItems(i: Omit<ChargeInput, "overage_minutes" | "overage_texts">): LineItem[] {
+export function subscriptionItems(i: Omit<ChargeInput, "overage_minutes" | "overage_texts" | "overage_signings" | "overage_campaign_email_blocks">): LineItem[] {
   const seats = billableSeats(i.plan, i.seats);
   const items: LineItem[] = [{ price_key: priceKey("seat", i.plan, i.billing_interval), quantity: seats }];
   if (SUPPORT[i.support_level].price_cents > 0) {
@@ -377,6 +532,7 @@ export function subscriptionItems(i: Omit<ChargeInput, "overage_minutes" | "over
   if (extra > 0) items.push({ price_key: priceKey("support_extra_seat", i.support_level, i.billing_interval), quantity: extra });
   const blocks = whole(i.extra_storage_blocks);
   if (blocks > 0) items.push({ price_key: priceKey("storage_block", i.billing_interval), quantity: blocks });
+  if (hasMarketingAddon(i)) items.push({ price_key: priceKey("marketing_addon", i.billing_interval), quantity: 1 }); // KS_OPS_MARKETING_ADDON
   return items;
 }
 
@@ -417,15 +573,50 @@ export function billingAllowance(plan: Plan, seats: number, trial: boolean): { m
   return { minutes, texts };
 }
 
-/** Overage worked out by KS-Ops from its own plan and seats; the overage a licensee's server reports is not used. */
+export type UsageForBilling = {
+  minutes: number;
+  texts: number;
+  /** KS_OPS_MARKETING_ADDON - from the licensee's usage report (0 when an older server does not send them). */
+  campaign_emails?: number;
+  marketing_texts?: number;
+  signings?: number;
+  /** KS_OPS_KYC - completed ID checks (0 when an older server does not send them). */
+  id_checks?: number;
+};
+
+export type OverageResult = {
+  minutes: number;
+  texts: number;
+  signings: number;
+  /** KS_OPS_KYC */
+  id_checks: number;
+  campaign_emails: number;
+  campaign_email_blocks: number;
+  allowance: { minutes: number; texts: number; signings: number; campaign_emails: number; bonus_marketing_texts: number; id_checks: number };
+};
+
+/**
+ * Overage worked out by KS-Ops from its own plan, seats and add-ons; the overage a licensee's server reports is not
+ * used. KS_OPS_MARKETING_ADDON: signings over 4 are always billed; campaign emails over the allowance only with the
+ * Marketing add-on (bought, or a trial), in 10,000 blocks; with the add-on up to 1,000 marketing texts do not count
+ * against the texts allowance.
+ */
 export function computeOverage(
-  i: { plan: Plan; seats: number; trial: boolean },
-  used: { minutes: number; texts: number },
-): { minutes: number; texts: number; allowance: { minutes: number; texts: number } } {
+  i: { plan: Plan; seats: number; trial: boolean; marketing_addon?: boolean },
+  used: UsageForBilling,
+): OverageResult {
   const allowance = billingAllowance(i.plan, i.seats, i.trial);
+  const addon = i.marketing_addon === true || i.trial;
+  const campaignAllowance = MARKETING_LIMITS[i.trial ? TRIAL.plan : i.plan].campaign_emails + (addon ? MARKETING_ADDON.extra_campaign_emails : 0);
+  const bonus = addon ? Math.min(whole(used.marketing_texts), MARKETING_ADDON.bonus_marketing_texts) : 0;
+  const overEmails = addon ? Math.max(0, whole(used.campaign_emails) - campaignAllowance) : 0;
   return {
     minutes: Math.max(0, whole(used.minutes) - allowance.minutes),
-    texts: Math.max(0, whole(used.texts) - allowance.texts),
-    allowance,
+    texts: Math.max(0, whole(used.texts) - allowance.texts - bonus),
+    signings: Math.max(0, whole(used.signings) - SIGNINGS.included),
+    id_checks: idCheckOverage(i.plan, i.trial, whole(used.id_checks)).id_checks, // KS_OPS_KYC
+    campaign_emails: overEmails,
+    campaign_email_blocks: overEmails > 0 ? Math.ceil(overEmails / MARKETING_ADDON.campaign_email_block) : 0,
+    allowance: { ...allowance, signings: SIGNINGS.included, campaign_emails: campaignAllowance, bonus_marketing_texts: addon ? MARKETING_ADDON.bonus_marketing_texts : 0, id_checks: idCheckOverage(i.plan, i.trial, 0).included },
   };
 }

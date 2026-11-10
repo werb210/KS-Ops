@@ -13,8 +13,8 @@ Keystone is your brokerage's own CRM and loan-origination system: a staff portal
 
 ## The first week, in order
 1. **Brand it.** Add your logo, colours and font. See [Brand your portal and client app](kb:brand-your-portal).
-2. **Add your team.** Each person signs in with a code sent to their mobile. See [Add users and choose their roles](kb:add-users-and-roles).
-3. **Get your phone number.** Pick a local business number in a few clicks. See [Get your phone numbers](kb:get-phone-numbers).
+2. **Check your team.** The people you listed at sign-up are invited for you; each signs in with a code sent to their mobile. Add more any time. See [Add users and choose their roles](kb:add-users-and-roles).
+3. **Get your phone number.** Pick a local business number in a few clicks, or keep a number you already have: forward it to your new Keystone number while it transfers so no calls are missed. See [Get your phone numbers](kb:get-phone-numbers) and [Keeping your existing phone number](kb:keep-your-existing-number).
 4. **Connect email and calendar.** Each person connects Microsoft 365 or Google. See [Connect your email and calendar](kb:connect-email-and-calendar).
 5. **Add your lenders.** Your own lenders and their products drive matching. See [Add lenders and their products](kb:add-lenders-and-products).
 6. **Bring your data over.** Import from HubSpot, Salesforce, Pipedrive or a spreadsheet. See [Import your data](kb:import-from-hubspot-salesforce-pipedrive).
@@ -29,16 +29,26 @@ Keystone is your brokerage's own CRM and loan-origination system: a staff portal
     category: "Getting started",
     audience: "public",
     plans: [],
-    summary: "From payment to your first sign-in: how your own Keystone copy is set up.",
+    summary: "From payment to your first sign-in: your team, the licence agreement, invites and your onboarding session.",
     body: `
-When you sign up on the Keystone website, you choose a company code, a plan, the number of seats, a support level and how to pay (Canadian pre-authorized debit or card).
+When you sign up on the Keystone website, you choose a company code, a plan, the number of seats, the Marketing add-on if you want it, a support level and how to pay (Canadian pre-authorized debit or card).
+
+## Your team
+Right after choosing your seats, you list the people who will use Keystone: each person's full name, email, mobile and role (**Broker**, **Marketing** or **Admin**). You are the first person on the list and an Admin. Everyone, you included, takes one seat, so you can list as many people as you bought seats.
+
+Give a Canadian or US **mobile** for each person: they sign in with a code texted to it. Until your team is invited you can still change the list from the link in your welcome email.
+
+## The licence agreement
+Before you pay, you read the **Keystone Software Licence Agreement** for your plan, seats, add-ons and support level, type your full name and title, and tick **I agree**. A signed copy is emailed to you. If you skip it, we email you the link after payment (and once more a day later); your team is invited as soon as it is signed.
 
 ## What happens next
 1. **You pay the first invoice** through a secure Stripe page. Growth and Pro include a one-time onboarding fee; Starter has none.
-2. **Your copy is built.** Each brokerage gets its own server and database in Microsoft Azure, Canada Central. Your branding from sign-up is applied.
-3. **You get a welcome email** with your portal address and how to sign in. Your first admin account is the contact you gave at sign-up.
-4. **Your phone account is opened.** Keystone sets up your phone and texting account and starts the carrier registration for business texting. Texting can take a few business days to be approved.
-5. **You sign in** with a code sent to your mobile and follow [Welcome to Keystone: your first week](kb:welcome-to-keystone).
+2. **Your workspace is set up.** Each brokerage gets its own private database on Keystone's servers in Microsoft Azure, Canada Central. Your branding from sign-up is applied.
+3. **You get a sign-in email** with your portal address and how to sign in. Your admin account is the contact you gave at sign-up.
+4. **Your team is invited.** Once the agreement is signed, each person on your list gets an invite email with the portal link, how to sign in with a texted code and a quick guide to the main features. A short set-up wizard runs the first time they sign in.
+5. **You meet your onboarding contact.** You get an email from Keystone support introducing your onboarding contact and how to book your Microsoft Teams setup session: a 30-minute kickoff on Email support, one 60-minute session on Priority, two 60-minute sessions on Premium, and a dedicated onboarding plan on Dedicated.
+6. **Your phone account is opened.** Keystone sets up your phone and texting account and starts the carrier registration for business texting. Texting can take a few business days to be approved.
+7. **You sign in** with a code sent to your mobile and follow [Welcome to Keystone: your first week](kb:welcome-to-keystone).
 
 > Your company code is how your staff and apps find your copy. It cannot be changed later, so pick something short, like your brokerage name.
 `,
@@ -109,7 +119,7 @@ Only Admins can add or change users.
 1. Open **Settings** > **User Management**.
 2. Choose **Add user**.
 3. Enter their first and last name, work email and **mobile number** (they sign in with a code sent to it).
-4. Pick a role: **Admin**, **Staff** or **Marketing**. See [Roles explained](kb:roles-explained).
+4. Pick a role: **Admin**, **Broker** or **Marketing**. See [Roles explained](kb:roles-explained).
 5. Choose **Add user**. They can sign in straight away.
 
 ## Change or remove a user
@@ -123,7 +133,7 @@ When someone leaves, remove them on their last day. Their records, calls and not
   },
   {
     slug: "roles-explained",
-    title: "Roles explained: Admin, Staff, Marketing and Ops",
+    title: "Roles explained: Admin, Broker, Marketing and Ops",
     category: "Users and teams",
     audience: "all_staff",
     plans: [],
@@ -132,7 +142,7 @@ When someone leaves, remove them on their last day. Their records, calls and not
 Every user has one role. Your Admin sets it in **Settings** > **User Management**.
 
 - **Admin**: everything, including company settings, users, billing, phone lines, the phone menu, imports, exports and security.
-- **Staff**: the day-to-day work: pipeline, CRM, communications, calendar, lenders and reports. Staff can't change company settings.
+- **Broker**: the day-to-day work: pipeline, CRM, communications, calendar, lenders and reports. Brokers can't change company settings.
 - **Marketing**: marketing tools and reports. Up to three Marketing users can use the Marketing add-on's advanced tools.
 - **Ops**: a back-office role with the pipeline, calendar and reports.
 

@@ -7,10 +7,10 @@ export const SECURITY_AND_DATA: SeedArticle[] = [
     category: "Security and privacy",
     audience: "public",
     plans: [],
-    summary: "Your own server and database in Canada, passwordless sign-in, audit log and 7-year retention.",
+    summary: "Your own private database in Canada, passwordless sign-in, audit log and 7-year retention.",
     body: `
 ## Your data stays in Canada
-Each brokerage gets its **own server and database** in Microsoft Azure, **Canada Central**. Your data is never mixed with another brokerage's.
+Each brokerage gets its **own private database** in Microsoft Azure, **Canada Central**, with its own login that cannot open any other brokerage's database. Your data is never mixed with another brokerage's.
 
 ## Signing in
 - No passwords: staff, clients, lenders and referrers sign in with a code sent to their phone.
@@ -225,10 +225,10 @@ These are planned but **not available yet**. We'll update this page as each one 
 
 - **Hold queue** for callers waiting on the main line (today calls ring the available people, then go to a message or voicemail).
 - **Android staff apps** (the dialler and the iPad-style portal app). The client app already works on Android.
-- **Gmail inbox reading** inside Keystone. Sending from Gmail works today.
+- **Gmail inbox reading** inside Keystone: built, waiting for Google's security review. Sending from Gmail works today.
 - **Sending deals straight into a lender's own system** through an API. Email and download-link packages work today.
 - **Lenders viewing your submitted files** inside the lender portal.
-- **Custom roles and permissions** beyond Admin, Staff, Marketing and Ops.
+- **Custom roles and permissions** beyond Admin, Broker, Marketing and Ops.
 - **Call voice check** for cloned or synthetic voices.
 - **Outside ID-verification and address-verification services** for the ID and business reality checks (the in-house checks work today).
 - **Taking client payments** through Keystone.

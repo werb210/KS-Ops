@@ -81,13 +81,15 @@ export function opsRoadmapRouter(deps: Deps): Router {
       const idea = await pendingIdea(deps.db, id);
       if (!idea) return res.status(404).json(NO_IDEA);
       const actor = actorOf(req);
+      // Review fix: claim the idea first (one conditional update), so two staff approving at once make one item.
+      if (!(await closeIdea(deps.db, id, "approved", null, null, actor))) return res.status(404).json(NO_IDEA);
       // The public item is written by staff (or is the idea's own title): the broker's details never go with it.
       const itemId = await createItem(
         deps.db,
         { title: parsed.data.title ?? String(idea.title), summary: parsed.data.summary ?? "", status: parsed.data.status ?? "requested", area: parsed.data.area ?? "", public: true },
         actor,
       );
-      await closeIdea(deps.db, id, "approved", itemId, null, actor);
+      await deps.db.query("UPDATE roadmap_ideas SET item_id = $2 WHERE id = $1", [id, itemId]);
       await audit(deps.db, actor, "roadmap.idea_approve", null, { idea: id, item: itemId });
       return res.status(201).json({ item: await getItem(deps.db, itemId) });
     }),

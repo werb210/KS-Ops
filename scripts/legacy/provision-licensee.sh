@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# ======================================================================================================================
+# LEGACY - kept for reference only (KS_SHARED_HOSTING_v1, 2026-11-03).
+#
+# Keystone no longer gives each brokerage its own resource group, servers and Postgres server. Every brokerage now runs
+# on the one shared server (resource group ks-shared, made once by scripts/provision-shared.sh) with its own database
+# ks_<code> on ks-shared-pg, set up by KS-Ops itself on /ops/provisioning. See docs/PROVISIONING.md.
+#
+# Use this script only to look after a brokerage that was set up the old way (resource group ks-<code>) until it is
+# moved to the shared server. KS-Ops's automatic provisioning no longer calls it. Do not use it for new brokerages.
+# ======================================================================================================================
+#
 # Provisions the Azure resources for one Keystone licensee. Safe to run again: anything that already exists is kept,
 # and secrets already stored in the apps' settings are reused rather than replaced.
 #
@@ -183,6 +194,8 @@ QBO_TOKEN_ENCRYPTION_KEY="$(setting "$SERVER_APP" QBO_TOKEN_ENCRYPTION_KEY)"; [[
 JWT_REFRESH_SECRET="$(setting "$SERVER_APP" JWT_REFRESH_SECRET)"; [[ -n "$JWT_REFRESH_SECRET" ]] || JWT_REFRESH_SECRET="$(secret 32)"
 GOOGLE_TOKEN_ENCRYPTION_KEY="$(setting "$SERVER_APP" GOOGLE_TOKEN_ENCRYPTION_KEY)"; [[ -n "$GOOGLE_TOKEN_ENCRYPTION_KEY" ]] || GOOGLE_TOKEN_ENCRYPTION_KEY="$(secret 32)"
 WATCH_PUSH_ENCRYPTION_KEY="$(setting "$SERVER_APP" WATCH_PUSH_ENCRYPTION_KEY)"; [[ -n "$WATCH_PUSH_ENCRYPTION_KEY" ]] || WATCH_PUSH_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+# KS_LENDER_API - seals lender connection credentials (broker API keys, portal passwords) on KS-server. Made once, kept.
+LENDER_CREDENTIALS_ENCRYPTION_KEY="$(setting "$SERVER_APP" LENDER_CREDENTIALS_ENCRYPTION_KEY)"; [[ -n "$LENDER_CREDENTIALS_ENCRYPTION_KEY" ]] || LENDER_CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 QBO_ENVIRONMENT="${QBO_ENVIRONMENT:-$(setting "$SERVER_APP" QBO_ENVIRONMENT)}"; QBO_ENVIRONMENT="${QBO_ENVIRONMENT:-sandbox}"
 if [[ "$QBO_ENVIRONMENT" != "sandbox" && "$QBO_ENVIRONMENT" != "production" ]]; then
   echo "QBO_ENVIRONMENT must be sandbox or production (got $QBO_ENVIRONMENT)." >&2
@@ -220,6 +233,7 @@ SERVER_SETTINGS=(
   "JWT_REFRESH_SECRET=$JWT_REFRESH_SECRET"
   "GOOGLE_TOKEN_ENCRYPTION_KEY=$GOOGLE_TOKEN_ENCRYPTION_KEY"
   "WATCH_PUSH_ENCRYPTION_KEY=$WATCH_PUSH_ENCRYPTION_KEY"
+  "LENDER_CREDENTIALS_ENCRYPTION_KEY=$LENDER_CREDENTIALS_ENCRYPTION_KEY"
   "NODE_ENV=production"
   "SCM_DO_BUILD_DURING_DEPLOYMENT=false"
   "KS_SERVER_URL=$SERVER_URL"

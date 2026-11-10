@@ -1,139 +1,181 @@
-# Provisioning a Keystone licensee
+# Provisioning a Keystone brokerage (shared hosting)
 
-> **Automatic now.** After payment (or a staff free trial) KS-Ops runs all of this by itself: see
-> [AUTO_PROVISIONING.md](AUTO_PROVISIONING.md) and `/ops/provisioning`. This page is the manual path, still used when
-> automatic setup is not configured yet or a step has to be done by hand.
+Since 2026-11-03 (KS_SHARED_HOSTING_v1) every brokerage runs on **one shared Keystone server, with its own database**.
+Nothing in Azure is created per brokerage any more:
 
-Each licensee (brokerage) gets its own copy of Keystone: KS-server, KS-Agent, KS-Portal and KS-Client, with its own
-Postgres database, all in one Azure resource group named `ks-<company code>`. `scripts/provision-licensee.sh` creates
-it. The script is safe to run again: what exists is kept, and the secrets already saved in the apps are reused.
+- **Once**, Todd runs `scripts/provision-shared.sh`. It makes the shared resource group and everything in it (below).
+- **Per brokerage**, KS-Ops does everything itself after payment or a staff free trial, and shows each step in plain
+  words on `/ops/provisioning`: it makes the brokerage's database and login role, writes its registry entry, asks the
+  shared server to load it and set up its tables, publishes its staff portal and client app, and adds its addresses.
 
-## Before you start
+The old layout (a resource group `ks-<code>` with its own servers and Postgres per brokerage) is retired. Its script is
+kept, for reference only, as `scripts/legacy/provision-licensee.sh`.
 
-1. The licensee exists in KS-Ops (signed up on the website, or added by staff) and its status is `provisioning`.
-2. You are signed in to Azure (`az login`) with the Keystone subscription selected (`az account set -s <id>`).
-3. You have `openssl` and `curl`.
-4. `KS_OPS_URL` is set to the KS-Ops base address (https). It is required: the script has no default, so a licensee
-   is never pointed at the wrong KS-Ops.
-5. Optional but recommended: a KS-Ops staff token in `OPS_TOKEN` (from the staff portal, or the break-glass
-   `OPS_ADMIN_TOKEN`). With it the script makes the licensee's ops key and saves the new addresses in KS-Ops.
+## The layout
 
-## Run it
-
-```bash
-KS_OPS_URL=https://<ks-ops address> \
-KS_LICENSEE_ID=<licensee id from KS-Ops> \
-OPS_TOKEN=<staff token> \
-KS_PLAN=growth \
-OPENAI_API_KEY=<key> \
-QBO_CLIENT_ID=<Intuit client id> QBO_CLIENT_SECRET=<Intuit client secret> QBO_ENVIRONMENT=production \
-CREATE_DEPLOY_SP=1 \
-scripts/provision-licensee.sh northwind canadacentral
-```
-
-What it creates (names use the company code):
-
-| Resource | Name | Notes |
+| Resource | Name | What it is |
 | --- | --- | --- |
-| Resource group | `ks-northwind` | in the region you give |
-| Postgres flexible server | `ks-northwind-pg`, database `ks` | Burstable `Standard_B1ms`, Postgres 17; firewall allows only the two web apps' outbound addresses |
-| App Service plan | `ks-northwind-plan` | Linux `B1` |
-| Web app (KS-server) | `ks-northwind-server` | Node 22, startup `node dist/index.js`, HTTPS only, always on |
-| Web app (KS-Agent) | `ks-northwind-agent` | same plan and settings |
-| Static Web App (KS-Portal) | `ks-northwind-portal` | Free, in `SWA_LOCATION` (default `eastus2`) |
-| Static Web App (KS-Client) | `ks-northwind-client` | Free, in `SWA_LOCATION` |
+| Resource group | `ks-shared` | canadacentral |
+| App Service plan | `ks-shared-plan` | Linux, `P0v3` by default (Basic or higher is needed for custom domains) |
+| Web app | `ks-shared-server` | KS-server, every brokerage (multi-brokerage mode: `KS_CONTROL_DATABASE_URL` is set) |
+| Web app | `ks-shared-agent` | KS-Agent (Maya), every brokerage |
+| Web app | `ks-shared-web` | the web host in this repository (`web-host/`): serves every brokerage's staff portal and client app from blob storage, chosen by host name |
+| Postgres flexible server | `ks-shared-pg` | Postgres 17; only the `vector` extension is allowed |
+| Database | `ks_control` | the brokerage registry, table `ks_tenants` (KS-Ops owns it) |
+| Database (one per brokerage) | `ks_<code>` | made by KS-Ops; only the role `ks_<code>_app` can connect to it |
+| Storage account | `ksshared<suffix>` | private container `sites`: `sites/<code>/portal/...` and `sites/<code>/client/...` |
 
-App settings it writes:
+KS-Ops itself is unchanged: its own App Service and its own database.
 
-- **KS-server:** `DATABASE_URL` (generated), `JWT_SECRET` and `OTP_HASH_SALT` (generated once, then kept),
-  `KS_SERVER_URL`, `KS_PORTAL_URL`, `KS_CLIENT_URL`, `KS_OPS_URL`, `KS_LICENSEE_ID`, `KS_OPS_KEY`, `MAYA_URL` (the
-  agent), `KS_PLAN` (first run only), `OPENAI_API_KEY` when given, `NODE_ENV=production`.
-  QuickBooks Online fee invoices: `QBO_TOKEN_ENCRYPTION_KEY` (generated once, then kept) and `QBO_ENVIRONMENT`
-  (`sandbox` unless given) always; `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET` and `QBO_REDIRECT_URI` (default
-  `<KS-server>/api/quickbooks/oauth/callback`) when `QBO_CLIENT_ID` is given. Without `QBO_CLIENT_ID` QuickBooks
-  stays off. The script prints the redirect URI to add to the licensee's Intuit app (see KS-server
-  `docs/QUICKBOOKS.md`).
-- **KS-Agent:** `SERVER_URL` (the licensee's KS-server), `JWT_SECRET` (same as KS-server), `OPENAI_API_KEY` when given.
+How the pieces find a brokerage: requests carry `X-KS-Tenant: <code>` (KS-Agent, the native apps, KS-Ops's own calls)
+or arrive on the brokerage's own host name (`<code>.api.<KS_DOMAIN>` for the server, `<code>.portal.<KS_DOMAIN>` and
+`<code>.app.<KS_DOMAIN>` for the web apps), matched against `ks_tenants`. Unknown hosts get a 404, cancelled brokerages
+a 410.
 
-Brand settings (`KS_COMPANY_NAME`, `KS_PRIMARY_COLOR` and so on) are not written: the licensee's admin sets them on
-the Company page in their staff portal (KS-server `PUT /api/licensee`).
+### The registry (`ks_tenants` in `ks_control`)
 
-## After it runs
+One row per brokerage: `code`, `licensee_id`, `status` (follows the licensee's KS-Ops status every 5 minutes), its host
+names (`api_hosts`, `portal_hosts`, `client_hosts`, lowercase, no port), `database_name`, and two encrypted columns:
 
-The script prints the addresses, then the GitHub settings the deploy workflows need. Each of the four app
-repositories (KS-server, KS-Agent, KS-Portal, KS-Client) deploys every licensee listed in its `deploy/licensees.json`,
-each from its own GitHub environment named `ks-<code>`. The development copy keeps deploying from the repositories'
-own (repository-level) secrets and variables, exactly as before.
+- `database_url_enc`: the connection string for `ks_<code>_app`.
+- `env_enc`: a JSON object of the brokerage's own settings, exactly what used to be in its own App Service settings:
+  `JWT_SECRET`, `JWT_REFRESH_SECRET`, `OTP_HASH_SALT`, `QBO_TOKEN_ENCRYPTION_KEY`, `GOOGLE_TOKEN_ENCRYPTION_KEY`,
+  `WATCH_PUSH_ENCRYPTION_KEY`, `LENDER_CREDENTIALS_ENCRYPTION_KEY` (made once and kept), `KS_LICENSEE_ID`, `KS_OPS_KEY`,
+  `KS_OPS_URL`, `KS_PLAN` (first run only), `KS_SERVER_URL`, `KS_PORTAL_URL`, `KS_CLIENT_URL`, `CLIENT_URL`,
+  `PUBLIC_BASE_URL`, `PUBLIC_SERVER_URL`, `MAYA_URL`, `QBO_ENVIRONMENT`, every `TWILIO_*` of its sub-account, and
+  `KS_M365_*` / `KS_GOOGLE_*` / `KS_OAUTH_BROKER_URL`.
 
-### 1. Create the GitHub environment `ks-<code>` in each of the four repositories
+Encryption (the same in every repository): AES-256-GCM with the key SHA-256(`KS_TENANT_KEY`), stored as
+`v1:<iv base64>:<auth tag base64>:<ciphertext base64>`. KS-Ops writes the registry as `ks_control_owner`; the shared
+server, agent and web host only read it, as `ks_control_reader` (SELECT on `ks_tenants` only).
 
-Settings > Environments > New environment, name `ks-<code>` (e.g. `ks-northwind`). The script prints this name. Add
-(secrets under "Environment secrets", the rest under "Environment variables"):
+The table is made by `migrations-control/001_ks_tenants.sql`, which KS-Ops applies to `KS_CONTROL_OWNER_DATABASE_URL`
+on startup (and `npm run migrate`), as the non-superuser owner. It is safe to run again.
 
-| Repository | Secrets | Variables |
+## What Todd sets up once
+
+1. **Sign in to Azure** with the Keystone subscription selected: `az login`, then `az account set -s <subscription id>`.
+   You also need `psql`, `openssl` and `curl` on that machine.
+2. **Run the one-time script** from a KS-Ops checkout:
+
+   ```bash
+   KS_OPS_APP=<ks-ops app name> KS_OPS_RG=<ks-ops resource group> \
+   OPENAI_API_KEY=<key> SENDGRID_API_KEY=<key> \
+   ALLOW_MY_IP=1 CREATE_DEPLOY_SP=1 \
+   scripts/provision-shared.sh
+   ```
+
+   It makes everything in the table above, allows only the three shared apps and KS-Ops through the Postgres firewall
+   (and this machine while it runs, with `ALLOW_MY_IP=1`), makes `ks_control` with its two roles, makes `ks_tenants`,
+   writes the shared apps' settings, and (with `KS_OPS_APP` / `KS_OPS_RG`) writes KS-Ops's settings straight to the
+   KS-Ops app. Anything it cannot write for you is printed once in the **COPY THIS NOW** block: the Postgres admin
+   password (keep it in the password manager), the storage connection string, and the deploy service principal.
+   Running it again keeps what exists; give `PG_ADMIN_PASSWORD` again so it can check the roles.
+3. **GitHub secrets.**
+   - KS-Portal and KS-Client: repository secret `KS_SITES_STORAGE_CONNECTION_STRING` (printed by the script). Their
+     deploy uploads each brokerage's `dist/` to `sites/<code>/portal/` or `sites/<code>/client/`.
+   - KS-server, KS-Agent and KS-Ops: secret `AZURE_CREDENTIALS` in the GitHub environment `ks-shared` (the `ks-shared-deploy` JSON from `CREATE_DEPLOY_SP=1`). The
+     "Deploy the shared web host" workflow uses it to deploy `web-host/` to `ks-shared-web`. Then run that workflow once
+     (Actions > Deploy the shared web host > Run workflow).
+   - KS-server and KS-Agent: their one shared deploy to `ks-shared-server` / `ks-shared-agent` (see those repositories).
+4. **Keystone's domain.** Choose the domain brokerage addresses live under (for example `keystone.example`) and set it
+   as `KS_DOMAIN` on KS-Ops. Without it KS-Ops makes no host names and adds no custom domains (the provisioning page says
+   so), and a brokerage's staff portal and client app cannot be opened, because the web host finds each one by its
+   host name.
+5. **DNS for each new brokerage.** When a brokerage is set up, its run on `/ops/provisioning` shows a **Custom domains**
+   box with the exact DNS records (a CNAME and a TXT `asuid.` record per address) and the `az` commands (add the host
+   name, make the free managed certificate, bind it). KS-Ops holds no Azure credential, so a person runs those
+   commands once per brokerage; the `custom_domains` step checks every 15 minutes and finishes by itself when every
+   address answers over https.
+6. **Check it.** `/ops/provisioning` shows no "Waiting for manual setup" box. Start a **dry run** for any licensee: its
+   log lists every step as "would: ...".
+
+The GitHub App and the KS-Ops GitHub environments `ks-ops-provisioning` / `ks-ops-teardown` (AUTO_PROVISIONING.md) are
+still used, for the KS-Portal and KS-Client steps only. They no longer need any Azure variable or `OPENAI_API_KEY`, and
+the `keystone-provisioning` Azure app registration and its federated credentials are no longer used by provisioning.
+
+## Settings on each app
+
+### KS-Ops (`ks-ops`): new settings
+
+| Setting | Value |
+| --- | --- |
+| `KS_CONTROL_OWNER_DATABASE_URL` | `postgresql://ks_control_owner:<password>@ks-shared-pg.postgres.database.azure.com:5432/ks_control?sslmode=require` |
+| `KS_SHARED_PG_ADMIN_URL` | the `ks-shared-pg` admin, database `postgres` (`...:5432/postgres?sslmode=require`). Makes and drops `ks_<code>` and `ks_<code>_app` |
+| `KS_TENANT_KEY` | the same value as on the three shared apps (the script makes it) |
+| `KS_OPS_SERVICE_KEY` | the same value as on `ks-shared-server` |
+| `KS_SHARED_SERVER_URL` | `https://ks-shared-server.azurewebsites.net` (KS-Ops calls `/api/ops/tenants/reload` and `/api/ops/tenants/<code>/migrate` there) |
+| `KS_SHARED_AGENT_URL` | `https://ks-shared-agent.azurewebsites.net` (each brokerage's `MAYA_URL`) |
+| `KS_DOMAIN` | Keystone's domain for brokerage addresses (step 4) |
+| `KS_SITES_STORAGE_CONNECTION_STRING` | the storage account; the purge deletes `sites/<code>/` |
+
+The existing KS-Ops settings stay (`OPS_ENCRYPTION_KEY`, `KS_OPS_PUBLIC_URL`, the GitHub token, Twilio, Microsoft 365 /
+Google, QuickBooks and so on). `OPS_ALLOWED_SERVER_HOST_SUFFIXES` automatically includes `.<KS_DOMAIN>`.
+
+### `ks-shared-server` (KS-server)
+
+| Setting | Value |
+| --- | --- |
+| `KS_CONTROL_DATABASE_URL` | `ks_control` as `ks_control_reader`. Setting it switches on multi-brokerage mode |
+| `KS_TENANT_KEY` | decrypts each brokerage's database address and settings |
+| `KS_OPS_SERVICE_KEY` | authorises KS-Ops's reload and migrate calls (`X-KS-Ops-Service-Key`) |
+| `OPENAI_API_KEY`, `SENDGRID_API_KEY`, `AZURE_STORAGE_CONNECTION_STRING` | Keystone-wide; a brokerage's own value with the same name wins |
+| `NODE_ENV` | `production` |
+
+### `ks-shared-agent` (KS-Agent)
+
+| Setting | Value |
+| --- | --- |
+| `KS_CONTROL_DATABASE_URL` | `ks_control` as `ks_control_reader` |
+| `KS_TENANT_KEY` | the same key (it signs service JWTs with each brokerage's own `JWT_SECRET`) |
+| `SERVER_URL` | `https://ks-shared-server.azurewebsites.net` |
+| `OPENAI_API_KEY` | Keystone-wide |
+| `NODE_ENV` | `production` |
+
+### `ks-shared-web` (the web host, `web-host/`)
+
+| Setting | Value |
+| --- | --- |
+| `KS_CONTROL_DATABASE_URL` | `ks_control` as `ks_control_reader` |
+| `KS_SITES_STORAGE_CONNECTION_STRING` | the storage account with the `sites` container |
+
+It streams `sites/<code>/<portal or client>/<path>` for the host's brokerage, falls back to `index.html` for app routes,
+caches hashed assets for a year and `index.html` not at all, sends the build's `staticwebapp.config.json` headers (CSP
+and so on) as Static Web Apps did, never serves that file itself, and refuses any path that tries to leave the site's
+folder. `/healthz` answers without a brokerage.
+
+## What KS-Ops does per brokerage
+
+The provisioning run (`/ops/provisioning`, every step safe to run again; "Retry step" and "Mark done manually" are on
+the page):
+
+| Step | Where | What |
 | --- | --- | --- |
-| KS-server | `AZURE_CREDENTIALS` (required); `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_TOKEN_ENCRYPTION_KEY` (optional, QuickBooks) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-server`); `QBO_ENVIRONMENT`, `QBO_REDIRECT_URI` (optional, QuickBooks) |
-| KS-Agent | `AZURE_CREDENTIALS` (required) | `AZURE_WEBAPP_NAME` (optional, default `ks-<code>-agent`) |
-| KS-Portal | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-portal`'s token) | `VITE_API_BASE_URL`, `VITE_APP_URL`, `VITE_CLIENT_APP_URL` (required, https); `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME`, `VITE_ASSISTANT_NAME` (optional) |
-| KS-Client | `AZURE_STATIC_WEB_APPS_API_TOKEN` (required, `ks-<code>-client`'s token) | `VITE_API_BASE_URL` (required, https); `VITE_LICENSEE` (optional: a folder under KS-Client `licensees/` for the branded build); `VITE_CLIENT_APP_URL`, `VITE_WEBSITE_URL`, `VITE_SUPPORT_EMAIL`, `VITE_COMPANY_NAME` (optional) |
+| `twilio_account`, `twilio_address` | KS-Ops | the brokerage's Twilio sub-account and business address |
+| `database` | KS-Ops | `CREATE ROLE ks_<code>_app` (random password), `CREATE DATABASE ks_<code>`, `REVOKE ALL ... FROM PUBLIC`, `GRANT CONNECT, TEMPORARY` to that role only, `USAGE, CREATE` on its `public` schema, `CREATE EXTENSION IF NOT EXISTS vector`. Names are checked and quoted; the password is kept on a re-run |
+| `tenant_registry` | KS-Ops | the `ks_tenants` row: host names and the encrypted settings (above); the licensee's server, portal and client addresses |
+| `twilio_settings`, `workspace_apps` | KS-Ops | the Twilio and Microsoft 365 / Google values, into the same encrypted settings |
+| `shared_server` | KS-Ops | `POST /api/ops/tenants/reload`, then `POST /api/ops/tenants/<code>/migrate` on the shared server |
+| `github_environments`, `deploy_registry`, `deploy` | GitHub workflow | KS-Portal and KS-Client only: the `ks-<code>` environment (VITE_* variables), the `deploy/licensees.json` entry, the build and upload to `sites/<code>/` |
+| `custom_domains` | KS-Ops + a person | the DNS records and `az` commands on the page; done when every address answers over https. Skipped (and said so) without `KS_DOMAIN` |
+| `health`, `configure`, `admin_user`, `welcome_email` | KS-Ops | as before, against the brokerage's address (every call carries `X-KS-Tenant: <code>`) |
+| `licence_agreement`, `team_users`, `onboarding_email` | KS-Ops | KS_OPS_ONBOARDING_v1: wait for the signed licence agreement, create and invite the sign-up team (`POST /api/provision/users`), email the owner their onboarding contact (see AUTO_PROVISIONING.md) |
+| `twilio_voice`, `twilio_bundle`, `phone_numbers`, `texting_registration` | KS-Ops | as before |
 
-- `AZURE_CREDENTIALS` is the JSON of the deploy service principal `ks-<code>-deploy` (contributor on `ks-<code>`
-  only), printed when the script runs with `CREATE_DEPLOY_SP=1`.
-- The `VITE_*` values are compiled into the public JavaScript, so they are variables, not secrets.
-- QuickBooks (optional): when the KS-server environment has `QBO_CLIENT_ID`, each deploy writes `QBO_CLIENT_ID`,
-  `QBO_CLIENT_SECRET`, `QBO_ENVIRONMENT` (default `sandbox`), and `QBO_REDIRECT_URI` / `QBO_TOKEN_ENCRYPTION_KEY`
-  when given, to the licensee's KS-server app settings. If the app has no token key yet, the deploy makes one.
-  Without `QBO_CLIENT_ID` the deploy leaves the QuickBooks settings alone (whatever the provisioning script wrote).
-- KS-server needs no `DATABASE_URL` in GitHub: it applies its migrations on startup with the `DATABASE_URL` app
-  setting the script wrote. (To read it: `az webapp config appsettings list -g ks-<code> -n ks-<code>-server --query
-  "[?name=='DATABASE_URL'].value" -o tsv`.)
-- If a value is missing from the environment, GitHub would quietly use the repository-level one (the development
-  copy's). The deploy jobs refuse that: the licensee's job fails with "Add ... to the GitHub environment 'ks-<code>'"
-  and nothing is deployed for it.
+The registry's code rule allows 2 to 31 characters; a 32-character company code stops at `database` with a plain
+message (change the code, then Retry step).
 
-Secrets are printed only inside the block marked **COPY THIS NOW**. Run the script again to see them again.
+### Removal after cancellation (the purge)
 
-### 2. Add the licensee to `deploy/licensees.json` in each of the four repositories
+When a cancelled brokerage's 180-day hold is over and its data purge is marked done, and `KS_TEARDOWN_ENABLED=true`,
+the teardown run checks the retention rules on the brokerage's server (as before), removes it from KS-Portal and
+KS-Client (registry entry and environment), then:
 
-The same line in all four (the script prints it):
+1. `database_drop`: `DROP DATABASE ks_<code> WITH (FORCE)` and `DROP ROLE ks_<code>_app`;
+2. `sites_delete`: deletes every blob under `sites/<code>/`;
+3. `tenant_delete`: deletes the `ks_tenants` row and tells the shared server to reload.
 
-```json
-{
-  "licensees": [
-    { "code": "northwind", "environment": "ks-northwind", "enabled": true, "apps": ["server", "agent", "portal", "client"] }
-  ]
-}
-```
-
-`environment` defaults to `ks-<code>` and `apps` to all four; `enabled: false` keeps an entry without deploying it.
-The file holds nothing secret. CI checks it (`node deploy/licensee-matrix.mjs --check`), so merge the change through
-a pull request; once merged, that push deploys the licensee.
-
-### 3. Deploy
-
-Every push to `main` whose CI passes deploys the development copy and then every enabled licensee, one job per
-licensee; one licensee failing does not stop the others. To deploy one licensee by hand (e.g. the first time): Actions
-> the deploy workflow ("Build and deploy Node.js app to Azure Web App" in KS-server, "Build and deploy the assistant
-to Azure Web App" in KS-Agent, "deploy" in KS-Portal, "Azure Static Web Apps CI/CD" in KS-Client) > Run workflow on
-`main`, with `licensee` set to the code. Left empty, a manual run deploys the development copy and every licensee.
-
-The licensee's iPhone/iPad and Android apps are separate: KS-Client's "Build licensee apps" workflow, with its own
-environment named after the `licensees/<key>` folder (see KS-Client `docs/LICENSEE_APPS.md`).
-
-### Postgres firewall
-
-Postgres has no "allow all Azure services" rule. Each run adds a rule per outbound address of the KS-server and
-KS-Agent web apps (`possibleOutboundIpAddresses`) and removes any other rule, so run the script again after changing
-the App Service plan's size or region (the outbound addresses can change). If KS-Ops cannot make the ops key, or its
-answer cannot be read, the script stops with an error rather than continuing without one.
-
-### Then
-
-1. Deploy KS-server, KS-Agent, KS-Portal and KS-Client (step 3 above).
-2. If you did not pass `OPS_TOKEN`, open the licensee in KS-Ops, press "Rotate ops key", set the key as `KS_OPS_KEY`
-   on `ks-<code>-server`, and save the server, portal and client addresses on the licensee.
-3. KS-Ops pushes the licensee's plan to the new server within 5 minutes of it answering.
-4. Set the licensee's status to `trial` or `active`. From then on the company code resolves in the apps' directory.
+Until then, export works as today.
 
 ## Twilio: what Todd sets up once (not per licensee)
 
@@ -167,9 +209,9 @@ If a registration is turned down: read the reason on `/ops/provisioning`, correc
 Keystone has **one** Microsoft app and **one** Google sign-in client for every brokerage (KS_OPS_WORKSPACE_APPS). Nobody
 registers an app per brokerage and Keystone staff type nothing per brokerage:
 
-- During provisioning, the `workspace_apps` step writes Keystone's keys (masked) to the licensee's KS-server:
-  `KS_M365_CLIENT_ID`, `KS_M365_CLIENT_SECRET`, `KS_GOOGLE_OAUTH_CLIENT_ID`, `KS_GOOGLE_OAUTH_CLIENT_SECRET` and
-  `KS_OAUTH_BROKER_URL`.
+- During provisioning, the `workspace_apps` step writes Keystone's keys into the brokerage's encrypted settings in the
+  registry (`ks_tenants.env_enc`): `KS_M365_CLIENT_ID`, `KS_M365_CLIENT_SECRET`, `KS_GOOGLE_OAUTH_CLIENT_ID`,
+  `KS_GOOGLE_OAUTH_CLIENT_SECRET` and `KS_OAUTH_BROKER_URL`. The shared server reads them for that brokerage.
 - The brokerage's admin opens **Settings > Connections** in their staff portal and clicks **Connect Microsoft 365**.
   Microsoft asks a Microsoft 365 administrator to approve Keystone once for the whole company. Keystone saves the
   company's tenant itself. If the person clicking is not a Microsoft 365 administrator, the page gives them a link to
@@ -266,7 +308,7 @@ KS-server `docs/GOOGLE_WORKSPACE.md` (sections 3.1 to 3.6) has the details. Diff
    - App name **Keystone**, with the support email, logo, home page, privacy policy and terms links.
    - Under **Authorized domains**, add the domain from step 1 and the website's domain.
    - Scopes: `openid`, `email`, `profile`, `gmail.send`, `calendar.events`, `tasks`, `drive.file`. **No**
-     `gmail.readonly`: Gmail inbox reading stays off until the CASA assessment.
+     `gmail.readonly` yet: Gmail inbox reading stays off until the CASA assessment (step 6).
 3. **OAuth client** (Credentials > Create credentials > OAuth client ID, type *Web application*):
    - **One** authorized redirect URI: `https://<KS-Ops address>/api/oauth/callback/google`.
    - No JavaScript origins.
@@ -274,6 +316,20 @@ KS-server `docs/GOOGLE_WORKSPACE.md` (sections 3.1 to 3.6) has the details. Diff
    scopes are free and take a few days to a few weeks. Answer Google's emails at `borealfinancial@gmail.com`. Until
    it is verified, people see an "unverified app" warning, and at most 100 users can use it.
 5. **Set the keys on KS-Ops:** `KS_GOOGLE_OAUTH_CLIENT_ID` and `KS_GOOGLE_OAUTH_CLIENT_SECRET`.
+6. **Later: Gmail inbox reading (restricted scope, CASA).** Leave `KS_GOOGLE_GMAIL_READ_ENABLED` unset on KS-Ops until
+   Google has approved it. Then:
+   1. Add `https://www.googleapis.com/auth/gmail.readonly` to the consent screen's scopes (only this one; never
+      `gmail.modify` or full mail access) and submit for restricted-scope verification, with a demo video of client
+      email reaching the CRM timeline and the portal's Gmail inbox.
+   2. Google asks for a **CASA Tier 2** security assessment by an App Defense Alliance lab. Published Tier 2 prices
+      were about US$540 to US$1,500 (TAC Security about $540 to $720) and it takes about 1 to 3 weeks; Tier 3, only if
+      Google asks, is about $4,500 to $8,000. The lab sends Google a letter of validation. Both the verification and
+      the assessment are renewed **every 12 months** (Google emails about 90 days before; set your own reminder too).
+   3. Once approved, set `KS_GOOGLE_GMAIL_READ_ENABLED=true` on KS-Ops. The `workspace_apps` step writes it, with the
+      Google keys, into each new brokerage's settings; for existing brokerages use "refresh settings" (below).
+   4. Each Google user reconnects once (My Profile > Reconnect Google). Settings > Connections counts who still has to.
+   Until then every server shows "Gmail inbox reading is pending Google's security review". KS-server
+   `docs/GOOGLE_WORKSPACE.md` section 5 has the details, and the optional Gmail push (Pub/Sub) setup.
 
 There is no "connect the whole domain" option for Google: Keystone does not use domain-wide delegation. Each person
 connects their own account with one click.
@@ -283,15 +339,16 @@ connects their own account with one click.
 New licensees get the keys during provisioning. If KS-Ops did not have them yet, the `workspace_apps` step says so in
 the run's log; set them on KS-Ops and press **Retry step**.
 
-A licensee set up before this change, or any licensee after a key is renewed, needs the new values written to its
-server once:
+After a key is renewed on KS-Ops (or `KS_GOOGLE_GMAIL_READ_ENABLED` changes), write the new values into each
+brokerage's settings once, with a staff token:
 
 ```bash
-az webapp config appsettings set -g ks-<code> -n ks-<code>-server --settings \
-  KS_M365_CLIENT_ID=<id> KS_M365_CLIENT_SECRET=<secret> \
-  KS_GOOGLE_OAUTH_CLIENT_ID=<id> KS_GOOGLE_OAUTH_CLIENT_SECRET=<secret> \
-  KS_OAUTH_BROKER_URL=https://<KS-Ops address>/api/oauth/callback
+curl -X POST -H "Authorization: Bearer <staff token>" \
+  https://<KS-Ops address>/api/ops/provisioning/tenants/<licensee id>/refresh-settings
 ```
+
+It writes the Twilio and Microsoft 365 / Google values again and tells the shared server to reload (it would pick
+them up within 60 seconds anyway). Nothing is restarted.
 
 A server that still has its own `MSAL_CLIENT_ID` / `MSAL_CLIENT_SECRET` (and `MSAL_TENANT_ID`) keeps using them, so
 Boreal's own server and existing staff sign-ins are not disturbed.
@@ -321,16 +378,27 @@ in Stripe, open `https://<ks-ops host>/ops/quickbooks`, connect, and fill in the
 
 ## Today's limits
 
-- By hand, creating the four `ks-<code>` GitHub environments, their secrets and variables, and the
-  `deploy/licensees.json` entries is done in the GitHub settings (four repositories, same values); the script prints
-  all of it. Automatic provisioning does it through the GitHub API (AUTO_PROVISIONING.md).
-- `deploy/licensees.json` is kept in each of the four repositories; keep the copies the same.
-- Each licensee's portal and client web app are built once per licensee (their addresses are compiled in), so a push
-  to `main` takes longer as licensees are added. KS-server and KS-Agent are built once and the same package is
-  deployed to every licensee.
-- Manual deploys run from `main` only.
-- `DEPLOY_IDENTITY=1` (used by automatic provisioning) makes a managed identity with GitHub federated credentials
-  instead of a service principal secret: the `ks-<code>` environments of KS-server and KS-Agent then hold the variables
-  `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` instead of the secret `AZURE_CREDENTIALS`. The
-  script also makes `JWT_REFRESH_SECRET`, `GOOGLE_TOKEN_ENCRYPTION_KEY` and `WATCH_PUSH_ENCRYPTION_KEY` once and keeps
-  them.
+- **Custom domains need a person** once per brokerage (DNS records and three `az` commands per address, shown on the
+  page), because KS-Ops holds no Azure credential. A brokerage's own address (for example `apply.<their domain>`) can be
+  added to its `client_hosts` in `ks_tenants` and bound the same way; KS-Ops keeps hosts added by hand.
+- **Brokerages set up the old way** (resource group `ks-<code>`) are not moved automatically. Moving one means copying
+  its database into `ks_<code>`, writing its registry entry, and deleting its resource group by hand
+  (`scripts/legacy/provision-licensee.sh` documents the old names). A teardown run no longer deletes old resource groups.
+- **Runs started before this change** that are still open have the old step names; cancel them and start a new run.
+- **`SENDGRID_FROM`, `SENDGRID_REPLY_TO` and `SIGNNOW_*`** per brokerage are not written by KS-Ops (it never wrote them);
+  until they are, the shared server's Keystone-wide values apply.
+- **App store builds per brokerage** (branded iPhone, iPad and Android apps) are separate: KS-Client's "Build licensee
+  apps" workflow (`docs/LICENSEE_APPS.md` in KS-Client).
+
+## Facebook and Instagram lead ads (KS_META_LEAD_ADS_v1)
+
+One Meta app for all of Keystone, created at developers.facebook.com with the Keystone business account.
+
+1. Create a **Business** app named "Keystone". Add the **Facebook Login for Business** and **Webhooks** products.
+2. Facebook Login > Settings > Valid OAuth Redirect URIs: `https://<KS-Ops address>/api/oauth/callback/meta`.
+3. Webhooks > Page > Subscribe to **leadgen**. Callback URL: `https://<KS-Ops address>/api/webhooks/meta/leadgen`. Verify token: a long random value.
+4. App Review: request **leads_retrieval**, **pages_manage_metadata**, **pages_show_list**, **pages_read_engagement** and **business_management** (Advanced access). Business verification is required first.
+5. KS-Ops settings: `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`.
+6. KS-server (shared app settings, Keystone-wide): `META_APP_ID`, `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`, `META_TOKEN_ENCRYPTION_KEY` (`openssl rand -base64 32`).
+
+Each brokerage then connects its Pages in Settings > Connections. Its KS-server registers the Pages here, and KS-Ops passes each lead webhook only to the brokerage that owns the Page.

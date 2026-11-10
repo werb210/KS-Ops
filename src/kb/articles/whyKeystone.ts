@@ -15,7 +15,7 @@ export const WHY_KEYSTONE: SeedArticle[] = [
     category: "Why Keystone",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "One system built for commercial lending: CRM, client app, documents, fraud checks, lenders, phones and compliance, instead of a general CRM plus add-ons.",
     body: `
 Keystone is built only for commercial lending and business financing brokerages. Most brokers who switch were running a general CRM (HubSpot, Salesforce, Zoho or Pipedrive) plus separate tools for marketing, calling and texting, e-signing, document collection and fraud checks.
@@ -40,7 +40,7 @@ Import from HubSpot, Salesforce, Pipedrive or a spreadsheet with a dry run and u
     category: "Why Keystone",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "What a 5-person brokerage buys from HubSpot to match Keystone Growth with the Marketing add-on, and what HubSpot doesn't do for lending.",
     body: `
 HubSpot Sales Hub is common with small brokerages for lead generation and follow-up. To match Keystone Growth with the Marketing add-on for **5 people**, HubSpot's Canadian price calculator lists (billed annually, CAD):
@@ -72,7 +72,7 @@ Sources: HubSpot price calculator in CAD (hubspot.com/pricing/bundle), HubSpot S
     category: "Why Keystone",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "What a 5-person brokerage buys from Salesforce to match Keystone Growth with the Marketing add-on, and what Salesforce doesn't do for lending.",
     body: `
 Salesforce Sales Cloud is the most widely used CRM, and brokers usually customise it for lending. To match Keystone Growth with the Marketing add-on for **5 people**, Salesforce's Canadian site lists (in USD, billed annually):
@@ -104,7 +104,7 @@ Sources: Salesforce Canada Sales Cloud pricing, Marketing Cloud Account Engageme
     category: "Why Keystone",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "Zoho is lower cost per seat; what it takes to match Keystone, and what Zoho doesn't do for lending.",
     body: `
 Zoho CRM is a low-cost general CRM that tops some finance-broker lists. To match Keystone Growth with the Marketing add-on for **5 people**, Zoho lists (billed annually):
@@ -130,7 +130,7 @@ Sources: Zoho CRM pricing, Zoho Marketing Automation pricing and Zoho Voice pric
     category: "Why Keystone",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "Pipedrive is a simple sales pipeline; what it takes to match Keystone, and what Pipedrive doesn't do for lending.",
     body: `
 Pipedrive is a simple visual pipeline many small brokerages start on. To match Keystone Growth with the Marketing add-on for **5 people**, Pipedrive's Canadian pricing lists (billed annually):
@@ -158,7 +158,7 @@ Sources: Pipedrive pricing (pipedrive.com/en/pricing), Pipedrive calling help (s
     category: "Security and privacy",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "Everything Keystone enforces: Canadian hosting, your own database, retention, legal holds, consent, texting rules, recording notices, audit log and sign-in security.",
     body: `
 Keystone gives you the tools; your brokerage stays responsible for how it collects and uses client information.
@@ -204,7 +204,7 @@ Every application is checked before it goes to a lender. See [Fraud checks and w
     category: "Marketing",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "Workflows that text, email, create tasks and move deals for you; drip sequences that stop on reply; shared task queues and lead rotation.",
     body: `
 ## Automations (Growth and Pro)
@@ -233,7 +233,7 @@ Applicants who start but don't finish get a reminder text and you get a follow-u
     category: "Importing and exporting",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "How a brokerage moves over: set-up within one business day, import with a dry run and undo, your lenders, your team and your numbers.",
     body: `
 1. **Sign up and pay online.** Your copy is set up within one business day and your sign-in details are emailed to you.
@@ -256,7 +256,7 @@ An Admin can download everything as one zip at any time, including after cancell
     category: "Client app and applications",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "A branded client app for iPhone and Android, an iPhone dialler, an Apple Watch app and the staff portal on iPad.",
     body: `
 ## For your clients
@@ -277,7 +277,7 @@ Android apps for staff. The client app already works on Android.
     category: "Lenders",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "How deals reach lenders today (email and download-link packages, the lender portal) and what's coming soon.",
     body: `
 ## Today
@@ -299,7 +299,7 @@ Keystone doesn't provide lenders: you bring the ones you already work with.
     category: "Plans and billing",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "Monthly or yearly billing, how to cancel, and what happens to your data.",
     body: `
 - **Billing**: choose monthly or yearly when you sign up. Yearly billing is charged once a year at the lower seat price; monthly billing is charged every month. Onboarding fees (Growth and Pro) are charged once with your first payment.
@@ -316,7 +316,7 @@ For anything about your agreement, talk to the Keystone team.
     category: "Getting support",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "See what's requested, planned, being built and shipped, +1 the ideas you want, and suggest your own.",
     body: `
 The website's **Roadmap** page lists what brokers have asked for, what's planned, what's being built and what has shipped.
@@ -331,7 +331,7 @@ The website's **Roadmap** page lists what brokers have asked for, what's planned
     category: "Why Keystone",
     audience: "public",
     plans: [],
-    since: 2,
+    since: 6,
     summary: "Straight answers on price, risk, data ownership, training, lenders and what isn't built yet.",
     body: `
 ## "We already pay for a CRM."

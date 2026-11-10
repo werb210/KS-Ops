@@ -48,8 +48,13 @@ again after a price changes.
 | `OPS_ADMIN_EMAILS` | recommended | comma-separated emails (case-insensitive) allowed into Keystone operations. Unset: any BF-Server Admin with an email (a warning is logged at startup). Accounts without an email (service principals) are always refused |
 | `OPS_ALLOWED_SERVER_HOST_SUFFIXES` | no | where a licensee's `server_url` may point (default `.azurewebsites.net,.azurestaticapps.net`; `*` allows any host). Server, client and portal addresses must be https |
 | `PENDING_SIGNUP_DAYS` | no | website sign-ups still unpaid after this many days are cancelled and their company code released (default 7) |
-| `KS_SALES_EMAIL` | no | sales inbox for sign-ups and payments (default `keystone@boreal.financial`) |
-| `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default: the sales inbox) |
+| `KS_SALES_EMAIL` | no | sales inbox for sign-ups and payments (default `sales@keystonecrm.online`) |
+| `KS_SUPPORT_EMAIL` | no | where new tickets are announced (default `support@keystonecrm.online`); also the From and reply-to address of the team invites and the owner's onboarding email (with SendGrid it must be a verified sender) |
+| `KS_ONBOARDING_BOOKING_URL` | recommended | KS_OPS_ONBOARDING_v1: the https booking page for the owner's Microsoft Teams setup session (e.g. a Microsoft Bookings page). Unset: the onboarding email asks the owner to reply to book |
+| `KS_ONBOARDING_CONTACT_NAME` | no | the person introduced as the onboarding contact (default `Todd Werboweski`) |
+| `KS_SUPPORT_PHONE` | no | Keystone's support line, shown in the onboarding emails when set. Never a person's own mobile |
+| `KS_PORT_RELEASE_GRACE_DAYS` | no | KS_OPS_NUMBER_PORTING_v1: days the temporary Keystone number keeps working after a brokerage's own number finishes transferring in (default 7, at most 90). The owner is told to turn off call forwarding before then |
+| `KS_LICENSOR_LEGAL_NAME` | no | the company named as licensor in the licence agreement (default `2630108 Alberta Ltd.`) |
 | `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET`, `MS_GRAPH_SEND_AS` | no | email through Microsoft Graph |
 | `SENDGRID_API_KEY`, `SENDGRID_FROM`, `SENDGRID_FROM_NAME` | no | email through SendGrid when Graph is not set; with neither, emails are only logged |
 | `DEMO_SMS_ENABLED` | no | `true` texts the demo link as well as emailing it. Off by default (the link is emailed only; the mobile number is still kept) |
@@ -58,10 +63,18 @@ again after a price changes.
 | `KS_TWILIO_ISV_PROFILE_SID` | for US texting | Keystone's approved ISV primary customer profile in Twilio Trust Hub (`BU...`), attached to each licensee's A2P 10DLC registration. Without it US local-line registrations wait as "needs info" |
 | `KS_TWILIO_NOTIFICATION_EMAIL` | no | where Twilio sends registration notices (default: the sales inbox) |
 | `KS_OPS_PUBLIC_URL` | recommended | this server's public https address, used for uploaded-logo links (falls back to Azure's `WEBSITE_HOSTNAME`, then the request's host) |
+| `KS_CONTROL_OWNER_DATABASE_URL` | for provisioning | the brokerage registry: database `ks_control` on `ks-shared-pg` as `ks_control_owner`. Its migrations (`migrations-control/`) run on startup (KS_SHARED_HOSTING_v1, `docs/PROVISIONING.md`) |
+| `KS_TENANT_KEY` | for provisioning | encrypts each brokerage's database address and settings in the registry; the same value as on the shared server, agent and web host |
+| `KS_SHARED_PG_ADMIN_URL` | for provisioning | the `ks-shared-pg` admin (database `postgres`): makes and drops each brokerage's database and role |
+| `KS_SHARED_SERVER_URL`, `KS_SHARED_AGENT_URL` | for provisioning | the shared KS-server and KS-Agent addresses (https) |
+| `KS_OPS_SERVICE_KEY` | for provisioning | sent as `X-KS-Ops-Service-Key` to the shared server's `/api/ops/tenants` routes; the same value as on `ks-shared-server` |
+| `KS_DOMAIN` | recommended | Keystone's domain for brokerage addresses (`<code>.api.<domain>`, `<code>.portal.<domain>`, `<code>.app.<domain>`). Without it no host names or custom domains are made, and the web apps cannot be opened |
+| `KS_SITES_STORAGE_CONNECTION_STRING` | for teardown | the `ksshared<suffix>` storage account; the purge deletes `sites/<code>/` |
 | `BF_CRM_URL` | no | BF-Server for the Keystone CRM (KS silo), default `https://server.boreal.financial`. Demo sign-ups (lead -> demo started -> demo finished, with progress and a summary note), website sign-ups and licensees (signed up -> paying, payments and status changes) are pushed to `POST {BF_CRM_URL}/api/ks/crm/upsert` (licensee pushes include `company.support_level`). Licensee support tickets and their follow-ups go to `POST {BF_CRM_URL}/api/ks/support/ingest` through the same outbox (required: `external_id`, `subject`, `message`, `message_id`, `licensee`, `requester`; 404/503 there = not deployed yet: retried every 6 h, logged once; 400/422 = rejected: logged with details, given up after 6 tries) |
 | `BF_CRM_KEY` | for the CRM | the same value as `KS_OPS_CRM_KEY` on BF-Server (sent as `X-KS-Ops-Key`). Unset: nothing is pushed (logged once at startup). Pushes wait in `crm_outbox` and are retried after 1 min, 5 min, 30 min, 2 h, 12 h, then daily until BF-Server accepts them |
 | `KS_M365_CLIENT_ID`, `KS_M365_CLIENT_SECRET` | for Microsoft 365 | Keystone's one multi-tenant Entra app (KS_OPS_WORKSPACE_APPS). Written to every licensee's KS-server by the `workspace_apps` provisioning step; the brokerage's admin then connects in one click. See `docs/PROVISIONING.md` |
 | `KS_GOOGLE_OAUTH_CLIENT_ID`, `KS_GOOGLE_OAUTH_CLIENT_SECRET` | for Google Workspace | Keystone's one Google OAuth client, written to every licensee's KS-server the same way |
+| `KS_GOOGLE_GMAIL_READ_ENABLED` | only after Google's CASA approval | `true` switches Gmail inbox reading on for every licensee (written with the Google keys); unset = off ("pending Google's security review") |
 | `KS_OAUTH_BROKER_URL` | no | the redirect broker's base address, default `{KS_OPS_PUBLIC_URL}/api/oauth/callback`. Microsoft and Google send every sign-in to `/microsoft` or `/google` under it, and KS-Ops forwards it to the right licensee's server (signed state, address from KS-Ops's records) |
 | `KS_QBO_CLIENT_ID`, `KS_QBO_CLIENT_SECRET`, `KS_QBO_TOKEN_ENCRYPTION_KEY` | for Keystone's QuickBooks | Keystone's own QuickBooks Online (Stripe invoices, payments, refunds and fees posted there). The key is 32 bytes (64 hex characters). Unset: off. See `docs/QUICKBOOKS.md` |
 | `KS_QBO_ENVIRONMENT` | no | `sandbox` (default) or `production` |
@@ -103,6 +116,20 @@ How they are handled:
   licensee with `PATCH /api/ops/licensees/:id { "addons": { "bank_connect": true } }` (or `false`), which is audited
   and pushed like a plan change. They are never listed in `/api/public/plans` and the licensee cannot change them.
   `bank_connect` = the applicant Connect Bank (View-Only) step, the staff request item, fraud check 3 and Flinks.
+- Marketing add-on (KS_OPS_MARKETING_ADDON, Todd Oct 26): CAD $49 a month, flat, one per brokerage, any plan (Pro does
+  not include it). Chosen at sign-up (`marketing_addon: true` on `POST /api/public/signup`) or switched on/off by staff
+  with `PATCH /api/ops/licensees/:id { "addons": { "marketing": true } }` (audited, pushed as `addons.marketing`, and the
+  Stripe subscription gets or loses its flat `marketing_addon:<interval>` line, 12 x on annual). Unlike `bank_connect`
+  it is public: `/api/public/plans` lists `marketing_addon` (what it adds), each plan's `marketing` limits (campaign
+  emails 500 / 1,000 / 2,500 a month, text-to-many 50 / 250 / 500, sequences 2 / 5 / 10, visitor history 30 / 90 / 365
+  days, 1 lead form) and `signings` (4 a month per brokerage, $2.50 each over). Both trials include the add-on (the
+  licensee's server turns it on during either trial; KS-Ops bills overage with its allowance while a trial applies).
+- Overage (after a month's final usage report, worked out from KS-Ops's own plan, seats and add-ons): extra minutes
+  ($0.04), texts ($0.03; with the add-on up to 1,000 marketing texts are not counted), signings over 4 ($2.50) and, with
+  the add-on, campaign emails over the plan's + 10,000 ($10 per 10,000 or part). Monthly subscriptions: the lines wait as
+  pending invoice items and go on the next month's subscription invoice (`overage_billing.status` `pending_next_invoice`).
+  Annual subscriptions get their own overage invoice as before. QuickBooks posts the add-on and extra campaign emails to
+  "Keystone Marketing add-on", extra signings to "Keystone e-signing", minutes and texts to "Keystone usage overage".
 
 ## API
 
@@ -176,10 +203,23 @@ live licensees (`trial`, `active`, `past_due`) with a server address are returne
   by OTHER opted-in licensees only. No personal data is ever sent or stored, only hashes
 - `POST /api/licensees/:id/purged` — the server reports a cancelled licensee's data was deleted (accepted on or after
   the purge date, 409 before)
+- KS_OPS_NUMBER_PORTING_v1 "Keep your existing phone number" (relayed by KS-server's `/api/port-requests`; bodies carry
+  the carrier account number and PIN, which are stored encrypted with `OPS_ENCRYPTION_KEY` and never logged):
+  `POST /api/licensees/:id/port-requests` (create; the bill as base64, PDF/PNG/JPG up to 7 MB),
+  `POST .../port-requests/list`, `POST .../port-requests/:rid/loa`, `.../sign`, `.../forwarding`, `.../cancel`
 - Usage reports with `generated_at` more than 5 minutes in the future are refused (400). Overage is billed from
   KS-Ops's own plan and seats (pooled, with the trial bonus during a trial), not from the report's `overage`.
 
 **Staff (BF staff portal, KS silo)** — `Authorization: Bearer <token>`
+- KS_OPS_NUMBER_PORTING_v1 number transfers, on the page `/ops/porting`: `GET /api/ops/porting?status=`,
+  `GET /api/ops/porting/:id` (the Twilio checklist, account number and PIN in clear; audited), `GET .../bill`,
+  `GET .../loa` (signed letter, HTML), `POST .../status { status, foc_date?, reason?, twilio_port_sid?, twilio_reference? }`.
+  Statuses: draft -> ready_to_submit (letter signed) -> submitted -> carrier_approval_pending -> scheduled (FOC date)
+  -> completed / rejected (reason) / cancelled. Each change emails the owner from the support address; "approve the
+  carrier's text" also texts the owner when `TWILIO_*`/`KS_SMS_FROM` are set. Submitting with a letter over 30 days old
+  sends it back to the brokerage to sign again. Completed calls the brokerage's `POST /api/provision/ported-numbers`,
+  which attaches the number and releases the temporary number after `KS_PORT_RELEASE_GRACE_DAYS`; texting is then
+  registered through `src/twilio/texting.ts` (toll-free verification, US A2P 10DLC; Canadian numbers need none).
 - `POST /api/ops/auth/exchange { bfToken }` — Admin users only; returns `{ token, expires_in, user }` (1 hour).
   `GET /api/ops/auth/me` returns who the token belongs to.
 - `GET /api/ops/licensees` (`?status=&q=`), `POST /api/ops/licensees`, `GET /api/ops/licensees/:id`,
@@ -246,6 +286,8 @@ Votes are one per browser (a salted hash of a random id), 60 a day per address.
 
 ## Background jobs
 
+- Every 30 seconds: Keystone prospect marketing (campaign sends, sequence steps, CRM timeline; the prospect sync every
+  2 minutes, the reply mailbox every 5, the Keystone CRM pull every 10).
 - Every minute: post queued Stripe invoices, payments, fees and refunds to Keystone's QuickBooks (`qbo_outbox`).
 - Every 5 minutes: end staff free trials whose 28 days are up, then push plans that are waiting (`pending_sync`) to
   licensees' servers.
@@ -255,6 +297,51 @@ Votes are one per browser (a salted hash of a random id), 60 a day per address.
   after `PENDING_SIGNUP_DAYS` (their company code becomes `exp--<id>` and the old one is kept in
   `released_company_code`).
 
+## Prospect marketing (KS_OPS_PROSPECT_MARKETING_v1)
+
+Email marketing to prospective licensees, run from the staff portal's Keystone silo > Marketing (staff API under
+`/api/ops/marketing/*`, see `src/routes/opsMarketing.ts`).
+
+- Prospects (`ks_prospects`, one per email) are synced every 2 minutes from demo sign-ups, beta sign-ups, the website
+  assistant's lead form and licensees, and every 10 minutes from the Keystone CRM on BF-Server
+  (`GET /api/ks/marketing/contacts`); staff can add or import them. Each carries a status (lead, demo booked, trial,
+  customer, lost), its sources, plan interest, country and province/state, and the consent we hold.
+- Consent (CASL / CAN-SPAM, `src/marketing/consent.ts`): express; implied by an inquiry (6 months); implied by a
+  subscription (while it runs, then 2 years); implied by a published business email (12-month review); US business
+  contacts under CAN-SPAM opt-out. Nobody without valid consent is emailed: they are listed as blocked with the reason.
+  The suppression list (unsubscribed, hard bounce, spam report, opted out in the CRM, staff) is checked at queue time
+  and again right before every email.
+- Every email has the Keystone layout and a fixed footer: why they get it, the sender (business and legal name), the
+  mailing address (`KS_MARKETING_ADDRESS`, default Boreal's business address), a contact address and an unsubscribe
+  link, plus `List-Unsubscribe` and `List-Unsubscribe-Post` (one-click). `GET/POST /api/public/marketing/unsubscribe`.
+- Campaigns: send now or schedule (up to 90 days), test send (max 5 addresses, marked [Test]). Sequences: steps of
+  "wait N days, send template"; an enrolment stops when the prospect replies, signs up or books a demo after enrolling,
+  unsubscribes or loses consent.
+- Tracking: SendGrid Event Webhook to `POST /api/public/marketing/sendgrid-events` (signed with
+  `KS_MARKETING_WEBHOOK_PUBLIC_KEY`, or `?token=KS_MARKETING_WEBHOOK_TOKEN`). Opens, clicks, bounces, spam reports and
+  unsubscribes go on the prospect's timeline here and on the Keystone CRM contact on BF-Server
+  (`POST /api/ks/marketing/events`, through `ks_mkt_timeline_outbox`).
+- Replies: the reply mailbox (`KS_MARKETING_REPLY_MAILBOX`, default `MS_GRAPH_SEND_AS`) is checked every 5 minutes when
+  the Graph app has Mail.Read; staff can also click "Mark replied".
+
+| Variable | Needed | What it is |
+| --- | --- | --- |
+| `KS_MARKETING_FROM` | yes, once the domain is chosen | marketing From address on an authenticated SendGrid domain. Until set, `SENDGRID_FROM` is used and the portal shows a warning |
+| `KS_MARKETING_FROM_NAME` | no | default `Keystone` |
+| `KS_MARKETING_REPLY_TO` | no | default `KS_SALES_EMAIL` |
+| `KS_MARKETING_BUSINESS_NAME` / `KS_MARKETING_LEGAL_NAME` | no | footer sender identification (default `Keystone` / `2630108 Alberta Ltd.`) |
+| `KS_MARKETING_ADDRESS` | recommended | footer mailing address (default `450 Sparling Crt SW, Edmonton, AB T6X 1G9, Canada`) |
+| `KS_MARKETING_SENDGRID_API_KEY` | no | a separate SendGrid key (e.g. a Keystone subuser); default `SENDGRID_API_KEY` |
+| `KS_MARKETING_WEBHOOK_PUBLIC_KEY` | for tracking | the Signed Event Webhook verification key |
+| `KS_MARKETING_WEBHOOK_TOKEN` | alternative | 24+ character token in the webhook URL instead of the signature |
+| `KS_MARKETING_UNSUBSCRIBE_SECRET` | no | signs unsubscribe links (default `OPS_JWT_SECRET`) |
+| `KS_MARKETING_REPLY_MAILBOX` | no | mailbox checked for replies (default `MS_GRAPH_SEND_AS`) |
+| `KS_OPS_PUBLIC_URL` | yes | KS-Ops's public address, used in unsubscribe links |
+
 ## Provisioning
 
-`KS_OPS_URL=https://<ks-ops> scripts/provision-licensee.sh <code> <region>` creates a licensee's Azure resources. See `docs/PROVISIONING.md`.
+Every brokerage runs on Keystone's one shared server with its own database (KS_SHARED_HOSTING_v1).
+`scripts/provision-shared.sh` makes the shared Azure resources once; after that KS-Ops sets up each brokerage itself
+on `/ops/provisioning` (its database `ks_<code>`, its role, its `ks_tenants` registry entry, its web builds).
+`web-host/` is the shared web host (`ks-shared-web`). See `docs/PROVISIONING.md`. The old per-brokerage script is kept
+as `scripts/legacy/provision-licensee.sh`.

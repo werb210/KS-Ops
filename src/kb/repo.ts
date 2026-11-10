@@ -252,9 +252,12 @@ export async function searchArticles(
       );
       if (withVec.rows.length) {
         const [qv] = await embed(opts.fetch, [q]);
+        // Equally similar articles are ordered by how well their words match (then by id), never by where the
+        // database happens to keep the rows (KS_OPS_ONBOARDING_v1: a longer article must not reshuffle the answers).
+        const ftsRank = new Map(ftsRows.map((a) => [String(a.id), Number(a.rank)]));
         semRows = withVec.rows
           .map((r) => ({ id: String(r.id), similarity: cosine(qv, (r.embedding as number[]).map(Number)) }))
-          .sort((a, b) => b.similarity - a.similarity)
+          .sort((a, b) => b.similarity - a.similarity || (ftsRank.get(b.id) ?? -1) - (ftsRank.get(a.id) ?? -1) || a.id.localeCompare(b.id))
           .slice(0, 25);
         semantic = true;
       }

@@ -2,6 +2,7 @@
 import { Router, type Request } from "express";
 import { isProduction, opsPublicUrl, salesEmail, signupTurnstileOptional } from "../config.js";
 import { checkLogo, logoByKey, logoPath, saveLogo, type CheckedLogo } from "../lib/logo.js";
+import { checkFavicon, faviconByKey, faviconPath, saveFavicon, type CheckedFavicon } from "../lib/logo.js"; // KS_OPS_SIGNUP_FAVICON_v1
 import type { Deps } from "../deps.js";
 import { BillingNotConfigured } from "../billing/stripeClient.js";
 import { createCheckout } from "../billing/billing.js";
@@ -18,6 +19,7 @@ import { CODE_MESSAGES, codeProblem, crossFieldErrors, normalizeCode, signupSche
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
 import { BrandScanError, scanBrand } from "../lib/brandScan.js";
+import { parseTeam, replaceTeam } from "../onboarding/team.js"; // KS_OPS_ONBOARDING_v1
 
 const limited = (limit: number, windowMs: number) => limiter(limit, windowMs);
 
@@ -44,7 +46,8 @@ function salesSignupMail(l: LicenseeRow, note: string) {
         `Company: ${l.company_name} (${l.legal_name})`,
         `Company code: ${l.company_code}`,
         `Plan: ${PLAN_NAMES[l.plan]}, ${l.seats} seat(s), ${l.billing_interval} billing, ${l.support_level} support` +
-          (l.extra_storage_blocks > 0 ? `, ${l.extra_storage_blocks} extra 50 GB storage block(s)` : ""),
+          (l.extra_storage_blocks > 0 ? `, ${l.extra_storage_blocks} extra 50 GB storage block(s)` : "") +
+          (l.addons?.marketing === true ? ", Marketing add-on" : ""),
         `Pays by: ${PAYMENT_METHOD_NAMES[isPaymentMethod(l.payment_method) ? l.payment_method : DEFAULT_PAYMENT_METHOD]}`,
         `Contact: ${l.contact_name}, ${l.contact_email}, ${l.contact_phone}`,
         `Address: ${l.mailing_address ?? ""}, ${l.province_state ?? ""}, ${l.country}`,
@@ -87,8 +90,15 @@ export function publicRouter(deps: Deps): Router {
         console.warn(`[signup] honeypot filled from ${clientIp(req)}`);
         return res.status(400).json({ errors: { form: "We could not accept this sign-up. Please try again." } });
       }
+      // KS_OPS_ONBOARDING_v1 - the team roster (owner first, at most one person per seat) is checked with the form.
+      const team = parseTeam(body.team, { contact_name: String(body.contact_name ?? ""), contact_email: String(body.contact_email ?? ""), contact_phone: String(body.contact_phone ?? "") }, Number(body.seats) || 1);
+      const teamErrors = team.ok ? {} : Object.fromEntries(Object.entries(team.errors).filter(([k]) => k.startsWith("team")));
       const parsed = parseBody(signupSchema, body, crossFieldErrors);
-      if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
+      if (!parsed.ok) return res.status(400).json({ errors: { ...teamErrors, ...parsed.errors } });
+      if (!team.ok) {
+        // The owner's own mobile must be a Canadian or US mobile (the owner signs in with it, like the rest of the team).
+        return res.status(400).json({ errors: team.errors });
+      }
       const input = parsed.data;
       // KS_OPS_v13_LOGO - an uploaded logo is checked before anything is saved.
       let logo: CheckedLogo | null = null;
@@ -96,6 +106,13 @@ export function publicRouter(deps: Deps): Router {
         const checked = checkLogo(input.logo_file);
         if (!checked.ok) return res.status(400).json({ errors: { logo_file: checked.error } });
         logo = checked.logo;
+      }
+      // KS_OPS_SIGNUP_FAVICON_v1
+      let favicon: CheckedFavicon | null = null;
+      if ((input as { favicon_file?: unknown }).favicon_file) {
+        const checked = checkFavicon((input as { favicon_file: { content_type: string; data_base64: string; filename?: string } }).favicon_file);
+        if (!checked.ok) return res.status(400).json({ errors: { favicon_file: checked.error } });
+        favicon = checked.favicon;
       }
       if (await codeTaken(deps.db, input.company_code)) {
         return res.status(409).json({ errors: { company_code: "taken" } });
@@ -133,6 +150,7 @@ export function publicRouter(deps: Deps): Router {
           seats: input.seats,
           extra_storage_blocks: input.extra_storage_blocks,
           payment_method: input.payment_method,
+          addons: input.marketing_addon ? { marketing: true } : {}, // KS_OPS_MARKETING_ADDON
           primary_color: input.primary_color,
           accent_color: input.accent_color,
           background_color: input.background_color,
@@ -155,9 +173,17 @@ export function publicRouter(deps: Deps): Router {
         await deps.db.query("UPDATE licensees SET logo_url = $2, updated_at = now() WHERE id = $1", [l.id, url]);
         l = { ...l, logo_url: url };
       }
+      if (favicon) { // KS_OPS_SIGNUP_FAVICON_v1
+        const key = await saveFavicon(deps.db, l.id, favicon);
+        const url = `${opsPublicUrl(`${req.protocol}://${req.get("host") ?? ""}`)}${faviconPath(key)}`;
+        await deps.db.query("UPDATE licensees SET favicon_url = $2, updated_at = now() WHERE id = $1", [l.id, url]);
+        l = { ...l, favicon_url: url } as typeof l;
+      }
+      await replaceTeam(deps.db, l.id, team.members);
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
-        payment_method: l.payment_method, logo_uploaded: Boolean(logo), ip: clientIp(req),
+        payment_method: l.payment_method, marketing_addon: input.marketing_addon === true, logo_uploaded: Boolean(logo), ip: clientIp(req),
+        team_size: team.members.length,
       });
       await crmLicenseeCreated(deps, l);
 
@@ -201,6 +227,22 @@ export function publicRouter(deps: Deps): Router {
   );
 
   // KS_OPS_v13_LOGO - an uploaded logo. Public (it is shown in the apps); served as an image only, never as a page.
+  // KS_OPS_SIGNUP_FAVICON_v1
+  router.get(
+    "/favicons/:key",
+    limited(300, 60_000),
+    h(async (req, res) => {
+      const f = await faviconByKey(deps.db, String(req.params.key));
+      if (!f) return res.status(404).json({ error: "not_found" });
+      res.setHeader("Content-Type", f.content_type);
+      res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      return res.send(Buffer.from(f.data));
+    }),
+  );
+
   router.get(
     "/logos/:key",
     limited(300, 60_000),

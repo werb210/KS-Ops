@@ -38,6 +38,7 @@ export type LicenseeRow = {
   client_url: string | null;
   portal_url: string | null;
   logo_url: string | null;
+  favicon_url?: string | null; // KS_OPS_SIGNUP_FAVICON_v1
   primary_color: string | null;
   /** KS_OPS_v13_BRAND - accent (secondary) and optional background / surface colours. */
   accent_color?: string | null;
@@ -66,6 +67,7 @@ export type LicenseeRow = {
   /** The payment method KS-Ops last made the Stripe customer's default for invoices (from the subscription). */
   stripe_default_payment_method?: string | null;
   onboarding_fee_paid: boolean;
+  test_brokerage?: boolean; // KS_OPS_TEST_BROKERAGE_v1
   plan_sync_status: string;
   plan_sync_error: string | null;
   plan_sync_attempts: number;
@@ -80,6 +82,10 @@ export type LicenseeRow = {
   admin_trial_pro_until?: Date | null;
   admin_trial_ended_at?: Date | null;
   admin_trial_end_reason?: string | null;
+  /** KS_OPS_ONBOARDING_v1 - the agreement link and its one reminder, and the owner's onboarding email. */
+  agreement_link_sent_at?: Date | null;
+  agreement_reminder_sent_at?: Date | null;
+  onboarding_email_sent_at?: Date | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -145,6 +151,8 @@ export const INSERTABLE = [
   "address_line1", "address_line2", "city", "postal_code", "accent_color", "background_color", "font_family",
   "signup_token_hash", "signup_token_encrypted", "source", "accepted_terms_at", "accepted_privacy_at", "payment_method",
   "business_number", "business_type", "contact_title", // KS_OPS_TWILIO_AUTO_v1
+  "addons", // KS_OPS_MARKETING_ADDON - the Marketing add-on chosen at sign-up
+  "test_brokerage", // KS_OPS_TEST_BROKERAGE_v1
 ] as const;
 
 export async function insertLicensee(db: Q, fields: Partial<Record<(typeof INSERTABLE)[number], unknown>>): Promise<LicenseeRow> {

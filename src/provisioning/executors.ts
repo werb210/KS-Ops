@@ -11,6 +11,11 @@ import { ensureAddress, ensureBundle, ensureSubaccount, pointVoiceApp, twilioOf,
 import { linesFrom, plainStatus, submitTexting, pushTexting } from "../twilio/texting.js";
 import type { TwilioStore } from "../twilio/store.js";
 import type { TwilioHttp } from "../twilio/http.js";
+import type { SharedDeps } from "../tenants/shared.js"; // KS_SHARED_HOSTING_v1
+import { SHARED_EXECUTORS, envOf, NO_DOMAIN_MESSAGE, sharedOf } from "./sharedSteps.js";
+import { ksDomain, sharedAgentUrl, tenantKeySetting } from "../tenants/config.js";
+import { setTenantStatus, tenantStatusFor } from "../tenants/repo.js";
+import { ONBOARDING_EXECUTORS } from "./onboardingSteps.js"; // KS_OPS_ONBOARDING_v1
 
 export type StepOutcome =
   | { kind: "done"; output?: Record<string, unknown>; message?: string }
@@ -18,13 +23,13 @@ export type StepOutcome =
   | { kind: "blocked"; retryMs: number; message: string }
   | { kind: "failed"; error: string };
 
-export type ExecDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now"> & { env?: NodeJS.ProcessEnv; twilioStore?: TwilioStore; twilioHttp?: TwilioHttp };
+export type ExecDeps = Pick<Deps, "db" | "fetch" | "mailer" | "now"> & { env?: NodeJS.ProcessEnv; twilioStore?: TwilioStore; twilioHttp?: TwilioHttp; shared?: SharedDeps };
 export type ExecCtx = {
   deps: ExecDeps;
   run: RunRow;
   step: StepRow;
   licensee: LicenseeRow;
-  /** Every step's output so far (e.g. azure_resources reports agent_url). */
+  /** Every step's output so far (e.g. phone_numbers reports the lines bought). */
   outputs: Record<string, Record<string, unknown>>;
   log: (message: string, level?: "info" | "warn" | "error") => Promise<void>;
 };
@@ -44,9 +49,15 @@ function waitOrFail(ctx: ExecCtx, limitMs: number, retryMs: number, message: str
   return { kind: "wait", retryMs, message };
 }
 
-async function probe(fetchImpl: typeof fetch, url: string, check: (status: number, body: string) => boolean): Promise<string | null> {
+/** KS_SHARED_HOSTING_v1 - every call to a brokerage's server names the brokerage, so it also resolves on the shared
+ *  server's own address (the X-KS-Tenant header wins over the Host header there; a single-brokerage server ignores it). */
+export function tenantHeader(l: Pick<LicenseeRow, "company_code">): Record<string, string> {
+  return { "X-KS-Tenant": l.company_code };
+}
+
+async function probe(fetchImpl: typeof fetch, url: string, check: (status: number, body: string) => boolean, headers: Record<string, string> = {}): Promise<string | null> {
   try {
-    const r = await fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { "Cache-Control": "no-cache" } });
+    const r = await fetchImpl(url, { signal: AbortSignal.timeout(10_000), headers: { "Cache-Control": "no-cache", ...headers } });
     const body = await r.text().catch(() => "");
     return check(r.status, body) ? null : `${url} answered ${r.status}`;
   } catch (err) {
@@ -69,14 +80,15 @@ const appPage = (status: number, body: string) => status === 200 && /id=["']root
 export const health: Executor = async (ctx) => {
   const l = ctx.licensee;
   if (!l.server_url || !l.portal_url || !l.client_url) {
-    return { kind: "failed", error: "The licensee has no server, portal or client address yet (the Azure step reports them)." };
+    // KS_SHARED_HOSTING_v1 - the addresses come from the tenant_registry step (host names under KS_DOMAIN).
+    if (!ksDomain(envOf(ctx))) return { kind: "failed", error: NO_DOMAIN_MESSAGE };
+    return { kind: "failed", error: "The licensee has no server, portal or client address yet: retry the tenant_registry step." };
   }
-  const reported = String(ctx.outputs.azure_resources?.agent_url ?? "");
-  const agentUrl = /^https:\/\//.test(reported) ? trim(reported) : trim(l.server_url).replace(/-server\./, "-agent.");
+  const agentUrl = trim(sharedAgentUrl(envOf(ctx))); // the one shared KS-Agent
   const problems = (
     await Promise.all([
-      probe(ctx.deps.fetch, `${trim(l.server_url)}/health`, jsonOk),
-      agentUrl !== trim(l.server_url) ? probe(ctx.deps.fetch, `${agentUrl}/health`, (s) => s === 200) : Promise.resolve(null),
+      probe(ctx.deps.fetch, `${trim(l.server_url)}/health`, jsonOk, tenantHeader(l)),
+      agentUrl && agentUrl !== trim(l.server_url) ? probe(ctx.deps.fetch, `${agentUrl}/health`, (s) => s === 200) : Promise.resolve(null),
       probe(ctx.deps.fetch, `${trim(l.portal_url)}/`, appPage),
       probe(ctx.deps.fetch, `${trim(l.client_url)}/`, appPage),
     ])
@@ -104,6 +116,17 @@ export const configure: Executor = async (ctx) => {
       await crmLicenseeStatus(ctx.deps, { ...l, status: to }, "provisioning", to, ctx.deps.now(), "ks-ops provisioning");
       await ctx.log(`status provisioning -> ${to}`);
     }
+    // KS_SHARED_HOSTING_v1 - the registry follows straight away (the worker also keeps it in step).
+    const tenantStatus = tenantStatusFor(to);
+    if (tenantStatus && tenantKeySetting(envOf(ctx))) {
+      try {
+        await setTenantStatus(sharedOf(ctx).control(), l.company_code, tenantStatus);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[provisioning] registry status not set", { code: l.company_code, to, message });
+        await ctx.log(`registry status not set to ${to} yet (${message}); the worker tries again`, "warn");
+      }
+    }
   }
   // The push carries the plan, status, add-ons, beta flags and (KS-Ops v15) the sign-up branding.
   const res = await pushPlan(ctx.deps, l.id, "ks-ops provisioning");
@@ -118,7 +141,7 @@ export const adminUser: Executor = async (ctx) => {
   try {
     const r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/admin`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning" },
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning", ...tenantHeader(l) },
       body: JSON.stringify({ name: l.contact_name, email: l.contact_email, phone: l.contact_phone }),
       signal: AbortSignal.timeout(15_000),
     });
@@ -178,7 +201,7 @@ export function phoneRequest(l: Pick<LicenseeRow, "contact_phone" | "province_st
   return { area_code: areaCode || undefined, region: region || undefined, country: String(l.country ?? "").toUpperCase() === "US" ? "US" : "CA" };
 }
 
-const PHONE_TWILIO_SETUP = "Connect Twilio on the licensee's KS-server first: set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN (a Keystone subaccount for this licensee) and KS_SERVER_URL in its App Service settings, then press Retry step. Checked again every 6 hours.";
+const PHONE_TWILIO_SETUP = "The brokerage's server has no Twilio settings yet: retry the twilio_settings step (it saves the sub-account's settings in the brokerage's registry entry), then press Retry step here. Checked again every 6 hours.";
 
 /**
  * KS_OPS_PHONE_PROVISIONING - asks the licensee's KS-server to buy its business line (every plan) and toll-free line
@@ -186,7 +209,14 @@ const PHONE_TWILIO_SETUP = "Connect Twilio on the licensee's KS-server first: se
  * signs the webhooks) and is safe to ask again. Twilio not connected there yet: blocked with what to do, retried every
  * 6 hours. A Twilio address / bundle requirement: failed with the explanation (emailed to sales). Other errors: retried.
  */
+/** KS_OPS_TEST_BROKERAGE_v1 - a test brokerage buys no numbers and registers nothing with carriers. */
+export function testBrokerageSkip(l: { test_brokerage?: boolean | null }, what: string): StepOutcome | null {
+  return l.test_brokerage ? { kind: "done", output: { skipped: "test_brokerage" }, message: `skipped: test brokerage (no ${what})` } : null;
+}
+
 export const phoneNumbers: Executor = async (ctx) => {
+  const skip = testBrokerageSkip(ctx.licensee, "phone numbers bought");
+  if (skip) return skip;
   const l = ctx.licensee;
   const key = opsKeyOf(l);
   if (!l.server_url || !key) return { kind: "failed", error: "No server address or ops key on the licensee." };
@@ -205,7 +235,7 @@ export const phoneNumbers: Executor = async (ctx) => {
   try {
     r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/phone-numbers`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning" },
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning", ...tenantHeader(l) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(60_000),
     });
@@ -249,6 +279,8 @@ export const twilioAccount: Executor = async (ctx) => fromTwilio(ctx, await ensu
 export const twilioAddress: Executor = async (ctx) => fromTwilio(ctx, await ensureAddress(ctx.deps, ctx.licensee, twilioLog(ctx)));
 export const twilioVoice: Executor = async (ctx) => fromTwilio(ctx, await pointVoiceApp(ctx.deps, ctx.licensee));
 export const twilioBundle: Executor = async (ctx) => {
+  const skip = testBrokerageSkip(ctx.licensee, "regulatory bundle");
+  if (skip) return skip;
   const started = ctx.step.started_at ? new Date(ctx.step.started_at) : null;
   // The bundle waits up to 14 days for Twilio; ensureBundle decides when to give up.
   return fromTwilio(ctx, await ensureBundle(ctx.deps, ctx.licensee, started, twilioLog(ctx)), 15 * DAY);
@@ -257,6 +289,8 @@ export const twilioBundle: Executor = async (ctx) => {
 /** Submits texting registration and pushes the status to the licensee's server. Done once submitted: approval by the
  *  carriers takes days and is followed by the worker, never holding the run. */
 export const textingRegistration: Executor = async (ctx) => {
+  const skip = testBrokerageSkip(ctx.licensee, "texting registration");
+  if (skip) return skip;
   const lines = linesFrom(ctx.outputs.phone_numbers?.results);
   const rows = await submitTexting(ctx.deps, ctx.licensee, lines, (m) => ctx.log(m));
   for (const r of rows) await ctx.log(`texting: ${plainStatus(r)}`, r.status === "needs_info" || r.status === "rejected" ? "warn" : "info");
@@ -278,7 +312,7 @@ export const retentionGate: Executor = async (ctx) => {
   if (!l.server_url || !key) return { kind: "blocked", retryMs: DAY, message: "No server address or ops key, so the retention rules cannot be checked. Mark this step done by hand only after checking there is no data." };
   try {
     const r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/teardown-check`, {
-      headers: { "X-KS-Ops-Key": key },
+      headers: { "X-KS-Ops-Key": key, ...tenantHeader(l) },
       signal: AbortSignal.timeout(15_000),
     });
     const body = (await r.json().catch(() => ({}))) as Record<string, unknown>;
@@ -312,6 +346,8 @@ export const SERVICE_EXECUTORS: Record<string, Executor> = {
   texting_registration: textingRegistration,
   retention_gate: retentionGate,
   finish: finishTeardown,
+  ...SHARED_EXECUTORS, // KS_SHARED_HOSTING_v1
+  ...ONBOARDING_EXECUTORS, // KS_OPS_ONBOARDING_v1
 };
 
 /** Re-reads the licensee (steps change it). */

@@ -44,7 +44,15 @@ export const itemCreateSchema = z.object({
   area: z.string().trim().max(60).default(""),
   public: z.boolean().default(true),
 });
-export const itemUpdateSchema = itemCreateSchema.partial();
+// Review fix: no defaults on update - with Zod 4, .partial() still fills defaults, so a PATCH of only the status
+// would have blanked the summary and area.
+export const itemUpdateSchema = z.object({
+  title: text(140, "Enter a title").optional(),
+  summary: z.string().trim().max(600).optional(),
+  status: z.enum(ROADMAP_STATUSES).optional(),
+  area: z.string().trim().max(60).optional(),
+  public: z.boolean().optional(),
+});
 
 export const approveSchema = z.object({
   title: z.string().trim().min(1).max(140).optional(),

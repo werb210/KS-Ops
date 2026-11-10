@@ -1,7 +1,8 @@
-// KS_OPS_AUTO_PROVISION_v1 - the workflow side, with az, gh, the GitHub API and KS-Ops all faked.
+// KS_OPS_AUTO_PROVISION_v1 - the workflow side, with gh, the GitHub API and KS-Ops all faked.
+// KS_SHARED_HOSTING_v1 - it only touches KS-Portal and KS-Client now, and never signs in to Azure.
 import { describe, expect, it, vi } from "vitest";
 import {
-  azureDelete, azureResources, deployOne, ensureRegistry, githubEnvironments, preflightMissing, readConfig, runWorkflow,
+  deployOne, ensureRegistry, githubEnvironments, preflightMissing, readConfig, RUNNER_STEPS, runWorkflow,
   type Context, type ExecResult, type RunnerConfig, type RunnerDeps,
 } from "../../src/provisioning/runner/runner.js";
 
@@ -14,6 +15,7 @@ const context: Context = {
   run_id: RUN, kind: "provision", dry_run: false, steps: [], region: "canadacentral", licensee_id: "11111111-1111-4111-8111-111111111111",
   code: "prairie", company_name: "Prairie Capital", assistant_name: "Maya", website: "https://prairie.example", plan: "growth",
   contact_email: "dana@prairie.example",
+  server_url: "https://prairie.api.keystone.test", portal_url: "https://prairie.portal.keystone.test", client_url: "https://prairie.app.keystone.test",
 };
 
 type Route = (url: string, init: RequestInit) => { status?: number; body?: unknown } | undefined;
@@ -27,7 +29,6 @@ function runnerDeps(opts: { exec?: (cmd: string, args: string[], o?: { env?: Rec
     const url = String(u);
     if (url.startsWith("https://ks-ops.example.test/api/provisioning/callback/")) {
       if (url.endsWith("/context")) return new Response(JSON.stringify(context));
-      if (url.endsWith("/ops-key")) return new Response(JSON.stringify({ ops_key: "ksops_secret_key" }));
       reports.push(JSON.parse(String(init.body ?? "{}")));
       return new Response(JSON.stringify({ ok: true }));
     }
@@ -40,11 +41,11 @@ function runnerDeps(opts: { exec?: (cmd: string, args: string[], o?: { env?: Rec
   const deps: RunnerDeps = {
     exec,
     fetch: fetchImpl as unknown as typeof fetch,
-    env: { AZURE_CLIENT_ID: "c", AZURE_TENANT_ID: "t", AZURE_SUBSCRIPTION_ID: "s", OPENAI_API_KEY: "sk-test", AZURE_LOGIN_OUTCOME: "success", ...(opts.env ?? {}) },
+    env: { ...(opts.env ?? {}) },
     log: (m) => logs.push(m),
     sleep: async (ms) => { clock += ms; },
     now: () => new Date(clock),
-    readFile: async () => JSON.stringify({ server_url: "https://ks-prairie-server.azurewebsites.net", agent_url: "https://ks-prairie-agent.azurewebsites.net", portal_url: "https://ks-prairie-portal.azurestaticapps.net", client_url: "https://ks-prairie-client.azurestaticapps.net", resource_group: "ks-prairie", deploy_client_id: "dep-client" }),
+    readFile: async () => "{}",
     tempFile: (n) => `/tmp/x/${n}`,
   };
   return { deps, exec, fetch: fetchImpl, logs, reports };
@@ -56,74 +57,56 @@ describe("workflow runner", () => {
     expect(() => readConfig({ KS_OPS_URL: "http://ops.test", RUN_ID: RUN, CALLBACK_TOKEN: "x" })).toThrow(/https/);
   });
 
-  it("reports missing settings instead of changing anything", async () => {
-    expect(preflightMissing(cfg({ ghToken: "" }), {})).toEqual(["AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID", "GITHUB_APP", "OPENAI_API_KEY"]);
-    const t = runnerDeps({ env: { AZURE_LOGIN_OUTCOME: "failure" } });
-    expect(await runWorkflow(t.deps, cfg({ steps: ["azure_resources"] }))).toBe(0);
-    expect(t.reports).toEqual([{ status: "setup_missing", missing: ["AZURE_LOGIN"], message: "missing: AZURE_LOGIN" }]);
+  it("needs only the GitHub credential (no Azure sign-in), and reports it missing instead of changing anything", async () => {
+    expect(preflightMissing(cfg({ ghToken: "" }), {})).toEqual(["GITHUB_APP"]);
+    expect(preflightMissing(cfg(), {})).toEqual([]);
+    const t = runnerDeps();
+    expect(await runWorkflow(t.deps, cfg({ ghToken: "", steps: ["github_environments"] }))).toBe(0);
+    expect(t.reports).toEqual([{ status: "setup_missing", missing: ["GITHUB_APP"], message: "missing: GITHUB_APP" }]);
     expect(t.exec).not.toHaveBeenCalled();
   });
 
-  it("a dry run prints the plan, reports each step and calls neither az nor GitHub", async () => {
+  it("knows only the web build steps; the Azure and settings steps are KS-Ops's own now", () => {
+    expect(Object.keys(RUNNER_STEPS.provision)).toEqual(["github_environments", "deploy_registry", "deploy"]);
+    expect(Object.keys(RUNNER_STEPS.teardown)).toEqual(["deploy_registry_remove", "github_environments_remove"]);
+  });
+
+  it("a dry run prints the plan, reports each step and calls neither gh nor GitHub", async () => {
     const t = runnerDeps();
-    expect(await runWorkflow(t.deps, cfg({ dryRun: true, steps: ["azure_resources", "deploy"] }))).toBe(0);
+    expect(await runWorkflow(t.deps, cfg({ dryRun: true, steps: ["github_environments", "deploy"] }))).toBe(0);
     expect(t.exec).not.toHaveBeenCalled();
     expect(t.fetch.mock.calls.every(([u]) => String(u).startsWith("https://ks-ops.example.test/"))).toBe(true);
-    expect(t.reports.filter((r) => r.status === "done").map((r) => r.step)).toEqual(["azure_resources", "deploy"]);
-    expect(t.logs.some((l) => l.startsWith("would: deploy: KS-server - run deploy.yml on main with licensee=prairie"))).toBe(true);
+    expect(t.reports.filter((r) => r.status === "done").map((r) => r.step)).toEqual(["github_environments", "deploy"]);
+    expect(t.logs.some((l) => l.startsWith("would: deploy: KS-Portal - run deploy.yml on main with licensee=prairie"))).toBe(true);
     expect(t.logs).toContain("::add-mask::cb-token");
   });
 
-  it("azure_resources runs provision-licensee.sh with the ops key, the deploy identity and no secret printing", async () => {
-    const t = runnerDeps();
-    const out = await azureResources(t.deps, cfg(), context);
-    const [cmd, args, opts] = t.exec.mock.calls[0];
-    expect(cmd).toBe("bash");
-    expect(args).toEqual(["scripts/provision-licensee.sh", "prairie", "canadacentral"]);
-    expect(opts?.env).toMatchObject({ KS_OPS_KEY: "ksops_secret_key", DEPLOY_IDENTITY: "1", KS_NONINTERACTIVE: "1", KS_PLAN: "growth", DEPLOY_IDENTITY_REPOS: "werb210/KS-server,werb210/KS-Agent" });
-    expect(t.logs).toContain("::add-mask::ksops_secret_key");
-    expect(out).toMatchObject({ server_url: "https://ks-prairie-server.azurewebsites.net", deploy_client_id: "dep-client" });
-  });
-
   it("a failing step is reported failed and stops the run", async () => {
-    const t = runnerDeps({ exec: () => ({ code: 1, stdout: "", stderr: "QuotaExceeded in canadacentral" }) });
-    expect(await runWorkflow(t.deps, cfg({ steps: ["azure_resources", "secrets"] }))).toBe(1);
-    expect(t.reports.at(-1)).toMatchObject({ step: "azure_resources", status: "failed", message: expect.stringMatching(/QuotaExceeded/) });
-    expect(t.reports.some((r) => r.step === "secrets")).toBe(false);
+    const t = runnerDeps({ exec: () => ({ code: 1, stdout: "", stderr: "HTTP 403: Resource not accessible by integration" }), routes: [(url, init) => (init.method === "PUT" && url.includes("/environments/") ? { status: 200, body: {} } : undefined)] });
+    expect(await runWorkflow(t.deps, cfg({ steps: ["github_environments", "deploy_registry"] }))).toBe(1);
+    expect(t.reports.at(-1)).toMatchObject({ step: "github_environments", status: "failed", message: expect.stringMatching(/Resource not accessible/) });
+    expect(t.reports.some((r) => r.step === "deploy_registry")).toBe(false);
   });
 
-  it("github_environments writes variables in the open and secrets only through stdin", async () => {
-    const az = (args: string[]) => {
-      const a = args.join(" ");
-      if (a.includes("account show")) return JSON.stringify({ t: "tenant-1", s: "sub-1" });
-      if (a.includes("identity show")) return "dep-client";
-      if (a.includes("secrets list")) return a.includes("portal") ? "swa-portal-token" : "swa-client-token";
-      if (a.includes("-portal")) return "ks-prairie-portal.azurestaticapps.net";
-      if (a.includes("-client")) return "ks-prairie-client.azurestaticapps.net";
-      if (a.includes("-agent")) return "ks-prairie-agent.azurewebsites.net";
-      return "ks-prairie-server.azurewebsites.net";
-    };
+  it("github_environments writes the web build variables for KS-Portal and KS-Client only, and no secret", async () => {
     const envPuts: string[] = [];
     const t = runnerDeps({
-      exec: (cmd, args) => ({ code: 0, stdout: cmd === "az" ? az(args) : "", stderr: "" }),
       routes: [(url, init) => (init.method === "PUT" && url.includes("/environments/ks-prairie") ? (envPuts.push(url), { status: 200, body: {} }) : undefined)],
     });
     await githubEnvironments(t.deps, cfg(), context);
-    expect(envPuts.map((u) => u.split("/")[5])).toEqual(["KS-server", "KS-Agent", "KS-Portal", "KS-Client"]);
+    expect(envPuts.map((u) => u.split("/")[5])).toEqual(["KS-Portal", "KS-Client"]);
     const gh = t.exec.mock.calls.filter(([c]) => c === "gh");
     const vars = gh.filter(([, a]) => a[0] === "variable").map(([, a]) => `${a[a.indexOf("--repo") + 1]} ${a[2]}=${a[a.indexOf("--body") + 1]}`);
-    expect(vars).toContain("werb210/KS-server AZURE_CLIENT_ID=dep-client");
-    expect(vars).toContain("werb210/KS-Agent AZURE_WEBAPP_NAME=ks-prairie-agent");
-    expect(vars).toContain("werb210/KS-Portal VITE_API_BASE_URL=https://ks-prairie-server.azurewebsites.net");
-    expect(vars).toContain("werb210/KS-Client VITE_CLIENT_APP_URL=https://ks-prairie-client.azurestaticapps.net");
-    const secrets = gh.filter(([, a]) => a[0] === "secret");
-    expect(secrets).toHaveLength(2);
-    for (const [, args, o] of secrets) {
-      expect(args.join(" ")).not.toContain("swa-");
-      expect(o?.input).toMatch(/^swa-(portal|client)-token$/);
-      expect(o?.env).toEqual({ GH_TOKEN: "ghs_app_token" });
-    }
-    expect(t.logs).toContain("::add-mask::swa-portal-token");
+    expect(vars).toContain("werb210/KS-Portal VITE_API_BASE_URL=https://prairie.api.keystone.test");
+    expect(vars).toContain("werb210/KS-Portal VITE_APP_URL=https://prairie.portal.keystone.test");
+    expect(vars).toContain("werb210/KS-Client VITE_CLIENT_APP_URL=https://prairie.app.keystone.test");
+    expect(gh.filter(([, a]) => a[0] === "secret")).toHaveLength(0);
+    expect(t.exec.mock.calls.some(([c]) => c === "az")).toBe(false);
+  });
+
+  it("github_environments refuses to run before KS-Ops has the brokerage's addresses", async () => {
+    const t = runnerDeps();
+    await expect(githubEnvironments(t.deps, cfg(), { ...context, portal_url: "" })).rejects.toThrow(/no portal_url/);
   });
 
   const registry = (licensees: unknown[]) => ({ content: Buffer.from(JSON.stringify({ $comment: "x", licensees })).toString("base64"), sha: "blob1" });
@@ -151,7 +134,7 @@ describe("workflow runner", () => {
     expect(r).toEqual({ repo: "KS-server", changed: true, pull_request: "https://github.com/werb210/KS-server/pull/7" });
     const file = JSON.parse(Buffer.from(committed.content, "base64").toString("utf8"));
     expect(file.$comment).toBe("x");
-    expect(file.licensees).toEqual([{ code: "older", enabled: true }, { code: "prairie", environment: "ks-prairie", enabled: true, apps: ["server", "agent", "portal", "client"] }]);
+    expect(file.licensees).toEqual([{ code: "older", enabled: true }, { code: "prairie", environment: "ks-prairie", enabled: true, apps: ["portal", "client"] }]);
     expect(committed).toMatchObject({ branch: "provision/prairie", sha: "blob1" });
     expect(merge).toMatchObject({ merge_method: "squash", sha: "head1", commit_title: expect.stringContaining("[skip ci]") });
     expect(checksCalls).toBe(2);
@@ -187,11 +170,5 @@ describe("workflow runner", () => {
       ],
     });
     expect(await deployOne(t.deps, cfg(), "KS-server", "deploy.yml", "prairie")).toBe("job1");
-  });
-
-  it("teardown never deletes a resource group that is not tagged for this licensee", async () => {
-    const t = runnerDeps({ exec: (_c, args) => ({ code: 0, stdout: args.includes("exists") ? "true" : args.includes("show") ? "someone-else" : "", stderr: "" }) });
-    await expect(azureDelete(t.deps, cfg({ mode: "teardown" }), context)).rejects.toThrow(/not tagged keystone-licensee=prairie/);
-    expect(t.exec.mock.calls.some(([, a]) => a.includes("delete"))).toBe(false);
   });
 });

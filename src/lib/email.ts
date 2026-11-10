@@ -3,7 +3,18 @@ import { env } from "../config.js";
 
 /** An attached file (base64). Used for the demo's lender package. */
 export type MailAttachment = { filename: string; contentType: string; base64: string };
-export type Mail = { to: string[]; subject: string; text: string; html?: string; attachments?: MailAttachment[] };
+export type Mail = {
+  to: string[];
+  subject: string;
+  text: string;
+  html?: string;
+  attachments?: MailAttachment[];
+  /** KS_OPS_ONBOARDING_v1 - another sending address (SendGrid only; it must be a verified sender there). Graph always
+   *  sends as MS_GRAPH_SEND_AS, so there it only becomes the reply-to address. */
+  from?: { email: string; name?: string };
+  /** Where replies go. */
+  replyTo?: string;
+};
 export type Mailer = (mail: Mail) => Promise<{ ok: boolean; error?: string }>;
 
 export const esc = (s: unknown) =>
@@ -30,7 +41,8 @@ export function sendgridConfigured(): boolean {
 
 let graphToken: { token: string; expiresAt: number } | null = null;
 
-async function graphAccessToken(fetchImpl: typeof fetch): Promise<string> {
+/** KS_OPS_PROSPECT_MARKETING_v1 - also used to read the reply mailbox. */
+export async function graphAccessToken(fetchImpl: typeof fetch): Promise<string> {
   if (graphToken && graphToken.expiresAt > Date.now() + 60_000) return graphToken.token;
   const url = `https://login.microsoftonline.com/${encodeURIComponent(env("MS_GRAPH_TENANT_ID"))}/oauth2/v2.0/token`;
   const body = new URLSearchParams({
@@ -52,6 +64,7 @@ export function createMailer(fetchImpl: typeof fetch = fetch): Mailer {
     const to = [...new Set(mail.to.map((e) => String(e ?? "").trim().toLowerCase()).filter((e) => e.includes("@")))];
     if (!to.length) return { ok: false, error: "no_recipients" };
     const html = mail.html ?? bodies([mail.text]).html;
+    const replyTo = String(mail.replyTo ?? mail.from?.email ?? "").trim();
     try {
       if (graphConfigured()) {
         const token = await graphAccessToken(fetchImpl);
@@ -63,6 +76,7 @@ export function createMailer(fetchImpl: typeof fetch = fetch): Mailer {
               subject: mail.subject,
               body: { contentType: "HTML", content: html },
               toRecipients: to.map((address) => ({ emailAddress: { address } })),
+              ...(replyTo ? { replyTo: [{ emailAddress: { address: replyTo } }] } : {}),
               ...(mail.attachments?.length
                 ? {
                     attachments: mail.attachments.map((a) => ({
@@ -86,7 +100,10 @@ export function createMailer(fetchImpl: typeof fetch = fetch): Mailer {
           headers: { Authorization: `Bearer ${env("SENDGRID_API_KEY")}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             personalizations: [{ to: to.map((email) => ({ email })) }],
-            from: { email: env("SENDGRID_FROM"), name: env("SENDGRID_FROM_NAME") || "Keystone" },
+            from: mail.from?.email
+              ? { email: mail.from.email, name: mail.from.name || env("SENDGRID_FROM_NAME") || "Keystone" }
+              : { email: env("SENDGRID_FROM"), name: env("SENDGRID_FROM_NAME") || "Keystone" },
+            ...(replyTo ? { reply_to: { email: replyTo } } : {}),
             subject: mail.subject,
             content: [
               { type: "text/plain", value: mail.text },

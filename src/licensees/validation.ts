@@ -345,6 +345,8 @@ export const signupSchema = z
     support_level: supportSchema,
     extra_storage_blocks: z.preprocess((v) => (v === null || v === "" ? undefined : v), storageBlocksSchema.default(0)),
     payment_method: z.preprocess((v) => (v === null || v === "" ? undefined : v), paymentMethodSchema.default(DEFAULT_PAYMENT_METHOD)),
+    // KS_OPS_MARKETING_ADDON - the Marketing add-on, chosen at sign-up ($49 a month, any plan).
+    marketing_addon: z.preprocess((v) => (v === null || v === "" || v === undefined ? false : v), z.boolean({ error: "Choose whether to add the Marketing add-on." })),
     primary_color: colorSchema,
     accent_color: colorSchema,
     background_color: colorSchema,
@@ -355,6 +357,15 @@ export const signupSchema = z
       .object({
         content_type: z.string().max(100),
         data_base64: z.string().max(800_000, "The logo is too large. Use a file under 500 KB."),
+        filename: z.string().max(200).optional(),
+      })
+      .optional()
+      .nullable(),
+    // KS_OPS_SIGNUP_FAVICON_v1 - an uploaded favicon (PNG, SVG or ICO, base64), checked in lib/logo.ts.
+    favicon_file: z
+      .object({
+        content_type: z.string().max(100),
+        data_base64: z.string().max(800_000, "The favicon is too large. Use a file under 500 KB."),
         filename: z.string().max(200).optional(),
       })
       .optional()
@@ -417,6 +428,7 @@ export const staffCreateSchema = z
     plan: planSchema,
     billing: intervalSchema.optional(),
     billing_interval: intervalSchema.optional(),
+    test_brokerage: z.boolean().optional(), // KS_OPS_TEST_BROKERAGE_v1
     support_level: supportSchema.default("email"),
     seats: seatsSchema,
     country: z.enum(["CA", "US"], { error: "Choose Canada or the United States." }).default("CA"),
@@ -499,9 +511,14 @@ export const staffPatchSchema = z
     font_family: z.preprocess((v) => (v === "" ? null : v), z.union([z.null(), fontSchema])),
     assistant_name: z.preprocess((v) => (v === "" ? null : v), z.string().trim().max(40).nullable()),
     onboarding_fee_paid: z.boolean(),
+    test_brokerage: z.boolean(), // KS_OPS_TEST_BROKERAGE_v1
     // KS_OPS_BANK_CONNECT_ADDON - staff-only add-ons (not plan features), merged into the stored set.
     addons: z
-      .object({ bank_connect: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "bank_connect must be true or false.") }) })
+      .object({
+        bank_connect: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "bank_connect must be true or false.") }),
+        // KS_OPS_MARKETING_ADDON - the Marketing add-on ($49 a month, flat).
+        marketing: z.boolean({ error: (iss) => (iss.input === undefined ? undefined : "marketing must be true or false.") }),
+      })
       .partial()
       .strict(),
   })

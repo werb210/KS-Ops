@@ -23,6 +23,8 @@ import { crmLicenseePaid, crmLicenseeStatus } from "../crm/triggers.js";
 import { queueQboForStripeEvent } from "../qbo/outbox.js";
 import { startProvisioningQuietly } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
 import { machineDeps } from "../provisioning/index.js";
+import { signedAgreement } from "../onboarding/agreement.js"; // KS_OPS_ONBOARDING_v1
+import { signupLink } from "../onboarding/config.js";
 
 type HookDeps = Pick<Deps, "db" | "mailer"> & Partial<Pick<Deps, "stripe" | "now">>;
 const crmDeps = (deps: HookDeps) => ({ db: deps.db, now: deps.now ?? (() => new Date()) });
@@ -236,16 +238,23 @@ async function checkoutCompleted(deps: HookDeps, s: Obj, paidNow: boolean): Prom
       licenseeSummary(l),
       run
         ? "Automatic setup has started. Follow it on /ops/provisioning; you are emailed if a step fails or if setup is waiting for configuration."
-        : `Next step: run scripts/provision-licensee.sh ${l.company_code} and then set the server, portal and client addresses in Keystone operations.`,
+        : `Next step: start the setup of ${l.company_code} on /ops/provisioning (automatic setup is off, or could not start).`,
     ]);
     await sendQuietly(deps.mailer, { to: [salesEmail()], subject: `New Keystone licensee paid: ${l.company_name}`, ...sales }, "sales signup notice");
+    // KS_OPS_ONBOARDING_v1 - the licence agreement link (when not signed at sign-up) and the team link.
+    const links = await onboardingLinks(deps, l);
     const welcome = bodies([
       `Hi ${l.contact_name},`,
       `Thank you for choosing Keystone. Your payment went through and we have started setting up ${l.company_name}'s copy.`,
       `We will email your sign-in details as soon as your system is ready (usually within the hour, and always within one business day). Your company code is "${l.company_code}" - your team will enter it the first time they open the Keystone apps.`,
+      ...(links.agreement ? [`Please sign the Keystone Software Licence Agreement: ${links.agreement}\nWe invite your team as soon as it is signed.`] : []),
+      ...(links.team ? [`Need to add or change someone on your team before they are invited? ${links.team}`] : []),
       `If you have questions in the meantime, reply to this email or write to ${salesEmail()}.`,
     ]);
-    await sendQuietly(deps.mailer, { to: [l.contact_email], subject: "Welcome to Keystone - we are setting things up", ...welcome }, "welcome email");
+    const sent = await sendQuietly(deps.mailer, { to: [l.contact_email], subject: "Welcome to Keystone - we are setting things up", ...welcome }, "welcome email");
+    if (sent && links.agreement) {
+      await deps.db.query("UPDATE licensees SET agreement_link_sent_at = now(), updated_at = now() WHERE id = $1 AND agreement_link_sent_at IS NULL", [l.id]);
+    }
   } else if (l.status === "cancelled") {
     await sendQuietly(
       deps.mailer,
@@ -262,6 +271,20 @@ async function checkoutCompleted(deps: HookDeps, s: Obj, paidNow: boolean): Prom
     );
   }
   return moved ? "provisioning" : "unchanged";
+}
+
+/** KS_OPS_ONBOARDING_v1 - the website links for the welcome email: the agreement (only while unsigned) and the team. */
+async function onboardingLinks(deps: HookDeps, l: LicenseeRow): Promise<{ agreement: string; team: string }> {
+  let token = signupTokenOf(l);
+  if (!token && publicSiteUrl()) {
+    try {
+      token = await newSignupToken(deps.db, l.id);
+    } catch (err) {
+      console.error("[stripe] no signup token for the onboarding links", { licensee: l.id, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  const signed = await signedAgreement(deps.db, l.id);
+  return { agreement: signed ? "" : signupLink("agreement", l.id, token), team: signupLink("team", l.id, token) };
 }
 
 /** checkout.session.async_payment_failed and checkout.session.expired: stay pending_payment, email a resume link. */

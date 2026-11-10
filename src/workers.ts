@@ -19,6 +19,10 @@ import { advanceDueRuns } from "./provisioning/machine.js"; // KS_OPS_AUTO_PROVI
 import { machineDeps } from "./provisioning/index.js";
 import { refreshTexting, syncAccountStatuses } from "./twilio/lifecycle.js"; // KS_OPS_TWILIO_AUTO_v1
 import { embedPending } from "./kb/repo.js"; // KS_OPS_KB_v1
+import { newMarketingClock, runMarketingTick } from "./marketing/worker.js"; // KS_OPS_PROSPECT_MARKETING_v1
+import { syncTenantStatuses } from "./tenants/repo.js"; // KS_SHARED_HOSTING_v1
+import { defaultShared } from "./tenants/shared.js";
+import { controlOwnerUrl } from "./tenants/config.js";
 
 export async function claimDailyJob(deps: Pick<Deps, "db">, job: string): Promise<boolean> {
   await deps.db.query("INSERT INTO job_runs (job) VALUES ($1) ON CONFLICT (job) DO NOTHING", [job]);
@@ -269,7 +273,38 @@ export function startWorkers(deps: Deps): () => void {
       kbBusy = false;
     }
   };
+  // KS_OPS_PROSPECT_MARKETING_v1 - Keystone prospect marketing: sends, sequences, sync, replies, CRM timeline (30 s).
+  let mktBusy = false;
+  const mktClock = newMarketingClock();
+  const mkt = async () => {
+    if (mktBusy) return;
+    mktBusy = true;
+    try {
+      await runMarketingTick(deps, mktClock);
+    } finally {
+      mktBusy = false;
+    }
+  };
+  // KS_SHARED_HOSTING_v1 - the registry's status follows each licensee's KS-Ops status (cancelled -> 410 on the shared
+  // server, suspended -> its suspended behaviour), every 5 minutes.
+  let tenantsBusy = false;
+  const tenants = async () => {
+    if (tenantsBusy || !controlOwnerUrl()) return;
+    tenantsBusy = true;
+    try {
+      const r = await syncTenantStatuses(defaultShared().control(), deps.db);
+      if (r.changed || r.failed) console.log(`[workers] registry status: ${r.changed} changed, ${r.failed} failed`);
+    } catch (err) {
+      console.error("[workers] registry status sync failed", err instanceof Error ? err.message : String(err));
+    } finally {
+      tenantsBusy = false;
+    }
+  };
   const timers = [
+    setInterval(tenants, 5 * 60_000),
+    setTimeout(tenants, 75_000),
+    setInterval(mkt, 30_000),
+    setTimeout(mkt, 50_000),
     setInterval(kb, 10 * 60_000),
     setTimeout(kb, 40_000),
     setInterval(twilio, 30 * 60_000),

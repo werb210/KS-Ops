@@ -151,12 +151,12 @@ describe("answering a broker (model mocked)", () => {
   });
 });
 
-describe("the sales articles (seed v2)", () => {
-  it("are public, new in v2, and follow the starter rules", () => {
-    expect(SEED_VERSION).toBe(2);
+describe("the sales articles (seed v6)", () => {
+  it("are public, new in v6, and follow the starter rules", () => {
+    expect(SEED_VERSION).toBe(6);
     for (const a of WHY_KEYSTONE) {
       expect(a.audience, a.slug).toBe("public");
-      expect(a.since, a.slug).toBe(2);
+      expect(a.since, a.slug).toBe(6);
       const text = `${a.title}\n${a.summary}\n${a.body}`;
       expect(guardReply(text).replaced, a.slug).toBe(false);
       expect(text, a.slug).not.toMatch(/587[\s.\-)]*888|boreal/i);
@@ -181,9 +181,9 @@ describe("the sales articles (seed v2)", () => {
     expect(text).toMatch(/## Coming soon\nAndroid apps for staff/);
   });
 
-  it("a copy seeded at v1 gets only the v2 articles; a fresh copy gets everything", async () => {
+  it("a copy seeded at v5 gets only the v6 articles; a fresh copy gets everything", async () => {
     const inserted: string[] = [];
-    const ran = new Set<number>([1]);
+    const ran = new Set<number>([1, 2, 3, 4, 5]);
     const db = fakeDb([
       [/SELECT 1 FROM kb_seed_runs WHERE version/, (p) => (ran.has(Number(p[0])) ? [{ "?column?": 1 }] : [])],
       [/INSERT INTO kb_articles/, (p) => { inserted.push(String(p[0])); return [{ id: "x" }]; }],

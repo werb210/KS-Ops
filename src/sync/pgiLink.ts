@@ -97,7 +97,7 @@ export async function linkPgi(deps: Pick<Deps, "db" | "fetch" | "now">, licensee
   try {
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/pgi/link`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": opsKey, "X-KS-Ops-User": "ks-ops pgi-link" },
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": opsKey, "X-KS-Ops-User": "ks-ops pgi-link", "X-KS-Tenant": l.company_code },
       body: JSON.stringify({ bi_server_url: bi.url, referral_source_id: source.referral_source_id, api_key: creds.api_key, callback_secret: creds.callback_secret }),
       signal: AbortSignal.timeout(15_000),
     });

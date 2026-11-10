@@ -14,7 +14,7 @@
 // the code with this broker address as redirect_uri, as both providers require. KS-Ops never sees a token.
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type BrokerProvider = "microsoft" | "google";
+export type BrokerProvider = "microsoft" | "google" | "meta" | "intuit" | "zoom"; // KS_ZOOM_MEETINGS_v1 - Keystone's Zoom app // KS_META_LEAD_ADS_v1 - Facebook Login for lead ads; KS_BROKERAGE_QBO - each brokerage's QuickBooks
 
 /** The flows each provider may forward, and where on the licensee's KS-server. */
 export const FLOW_PATHS: Record<BrokerProvider, Record<string, string>> = {
@@ -26,6 +26,17 @@ export const FLOW_PATHS: Record<BrokerProvider, Record<string, string>> = {
   google: {
     google: "/api/google/oauth/callback",
     "sso-google": "/api/auth/sso/google/callback",
+  },
+  meta: {
+    meta: "/api/integrations/meta/callback",
+  },
+  // KS_BROKERAGE_QBO - Keystone's Intuit app lists one redirect URI: {KS-Ops}/api/oauth/callback/intuit
+  intuit: {
+    qbo: "/api/quickbooks/oauth/callback",
+  },
+  // KS_ZOOM_MEETINGS_v1 - Keystone's Zoom app lists one redirect URL: {KS-Ops}/api/oauth/callback/zoom
+  zoom: {
+    zoom: "/api/meeting-notes/zoom/callback",
   },
 };
 

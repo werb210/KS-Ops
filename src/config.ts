@@ -18,11 +18,11 @@ export function publicSiteUrl(e: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function salesEmail(e: NodeJS.ProcessEnv = process.env): string {
-  return env("KS_SALES_EMAIL", e) || "keystone@boreal.financial";
+  return env("KS_SALES_EMAIL", e) || "sales@keystonecrm.online";
 }
 
 export function supportEmail(e: NodeJS.ProcessEnv = process.env): string {
-  return env("KS_SUPPORT_EMAIL", e) || salesEmail(e);
+  return env("KS_SUPPORT_EMAIL", e) || "support@keystonecrm.online";
 }
 
 export function workersEnabled(e: NodeJS.ProcessEnv = process.env): boolean {
@@ -53,10 +53,14 @@ export const DEFAULT_SERVER_HOST_SUFFIXES = ".azurewebsites.net,.azurestaticapps
 /** OPS_ALLOWED_SERVER_HOST_SUFFIXES: where a licensee's server_url may point. ["*"] allows any host. */
 export function allowedServerHostSuffixes(e: NodeJS.ProcessEnv = process.env): string[] {
   const raw = env("OPS_ALLOWED_SERVER_HOST_SUFFIXES", e) || DEFAULT_SERVER_HOST_SUFFIXES;
-  return raw
+  const list = raw
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+  // KS_SHARED_HOSTING_v1 - brokerage addresses live under Keystone's own domain (<code>.api.<KS_DOMAIN> and so on).
+  const domain = env("KS_DOMAIN", e).toLowerCase().replace(/^\.+|\.+$/g, "");
+  if (domain && /^[a-z0-9.-]+\.[a-z]{2,63}$/.test(domain) && !list.includes("*") && !list.includes(`.${domain}`)) list.push(`.${domain}`);
+  return list;
 }
 
 /** PENDING_SIGNUP_DAYS (default 7): website sign-ups still waiting for payment after this are cancelled. */

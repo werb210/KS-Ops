@@ -8,6 +8,9 @@
 //   GET  /api/ops/provisioning/plan/:code?kind=         the dry-run plan (what a run would do), changes nothing
 //   GET  /api/ops/provisioning/twilio/:licenseeId       the licensee's Twilio sub-account and texting registration (KS_OPS_TWILIO_AUTO_v1)
 //   POST /api/ops/provisioning/twilio/:licenseeId/texting/resubmit   submit texting registration again (after a fix)
+//   POST /api/ops/provisioning/tenants/:licenseeId/refresh-settings  KS_SHARED_HOSTING_v1 - write the Twilio and Microsoft
+//                                                       365 / Google settings into the brokerage's registry entry again
+//                                                       (after a key is renewed on KS-Ops) and tell the shared server
 import { Router } from "express";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
@@ -25,6 +28,13 @@ import { twilioSummary } from "../twilio/view.js";
 import { linesFrom, pushTexting, submitTexting } from "../twilio/texting.js";
 import { twilioOf } from "../twilio/account.js";
 import { audit } from "../licensees/repo.js";
+import { identitySettings, twilioSettings, workspaceApps } from "../provisioning/sharedSteps.js";
+import { mergeTenantEnv } from "../tenants/repo.js";
+import { defaultShared } from "../tenants/shared.js";
+import { tenantKeySetting } from "../tenants/config.js";
+import { tenantKey } from "../tenants/crypto.js";
+import { reloadTenants } from "../tenants/sharedServer.js";
+import type { ExecCtx } from "../provisioning/executors.js";
 
 const startSchema = z.object({
   licensee_id: z.string().regex(UUID_RE, "Choose a licensee."),
@@ -118,6 +128,43 @@ export function opsProvisioningRouter(deps: Deps, md: MachineDeps = machineDeps(
       await audit(deps.db, actorOf(req), "licensee.texting_resubmitted", l.id, { results: rows.map((r) => ({ kind: r.kind, status: r.status })) });
       const pushed = await pushTexting(md, l);
       return res.json({ ...(await twilioSummary(md, l.id)), pushed: pushed.ok, message: "Texting registration submitted again." });
+    }),
+  );
+
+  router.post(
+    "/provisioning/tenants/:licenseeId/refresh-settings",
+    h(async (req, res) => {
+      const id = String(req.params.licenseeId);
+      const l = UUID_RE.test(id) ? await getLicensee(deps.db, id) : null;
+      if (!l) return res.status(404).json({ error: "not_found" });
+      const run = await md.store.latestRun(l.id, "provision");
+      const notes: string[] = [];
+      const ctx = (step: string): ExecCtx => ({
+        deps: md,
+        run: (run ?? { id: "manual" }) as ExecCtx["run"],
+        step: { step, started_at: md.now() } as ExecCtx["step"],
+        licensee: l,
+        outputs: {},
+        log: async (m) => { notes.push(m); },
+      });
+      const results: Record<string, unknown> = {};
+      for (const [k, fn] of [["twilio_settings", twilioSettings], ["workspace_apps", workspaceApps]] as const) {
+        const r = await fn(ctx(k));
+        results[k] = r.kind === "done" ? { ok: true, message: r.message } : { ok: false, message: "error" in r ? r.error : r.message };
+      }
+      // KS_OPS_TENANT_IDENTITY_v1 - the brokerage's name, address and time zone too.
+      const key = tenantKey(tenantKeySetting(md.env ?? process.env));
+      if (key) {
+        try {
+          await mergeTenantEnv((md.shared ?? defaultShared()).control(), key, l.company_code, identitySettings(l));
+          results.identity = { ok: true };
+        } catch (err) {
+          results.identity = { ok: false, message: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      const reload = await reloadTenants(md.fetch, md.env);
+      await audit(deps.db, actorOf(req), "licensee.tenant_settings_refreshed", l.id, { results });
+      return res.json({ results, notes, reloaded: reload.ok, message: reload.ok ? "Settings written; the shared server reloaded." : `Settings written; the shared server was not told (${reload.message}) and picks them up within 60 seconds.` });
     }),
   );
 

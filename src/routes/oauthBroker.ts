@@ -38,7 +38,7 @@ export function oauthBrokerRouter(deps: Deps): Router {
       // The query holds a one-time code: it must not leak to the next site in a Referer header.
       res.setHeader("Referrer-Policy", "no-referrer");
       const provider = String(req.params.provider);
-      if (provider !== "microsoft" && provider !== "google") return res.status(404).type("html").send(brokerPage("Page not found", "There is nothing at this address."));
+      if (provider !== "microsoft" && provider !== "google" && provider !== "meta" && provider !== "intuit" && provider !== "zoom") return res.status(404).type("html").send(brokerPage("Page not found", "There is nothing at this address."));
       const parsed = parseBrokerState(req.query.state);
       const l = parsed ? await getLicensee(deps.db, parsed.licenseeId) : null;
       const target = brokerTarget(

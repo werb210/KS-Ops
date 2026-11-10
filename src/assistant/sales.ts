@@ -11,7 +11,7 @@
 // demo and talking to a person go through the lead form (leads.ts), which captures the lead into the Keystone CRM and
 // hands off to sales.
 import type { Deps } from "../deps.js";
-import { publicPlans } from "../pricing.js";
+import { MARKETING_ADDON, dollars, publicPlans } from "../pricing.js";
 import { hasGoodMatch, logQuestion, readableArticle, searchArticles, type SearchHit } from "../kb/repo.js";
 import { aiConfigured, chatJson, type ChatMessage } from "./openai.js";
 import { guardReply, wantsPerson } from "./guard.js";
@@ -118,6 +118,29 @@ export function pageFor(question: string): string | null {
   return topicsFor(question)[0]?.page ?? null;
 }
 
+/** KS_OPS_MAYA_PRICES - questions about price get the published prices even when the AI is off or fails. */
+export function asksAboutPrice(question: string): boolean {
+  return /\b(cost|costs|price|prices|pricing|priced|how much|fee|fees|charge|charges|per seat|per user|per month|monthly|subscription)\b/i.test(question);
+}
+
+const money = (n: number) => `$${n.toLocaleString("en-CA", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+
+/** The published prices in plain words, from the live catalogue (the same numbers as the pricing page). */
+export function priceAnswer(): string {
+  const { plans } = publicPlans();
+  const lines = plans.map((p) => {
+    const onboarding = p.onboarding_fee > 0 ? `, plus a one-time ${money(p.onboarding_fee)} onboarding fee` : "";
+    const min = p.min_seats > 1 ? ` (at least ${p.min_seats} seats)` : "";
+    return `**${p.name}** is ${money(p.seat_price_annual)} per seat a month billed yearly, or ${money(p.seat_price_monthly)} month to month${min}${onboarding}.`;
+  });
+  // One paragraph: the website's chat panel shows text as it comes and does not turn line breaks into a list.
+  return [
+    "Keystone is priced per seat, in Canadian dollars.",
+    ...lines,
+    `The optional ${MARKETING_ADDON.name} is ${money(dollars(MARKETING_ADDON.price_cents))} a month for the whole brokerage. Full details are on the [Pricing](/pricing) page.`,
+  ].join(" ");
+}
+
 export function salesSystemPrompt(): string {
   return [
     `You are ${SALES_ASSISTANT_NAME}, Keystone's assistant on the Keystone website. Keystone is white-label CRM and loan-origination software for commercial lending and business financing brokerages, licensed per seat, with Starter, Growth and Pro plans and a Marketing add-on. Prices are in Canadian dollars (CAD). You talk to brokers deciding whether to switch.`,
@@ -193,6 +216,11 @@ export async function answerSales(
   }
 
   const fallback = async (): Promise<SalesReply> => {
+    // KS_OPS_MAYA_PRICES - without the AI, a price question still gets the prices, not a list of unrelated articles.
+    if (asksAboutPrice(question)) {
+      await log("answered", []);
+      return { answer: priceAnswer(), citations: [], actions: [ACTIONS.pricing, ACTIONS.start_demo, ACTIONS.signup], outcome: "answered", ai: false };
+    }
     const good = hasGoodMatch(result) || hits.length > 0;
     await log(good ? "answered" : "no_answer", good ? hits.slice(0, 3) : []);
     return {

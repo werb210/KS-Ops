@@ -249,7 +249,10 @@ export async function qboApi(deps: QboDeps, cfg: QboConfig | null = qboConfig())
       }
       if (!res.ok || json.Fault) {
         const f = faultMessage(json);
-        throw new QboError(`QuickBooks ${method} ${path.split("?")[0]} answered ${res.status}: ${f.message}`, res.status, f.code, json);
+        // KS_OPS_INTUIT_TID - Intuit's transaction id, so Intuit support can find the failed call.
+        const tid = intuitTid(res);
+        console.warn("[qbo] api error", { method, path: path.split("?")[0], status: res.status, code: f.code, intuit_tid: tid });
+        throw new QboError(`QuickBooks ${method} ${path.split("?")[0]} answered ${res.status}: ${f.message}${tid ? ` (intuit_tid ${tid})` : ""}`, res.status, f.code, json);
       }
       return json;
     }
@@ -265,3 +268,10 @@ export async function qboApi(deps: QboDeps, cfg: QboConfig | null = qboConfig())
 
 /** Quotes a value for a QuickBooks query (backslash-escaped single quotes). */
 export const qboQuote = (v: string) => `'${String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+
+/** KS_OPS_INTUIT_TID - the intuit_tid response header (Intuit support's id for a call), or null. */
+export function intuitTid(res: unknown): string | null {
+  const h = (res as { headers?: { get?: (n: string) => string | null } } | null)?.headers;
+  const v = typeof h?.get === "function" ? h.get("intuit_tid") : null;
+  return v ? String(v).slice(0, 100) : null;
+}

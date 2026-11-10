@@ -23,7 +23,9 @@ export const isServiceStatus = (s: unknown): boolean => (SERVICE_STATUSES as rea
 
 /** KS_OPS_BANK_CONNECT_ADDON - the add-ons Keystone staff can switch on for one licensee. Not plan features: they are
  *  never listed in /api/public/plans and the licensee cannot change them. */
-export const ADDONS = ["bank_connect"] as const;
+// KS_OPS_MARKETING_ADDON - "marketing" is the Marketing add-on: sold at sign-up and on the website (unlike bank_connect),
+// switched on or off by staff with the same PATCH, billed as a flat line on the subscription.
+export const ADDONS = ["bank_connect", "marketing"] as const;
 export type AddonKey = (typeof ADDONS)[number];
 
 /** Every known add-on as an explicit boolean (missing = off), so a push also switches one off. */
@@ -55,7 +57,7 @@ export function planPushBody(
  * page (KS-server applyOpsBranding): the admin's own edits win. Unset fields go as "" (no choice). Servers that do
  * not know the field ignore it.
  */
-export const BRAND_PUSH_FIELDS = ["primary_color", "accent_color", "background_color", "font_family", "logo_url"] as const;
+export const BRAND_PUSH_FIELDS = ["primary_color", "accent_color", "background_color", "font_family", "logo_url", "favicon_url"] as const; // favicon_url: KS_OPS_SIGNUP_FAVICON_v1
 export function brandingOf(l: Partial<Record<(typeof BRAND_PUSH_FIELDS)[number], string | null>>): Record<(typeof BRAND_PUSH_FIELDS)[number], string> {
   return Object.fromEntries(BRAND_PUSH_FIELDS.map((f) => [f, String(l[f] ?? "").trim()])) as Record<(typeof BRAND_PUSH_FIELDS)[number], string>;
 }
@@ -145,7 +147,7 @@ export async function pushPlan(deps: Pick<Deps, "db" | "fetch" | "now">, license
   try {
     const res = await deps.fetch(`${l.server_url.replace(/\/+$/, "")}/api/plan`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120) },
+      headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": by.slice(0, 120), "X-KS-Tenant": l.company_code }, // KS_SHARED_HOSTING_v1
       body: JSON.stringify({ ...planPushBody(l, deps.now()), ...(beta ? { beta_features: beta } : {}), branding: brandingOf(l) }),
       signal: AbortSignal.timeout(15_000),
     });

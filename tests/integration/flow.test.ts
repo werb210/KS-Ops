@@ -146,7 +146,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
   it("PATCH plan pushes to the licensee and records the change; failures retry", async () => {
     const ok = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "growth", extra_storage_blocks: 1 });
     expect(ok.body.plan_push).toEqual({ ok: true });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [], branding: expect.any(Object) });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "growth", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false, marketing: false }, beta_features: [], branding: expect.any(Object) });
 
     remote.up = false;
     const fail = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ plan: "pro" });
@@ -159,7 +159,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     now = new Date(now.getTime() + 6 * 60_000);
     // Northwind (from the sign-up tests) is also waiting: its status changes are queued but it has no ops key yet.
     expect(await retryPendingPlanPushes(deps)).toEqual({ tried: 2, pushed: 1 });
-    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false }, beta_features: [], branding: expect.any(Object) });
+    expect(remote.puts.at(-1)!.body).toEqual({ plan: "pro", extra_storage_blocks: 1, status: "trial", addons: { bank_connect: false, marketing: false }, beta_features: [], branding: expect.any(Object) });
     const changes = (await pool.query("SELECT status FROM plan_changes WHERE licensee_id = $1", [id])).rows;
     expect(changes.map((c) => c.status)).toEqual(["pushed", "pushed"]);
   });
@@ -182,6 +182,15 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
 
     const reqs = await request(app()).get("/api/ops/requests").set(staff());
     expect(reqs.body.requests[0]).toMatchObject({ kind: "upgrade", requested_plan: "pro", requested_extra_storage_blocks: 2, company_code: "keystone-demo" });
+    // KS_OPS_MARKETING_ADDON - KS-server's add-on request (and its "plan" kind for upgrades) is accepted.
+    const addon = await request(app()).post(`/api/licensees/${id}/requests`).set("X-KS-Ops-Key", opsKey).send({ kind: "addon", addon: "marketing", requested_by: "dee@demo.example" });
+    expect(addon.status).toBe(201);
+    const planKind = await request(app()).post(`/api/licensees/${id}/requests`).set("X-KS-Ops-Key", opsKey).send({ kind: "plan", requested_plan: "pro" });
+    expect(planKind.status).toBe(201);
+    const all = (await request(app()).get("/api/ops/requests").set(staff())).body.requests;
+    expect(all.find((x: any) => x.id === addon.body.request_id)).toMatchObject({ kind: "addon", message: "Asked for the Marketing add-on." });
+    expect(all.find((x: any) => x.id === planKind.body.request_id)).toMatchObject({ kind: "upgrade", requested_plan: "pro" });
+    for (const done of [addon, planKind]) await request(app()).patch(`/api/ops/requests/${done.body.request_id}`).set(staff()).send({ status: "done" });
     const done = await request(app()).patch(`/api/ops/requests/${r.body.request_id}`).set(staff()).send({ status: "done" });
     expect(done.body.request.handled_by).toBe("admin@example.test");
 
@@ -320,6 +329,8 @@ describe("Stripe billing", () => {
 
   it("bills overage for finished months once, from KS-Ops's own plan and seats", async () => {
     // acme: pro, 12 seats -> 18,000 pooled minutes and texts. The reported overage (1 and 1) is ignored.
+    // KS_OPS_MARKETING_ADDON - an annual subscription gets its own overage invoice each month (monthly ones: below).
+    await pool.query("UPDATE licensees SET billing_interval = 'annual' WHERE id = $1", [id]);
     await pool.query(
       `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, overage_minutes, overage_texts, report)
        VALUES ($1, '2026-09', '2026-10-01T00:05:00Z', 18100, 18050, 1, 1, '{}'),
@@ -377,6 +388,46 @@ describe("Stripe billing", () => {
     expect((stripe!.invoices.create as any).mock.calls.length).toBe(invoiceCalls);
     p7 = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-07'", [id])).rows[0];
     expect(p7).toMatchObject({ status: "invoiced", invoice_id: "in_found" });
+  });
+
+  it("KS_OPS_MARKETING_ADDON - monthly: signings and campaign emails go on the next month's bill as pending items", async () => {
+    await pool.query("UPDATE licensees SET billing_interval = 'monthly', addons = '{\"marketing\": true}'::jsonb WHERE id = $1", [id]);
+    // pro + add-on: 2,500 + 10,000 campaign emails; 12,501 used -> 1 block. 10 signings -> 6 over. 18,900 texts with
+    // 1,000 marketing texts: 18,000 + 900 covered by the bonus -> no text overage.
+    await pool.query(
+      `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, campaign_emails, marketing_texts, signings, report)
+       VALUES ($1, '2026-06', '2026-07-01T00:05:00Z', 100, 18900, 12501, 1000, 10, '{}')`,
+      [id],
+    );
+    const invoiceCalls = (stripe!.invoices.create as any).mock.calls.length;
+    expect((await billOverage(deps)).billed).toBe(1);
+    expect((stripe!.invoices.create as any).mock.calls.length).toBe(invoiceCalls);
+    const items = (stripe!.invoiceItems.create as any).mock.calls.filter((c: any) => c[0].metadata?.period === "2026-06");
+    expect(items.map((c: any) => [c[0].metadata.overage, c[0].amount])).toEqual([["signings", 1500], ["campaign_emails", 1000]]);
+    const p6 = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-06'", [id])).rows[0];
+    expect(p6).toMatchObject({ status: "pending_next_invoice", signings: 6, signings_amount: 1500, campaign_email_blocks: 1, campaign_emails_amount: 1000, invoice_id: null });
+    const ur = (await pool.query("SELECT overage_billed_at FROM usage_reports WHERE licensee_id = $1 AND period = '2026-06'", [id])).rows[0];
+    expect(ur.overage_billed_at).not.toBeNull();
+    expect((await billOverage(deps)).billed).toBe(0);
+    await pool.query("UPDATE licensees SET addons = '{}'::jsonb WHERE id = $1", [id]);
+  });
+
+  it("bills ID checks over the plan's included number (KS_OPS_KYC)", async () => {
+    // acme is pro: 30 ID checks included a month. 35 used -> 5 extra at $4.00. Minutes and texts within the allowance.
+    await pool.query("UPDATE licensees SET billing_interval = 'annual' WHERE id = $1", [id]);
+    await pool.query(
+      `INSERT INTO usage_reports (licensee_id, period, generated_at, minutes, texts, id_checks, report)
+       VALUES ($1, '2026-05', '2026-06-01T00:05:00Z', 10, 10, 35, '{}')`,
+      [id],
+    );
+    expect((await billOverage(deps)).billed).toBeGreaterThanOrEqual(1);
+    const item = (stripe!.invoiceItems.create as any).mock.calls.find((c: any) => c[0].metadata?.period === "2026-05");
+    expect(item[0]).toMatchObject({ amount: 2000, metadata: { overage: "id_checks" } });
+    expect(item[0].description).toBe("Extra ID checks for 2026-05: 5 at $4.00");
+    const p6 = (await pool.query("SELECT * FROM overage_billing WHERE licensee_id = $1 AND period = '2026-05'", [id])).rows[0];
+    expect(p6).toMatchObject({ id_checks: 5, id_checks_amount: 2000, minutes: 0, texts: 0 });
+    expect(p6.id_checks_invoice_item_id).toMatch(/^ii_/);
+    expect(p6.details).toMatchObject({ allowance: { id_checks: 30 }, used: { id_checks: 35 } });
   });
 
   it("daily jobs run once a day", async () => {
@@ -507,7 +558,7 @@ describe("bank_connect add-on", () => {
     const on = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { bank_connect: true } });
     expect(on.status).toBe(200);
     expect(on.body.plan_push).toEqual({ ok: true });
-    expect(on.body.licensee.addons).toEqual({ bank_connect: true });
+    expect(on.body.licensee.addons).toEqual({ bank_connect: true, marketing: false });
     expect(remote.puts.at(-1)).toMatchObject({ url: "https://ks-addon.azurewebsites.net/api/plan", body: { plan: "starter", addons: { bank_connect: true } } });
     const audit = (await pool.query("SELECT details FROM staff_audit WHERE licensee_id = $1 AND action = 'licensee.addons'", [id])).rows;
     expect(audit.map((r) => r.details)).toEqual([{ bank_connect: { from: false, to: true } }]);
@@ -522,8 +573,19 @@ describe("bank_connect add-on", () => {
 
     const off = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { bank_connect: false } });
     expect(off.body.plan_push).toEqual({ ok: true });
-    expect(remote.puts.at(-1)!.body.addons).toEqual({ bank_connect: false });
-    expect((await pool.query("SELECT addons FROM licensees WHERE id = $1", [id])).rows[0].addons).toEqual({ bank_connect: false });
+    expect(remote.puts.at(-1)!.body.addons).toEqual({ bank_connect: false, marketing: false });
+    expect((await pool.query("SELECT addons FROM licensees WHERE id = $1", [id])).rows[0].addons).toEqual({ bank_connect: false, marketing: false });
+
+    // KS_OPS_MARKETING_ADDON - the Marketing add-on is switched the same way (audited, pushed), and IS public.
+    const mk = await request(app()).patch(`/api/ops/licensees/${id}`).set(staff()).send({ addons: { marketing: true } });
+    expect(mk.status).toBe(200);
+    expect(mk.body.plan_push).toEqual({ ok: true });
+    expect(remote.puts.at(-1)!.body.addons).toEqual({ bank_connect: false, marketing: true });
+    const mkAudit = (await pool.query("SELECT details FROM staff_audit WHERE licensee_id = $1 AND action = 'licensee.addons'", [id])).rows;
+    expect(mkAudit.map((r) => r.details)).toContainEqual({ marketing: { from: false, to: true } });
+    const detail = await request(app()).get(`/api/ops/licensees/${id}`).set(staff());
+    expect(detail.body.pricing).toMatchObject({ marketing_addon: 49, mrr: 59 + 49 });
+    expect(plans.body.marketing_addon).toMatchObject({ key: "marketing", price: 49 });
   });
 });
 
