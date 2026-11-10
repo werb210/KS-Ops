@@ -14,6 +14,7 @@ import { PHONE } from "./phone.js";
 import { MARKETING_AND_REPORTS } from "./marketingReports.js";
 import { PLANS_AND_BILLING } from "./plansBilling.js";
 import { SECURITY_AND_DATA } from "./securityData.js";
+import { WHY_KEYSTONE } from "./whyKeystone.js"; // KS_OPS_MAYA_TRAINING_v1
 import { FEATURES_CLIENT } from "./featuresClient.js"; // KS_OPS_KB_v5 - one article per feature
 import { FEATURES_UNDERWRITING } from "./featuresUnderwriting.js";
 import { FEATURES_WORK } from "./featuresWork.js";
@@ -28,6 +29,8 @@ export type SeedArticle = {
   plans: Plan[];
   summary: string;
   body: string;
+  /** The seed version that adds it (default 1). Copies seeded before add only the newer articles. */
+  since?: number;
 };
 
 export const STARTER_ARTICLES: SeedArticle[] = [
@@ -39,6 +42,7 @@ export const STARTER_ARTICLES: SeedArticle[] = [
   ...MARKETING_AND_REPORTS,
   ...PLANS_AND_BILLING,
   ...SECURITY_AND_DATA,
+  ...WHY_KEYSTONE,
   ...FEATURES_CLIENT,
   ...FEATURES_UNDERWRITING,
   ...FEATURES_WORK,

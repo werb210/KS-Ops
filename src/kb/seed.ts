@@ -4,20 +4,27 @@
 import type { Q } from "../db.js";
 import { STARTER_ARTICLES, type SeedArticle } from "./articles/index.js";
 
-export const SEED_VERSION = 5; // KS_OPS_KB_v2 - v2 refreshes untouched articles' text (Broker role, shared hosting); v3 sign-up team and licence agreement (KS_OPS_ONBOARDING_v1); v4 keeping your existing number (KS_OPS_NUMBER_PORTING_v1); v5 one article per feature (KS_OPS_KB_v5)
+export const SEED_VERSION = 6; // KS_OPS_MAYA_TRAINING_v1: v6 adds the sales articles (whyKeystone.ts). // KS_OPS_KB_v2 - v2 refreshes untouched articles' text (Broker role, shared hosting); v3 sign-up team and licence agreement (KS_OPS_ONBOARDING_v1); v4 keeping your existing number (KS_OPS_NUMBER_PORTING_v1); v5 one article per feature (KS_OPS_KB_v5)
 
+/**
+ * Each seed version not yet run adds the articles that version introduced (an article's `since`, default 1). A copy
+ * seeded at v1 therefore gets only the v2 articles, and an article staff deleted is never brought back.
+ */
 export async function seedKnowledgeBase(db: Q, articles: SeedArticle[] = STARTER_ARTICLES, version = SEED_VERSION): Promise<number> {
-  const done = await db.query("SELECT 1 FROM kb_seed_runs WHERE version = $1", [version]);
-  if (done.rows.length) return 0;
   let added = 0;
-  for (const a of articles) {
-    const r = await db.query(
-      `INSERT INTO kb_articles (slug, title, category, summary, body_md, plans, audience, status, seed_key, created_by, updated_by, published_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'published', $8, 'keystone', 'keystone', now())
-       ON CONFLICT DO NOTHING RETURNING id`,
-      [a.slug, a.title, a.category, a.summary, a.body.trim(), a.plans ?? [], a.audience, `v${version}:${a.slug}`],
-    );
-    added += r.rows.length;
+  for (let v = 1; v <= version; v++) {
+    const done = await db.query("SELECT 1 FROM kb_seed_runs WHERE version = $1", [v]);
+    if (done.rows.length) continue;
+    for (const a of articles.filter((x) => (x.since ?? 1) === v)) {
+      const r = await db.query(
+        `INSERT INTO kb_articles (slug, title, category, summary, body_md, plans, audience, status, seed_key, created_by, updated_by, published_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'published', $8, 'keystone', 'keystone', now())
+         ON CONFLICT DO NOTHING RETURNING id`,
+        [a.slug, a.title, a.category, a.summary, a.body.trim(), a.plans ?? [], a.audience, `v${v}:${a.slug}`],
+      );
+      added += r.rows.length;
+    }
+    await db.query("INSERT INTO kb_seed_runs (version) VALUES ($1) ON CONFLICT DO NOTHING", [v]);
   }
   // KS_OPS_KB_v2 - a new version also refreshes the text of starter articles nobody at Keystone has edited since they
   // were loaded (updated_by is still 'keystone'), so wording changes reach existing libraries. Edited ones are left alone.

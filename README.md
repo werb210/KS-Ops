@@ -265,6 +265,23 @@ loaded once on startup and by `npm run migrate`.
   `/kb/ask` (Ask Maya: answers from the KB with citations, uses only this licensee's plan/usage/connections, offers
   "Contact support" when it can't help)
 
+**Sales Maya training (KS_OPS_MAYA_TRAINING_v1)** — seed v2 adds 12 public articles (`src/kb/articles/whyKeystone.ts`):
+why brokers switch, Keystone vs HubSpot / Salesforce / Zoho / Pipedrive (prices copied from KS-Website
+`src/data/compare.ts`, with sources and the date checked), compliance built in, automations, switching, mobile apps,
+lender integrations, contracts and cancelling, the roadmap and objection handling. A copy seeded at v1 gets only the new
+articles; deleted articles never come back. The website assistant routes each question to its topic's articles and page
+(`TOPICS` in `src/assistant/sales.ts`) before full-text search, and its prompt asks for a direct answer under 90 words
+with one page link. When KS-Website's compare prices change, update the four comparison articles on `/ops/kb`.
+
+**Public roadmap (KS_OPS_ROADMAP_v1)** — brokers suggest features and +1 them on the website's `/roadmap`; staff moderate
+on `GET /ops/roadmap` (staff token). Nothing a broker sends is public until approved, and the public list is only the
+item's title, summary, area, status and votes. Ideas need the consent box (its wording is stored), the honeypot and
+Turnstile (when `TURNSTILE_SECRET` is set) like the beta sign-up; sales (`KS_SALES_EMAIL`) is emailed about each idea.
+Votes are one per browser (a salted hash of a random id), 60 a day per address.
+- Public: `GET /api/public/roadmap`, `POST /api/public/roadmap/ideas`, `POST /api/public/roadmap/items/:id/vote|unvote`
+- Staff: `GET /api/ops/roadmap`, `POST /api/ops/roadmap/items`, `PATCH|DELETE /api/ops/roadmap/items/:id`,
+  `POST /api/ops/roadmap/ideas/:id/approve|merge|reject` (all audited)
+
 `GET /api/health` reports whether the database answers.
 
 ## Background jobs

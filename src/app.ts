@@ -34,6 +34,9 @@ import { opsKbRouter } from "./routes/opsKb.js"; // KS_OPS_KB_v1
 import { kbPageRouter } from "./routes/opsKbPage.js";
 import { publicAssistantRouter, publicKbRouter } from "./routes/publicKb.js";
 import { licenseeKbRouter } from "./routes/licenseeKb.js";
+import { publicRoadmapRouter } from "./routes/publicRoadmap.js"; // KS_OPS_ROADMAP_v1
+import { opsRoadmapRouter } from "./routes/opsRoadmap.js";
+import { roadmapPageRouter } from "./routes/opsRoadmapPage.js";
 import { opsMarketingRouter } from "./routes/opsMarketing.js"; // KS_OPS_PROSPECT_MARKETING_v1
 import { publicMarketingRouter } from "./routes/publicMarketing.js";
 import { licenseePortingRouter } from "./routes/licenseePorting.js"; // KS_OPS_NUMBER_PORTING_v1
@@ -98,6 +101,7 @@ export function createApp(deps: Deps) {
   // KS_OPS_KB_v1 - public help articles and Keystone Maya for prospects (the website's assistant).
   app.use("/api/public/kb", corsFor("PUBLIC_SITE_URL"), publicKbRouter(deps));
   app.use("/api/public/assistant", corsFor("PUBLIC_SITE_URL"), publicAssistantRouter(deps));
+  app.use("/api/public/roadmap", corsFor("PUBLIC_SITE_URL"), publicRoadmapRouter(deps)); // KS_OPS_ROADMAP_v1
   app.use("/api/public", corsFor("PUBLIC_SITE_URL"), publicRouter(deps), publicBetaRouter(deps), publicProvisioningRouter(deps), publicOnboardingRouter(deps));
   // KS_OPS_AUTO_PROVISION_v1 - the provisioning workflow in GitHub Actions reports back with its run's one-off token.
   app.use("/api/provisioning/callback", provisioningCallbackRouter(deps));
@@ -116,6 +120,7 @@ export function createApp(deps: Deps) {
   app.use("/api/ops/quickbooks/oauth/callback", qboCallbackRouter(deps));
   app.use("/api/ops", requireStaff, opsLicenseesRouter(deps), opsSupportRouter(deps), opsQuickbooksRouter(deps), opsTrialsRouter(deps), opsBetaRouter(deps), opsProvisioningRouter(deps));
   app.use("/api/ops", requireStaff, opsKbRouter(deps)); // KS_OPS_KB_v1
+  app.use("/api/ops", requireStaff, opsRoadmapRouter(deps)); // KS_OPS_ROADMAP_v1
   app.use("/api/ops", requireStaff, opsOnboardingRouter(deps)); // KS_OPS_ONBOARDING_v1 - sign-up team and licence agreement
   app.use("/api/ops", requireStaff, opsMarketingRouter(deps)); // KS_OPS_PROSPECT_MARKETING_v1
   app.use("/api/ops", requireStaff, opsPortingRouter(deps)); // KS_OPS_NUMBER_PORTING_v1 - number transfers
@@ -125,6 +130,7 @@ export function createApp(deps: Deps) {
   app.use("/ops/beta", betaPageRouter()); // KS_OPS_BETA_v1
   app.use("/ops/provisioning", provisioningPageRouter()); // KS_OPS_AUTO_PROVISION_v1
   app.use("/ops/kb", kbPageRouter()); // KS_OPS_KB_v1
+  app.use("/ops/roadmap", roadmapPageRouter()); // KS_OPS_ROADMAP_v1
   app.use("/ops/porting", portingPageRouter()); // KS_OPS_NUMBER_PORTING_v1
 
   app.use("/api", (_req, res) => res.status(404).json({ error: "not_found" }));
