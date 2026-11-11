@@ -211,16 +211,12 @@ export const FEATURES: ReadonlyArray<{ key: string; label: string; plan: Plan }>
   // KS_OPS_KYC - ID and selfie verification of applicants and guarantors, growth and up (some checks included; see ID_CHECKS).
   { key: "id_verification", label: "ID and selfie verification of applicants and guarantors (some checks included each month)", plan: "growth" },
   // KS_OPS_QUOTES_FORECAST - quotes for the client and the revenue forecast, growth and up (mirrors KS-server).
-  { key: "quotes", label: "Quotes: compare lender offers for the client, branded PDF and acceptance in the client app", plan: "growth" },
   { key: "forecasting", label: "Revenue forecast: weighted pipeline, commit and best case per rep and team, against goals", plan: "growth" },
   // KS_ACTIVE_CONTRACTS - funded facilities as contracts, renewal engine, commission tracking (KS-server).
   { key: "active_contracts", label: "Active contracts: renewals, re-engagement queues and commission tracking", plan: "growth" },
   // Lender API connections: send the lender package by API, sync status, offers and conditions back (KS-server lender API).
   { key: "lender_api", label: "Lender API connections (submit by API, sync status, offers and conditions)", plan: "growth" },
-  { key: "credit_lines", label: "Approved credit lines per client: limit, used, available and expiry reminders", plan: "growth" },
-  { key: "rate_cards", label: "Rate cards and deal structuring: payment options across lenders side by side, with sales tax", plan: "growth" },
-  { key: "credit_scorecards", label: "Credit scorecards and pre-decision rules: grade, rule hits and lender ranking on each application", plan: "growth" },
-  { key: "contract_templates", label: "Contracts from Word templates: merge fields, Word and PDF, sent for e-signature", plan: "growth" },
+  { key: "rate_cards", label: "Lender rate cards for the vendor and dealer portal's point-of-sale quotes", plan: "growth" },
   { key: "multiple_lines", label: "Multiple business lines and a direct line for each person", plan: "pro" },
   { key: "ad_attribution", label: "Google Ads tools: attribution, ad-waste report, Customer Match, Monday ads email and AI ads suggestions", plan: "pro" },
   { key: "api_access", label: "API access", plan: "pro" },
