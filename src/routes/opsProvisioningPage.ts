@@ -58,6 +58,11 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   </section>
 
   <div id="app" class="hidden">
+    <section id="signupBox" class="hidden"><!-- KS_OPS_SIGNUP_READINESS_v1 -->
+      <h2>Before brokerages can sign up and pay on their own</h2>
+      <p>Settings still missing for the website sign-up, card payment and emails:</p>
+      <ul id="signupList" class="check"></ul>
+    </section>
     <section id="setupBox" class="hidden">
       <h2>Waiting for manual setup</h2>
       <p>Automatic setup is not fully configured. Runs wait here and start by themselves once these are in place (see KS-Ops docs/PROVISIONING.md):</p>
@@ -302,6 +307,10 @@ export const PROVISIONING_PAGE_HTML = `<!doctype html>
   function load() {
     return api("GET", "/provisioning").then(function (r) {
       $("signin").className = "hidden"; $("app").className = "";
+      var signupMissing = (r.setup_missing && r.setup_missing.signup) || [];
+      $("signupBox").className = signupMissing.length ? "" : "hidden";
+      var su = $("signupList"); su.innerHTML = "";
+      signupMissing.forEach(function (m) { su.appendChild(el("li", null, m.label)); });
       var missing = (r.setup_missing && r.setup_missing.provision) || [];
       $("setupBox").className = missing.length ? "" : "hidden";
       var sl = $("setupList"); sl.innerHTML = "";

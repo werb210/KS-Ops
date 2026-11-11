@@ -21,6 +21,7 @@ import { CODE_RE } from "../licensees/validation.js";
 import { kick, machineDeps } from "../provisioning/index.js";
 import { advanceRun, cancelRun, markStepDone, retryStep, runView, startRun, type MachineDeps } from "../provisioning/machine.js";
 import { serviceSetupMissing } from "../provisioning/config.js";
+import { signupSetupMissing } from "../onboarding/readiness.js"; // KS_OPS_SIGNUP_READINESS_v1
 import { describePlan, type RunKind } from "../provisioning/steps.js";
 import { statusTokenFor } from "../provisioning/statusToken.js";
 import { publicSiteUrl } from "../config.js";
@@ -51,7 +52,7 @@ export function opsProvisioningRouter(deps: Deps, md: MachineDeps = machineDeps(
       const runs = await md.store.listRuns(200);
       res.setHeader("Cache-Control", "no-store");
       res.json({
-        setup_missing: { provision: serviceSetupMissing("provision"), teardown: serviceSetupMissing("teardown") },
+        setup_missing: { signup: await signupSetupMissing(deps.db), provision: serviceSetupMissing("provision"), teardown: serviceSetupMissing("teardown") },
         runs: await Promise.all(runs.map((r) => runView(md, r, 0))),
       });
     }),
