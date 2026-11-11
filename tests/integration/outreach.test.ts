@@ -157,7 +157,7 @@ describe("items, tracked links and referrals", () => {
 // KS_OPS_OUTREACH_v2
 describe("mail, the LinkedIn company list and webinar sign-ups", () => {
   it("makes a mail batch: one letter per firm with an address, its own tracked link, a PDF and a label file", async () => {
-    await request(app()).put("/api/ops/outreach/letter").set(staff()).send({ greeting: "Dear {{first_name}},", body: "A note for {{company}}.", closing: "Sincerely,", signature: "Pat Founder", ps: "P.S. Scan the code.", target_url: "https://www.keystone.example/tour" });
+    await request(app()).post("/api/ops/outreach/letter").set(staff()).send({ greeting: "Dear {{first_name}},", body: "A note for {{company}}.", closing: "Sincerely,", signature: "Pat Founder", ps: "P.S. Scan the code.", target_url: "https://www.keystone.example/tour" });
     const ready = await request(app()).get("/api/ops/outreach/mail/ready").set(staff());
     expect(ready.body).toMatchObject({ ready: 1, without_address: 1 });
     expect(ready.body.first[0]).toMatchObject({ company: "Northfield Leasing Inc.", name: "Olive Owner" });

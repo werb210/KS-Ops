@@ -308,12 +308,14 @@ export function opsOutreachRouter(deps: Deps): Router {
     target_url: z.string().trim().max(500).refine((u) => u === "" || /^https:\/\//i.test(u), "The address must start with https://"),
   });
   r.get("/outreach/letter", h(async (_req, res) => res.json({ letter: await loadLetter(deps.db), defaults: DEFAULT_LETTER, merge_fields: ["first_name", "name", "company", "title"] })));
-  r.put("/outreach/letter", h(async (req, res) => {
+  const saveLetter = h(async (req, res) => {
     const parsed = parseBody(letterSchema, req.body);
     if (!parsed.ok) return bad(res, parsed.errors);
     await deps.db.query(`UPDATE ks_outreach_settings SET letter = $1::jsonb, updated_by = $2, updated_at = now() WHERE id = 1`, [JSON.stringify(parsed.data), actorOf(req)]);
     res.json({ letter: letterFrom(parsed.data) });
-  }));
+  });
+  r.put("/outreach/letter", saveLetter);
+  r.post("/outreach/letter", saveLetter); // the staff portal's client sends GET, POST and PATCH only
   r.get("/outreach/mail/ready", h(async (req, res) => {
     const list = await pickRecipients(deps.db, { limit: 2000, countries: split(req.query.countries) });
     const noAddress = Number((await deps.db.query(`SELECT count(*)::int AS n FROM ks_brokerages WHERE qualification = 'keep' AND status = 'working' AND (address_line1 IS NULL OR city IS NULL)`)).rows[0]?.n ?? 0);
