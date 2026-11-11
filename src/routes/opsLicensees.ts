@@ -19,7 +19,7 @@ import { addonsOf, BRAND_PUSH_FIELDS, isServiceStatus, pushPlan, recordPlanChang
 import { crmLicenseeCreated, crmLicenseeStatus, crmLicenseeUpdated } from "../crm/triggers.js";
 import { isFinal, pullUsageReport } from "../sync/usage.js";
 import { biConfig, linkPgi, queuePgiBackfill } from "../sync/pgiLink.js";
-import { ensureQaLogin } from "../tenants/qaLogin.js"; // KS_OPS_QA_LOGIN_v1
+import { ensureQaLogin, markStoreReview } from "../tenants/qaLogin.js"; // KS_OPS_QA_LOGIN_v1, KS_OPS_STORE_REVIEW_v1
 import { defaultShared } from "../tenants/shared.js";
 import { tenantKeySetting } from "../tenants/config.js";
 import { tenantKey } from "../tenants/crypto.js";
@@ -458,6 +458,27 @@ export function opsLicenseesRouter(deps: Deps): Router {
       await audit(deps.db, actorOf(req), "licensee.qa_login", l.id, { reloaded: reload.ok });
       res.setHeader("Cache-Control", "no-store");
       return res.json({ code, owner_phone: l.contact_phone, phones: "any NXX-555-0100 to 0199", server_reloaded: reload.ok, portal_url: l.portal_url, client_url: l.client_url, server_url: l.server_url });
+    }),
+  );
+
+  // KS_OPS_STORE_REVIEW_v1 - make this TEST brokerage the one Apple and Google reviewers sign in to: (403) 555-0100 plus
+  // the returned code. Only one test brokerage is marked at a time.
+  router.post(
+    "/licensees/:id/store-review",
+    h(async (req, res) => {
+      const l = await load(String(req.params.id));
+      if (!l) return res.status(404).json(notFound);
+      if (!(l as { test_brokerage?: boolean }).test_brokerage) {
+        return res.status(409).json({ error: "not_a_test_brokerage", message: "Store review is only for licensees marked as a test brokerage." });
+      }
+      const key = tenantKey(tenantKeySetting());
+      if (!key) return res.status(503).json({ error: "not_configured", message: "KS_TENANT_KEY is not set on KS-Ops." });
+      const others = await deps.db.query("SELECT company_code FROM licensees WHERE test_brokerage = true AND id <> $1", [l.id]);
+      const code = await markStoreReview(defaultShared().control(), key, l.company_code, others.rows.map((r: { company_code: string }) => String(r.company_code)));
+      const reload = await reloadTenants(deps.fetch);
+      await audit(deps.db, actorOf(req), "licensee.store_review", l.id, { reloaded: reload.ok });
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ code, reviewer_phone: "(403) 555-0100", server_reloaded: reload.ok, portal_url: l.portal_url, server_url: l.server_url });
     }),
   );
 
