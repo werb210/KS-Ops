@@ -26,3 +26,19 @@ export async function ensureQaLogin(control: Q, key: Buffer, code: string): Prom
   await mergeTenantEnv(control, key, code, { KS_TEST_BROKERAGE: "true", KS_QA_LOGIN_CODE: qa });
   return qa;
 }
+
+/**
+ * KS_OPS_STORE_REVIEW_v1 - mark ONE test brokerage as the App Store / Google Play review brokerage: KS-server then gives
+ * it the reviewer user (403-555-0100) and sample data (KS_SERVER_STORE_REVIEW_SEED_v2). Every other test brokerage is
+ * set back to KS_STORE_REVIEW=false so the reviewer's number finds only this one. Returns the QA code to give Apple.
+ */
+export async function markStoreReview(control: Q, key: Buffer, code: string, otherTestCodes: string[]): Promise<string> {
+  const qa = await ensureQaLogin(control, key, code);
+  await mergeTenantEnv(control, key, code, { KS_STORE_REVIEW: "true" });
+  for (const other of otherTestCodes) {
+    if (other === code) continue;
+    if (!(await getTenant(control, other))) continue;
+    await mergeTenantEnv(control, key, other, { KS_STORE_REVIEW: "false" });
+  }
+  return qa;
+}
