@@ -207,16 +207,19 @@ After an offer is accepted, add the lender's conditions (insurance certificate, 
 `,
   },
   {
-    slug: "quotes-for-clients",
-    title: "Send a client a quote with options",
+    slug: "offers-and-term-sheets",
+    title: "Offers, term sheets and your pricing",
     category: "Pipeline",
     audience: "all_staff",
     plans: [],
-    summary: "Put two or three options in front of the client and let them choose.",
+    summary: "Upload each lender's term sheet or issue your own, set your fees, and see what each offer earns.",
     body: `
-1. On the deal, open **Quotes** and choose **New quote**.
-2. Add each option: amount, term, rate or payment, and any notes.
-3. Choose **Send to client**. They see the options in their portal and pick one.
+1. On the deal, open **Lenders**. Beside each lender, upload the lender's term sheet. Its terms and conditions are read for you; approve the conditions you want the client to see.
+2. Open **Lenders > Offer**. Every offer is listed. Choose **Pricing** on an offer:
+   - **The lender's term sheet**: the client signs the lender's paper and sees the lender's name.
+   - **Our term sheet**: you buy the deal and sell it on. Set your rate to the client; the client never sees the lender's name. Choose **Make our term sheet** to fill in your own template (upload it in **Settings > Your documents**).
+   - Add any broker fee, set-up fee, fee from the proceeds and the lender's commission. **Our revenue** adds them up with the rate difference over the term.
+3. Choose **Send to client for signature**. With two or more offers, the client sees them side by side in their portal and signs the one they want.
 `,
   },
   {
