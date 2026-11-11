@@ -15,6 +15,8 @@ import { processSendgridEvents, suppressProspectEmail } from "../marketing/event
 import { KS_BRAND, readUnsubscribeToken } from "../marketing/render.js";
 import { sender } from "../marketing/settings.js";
 import { webhookAuthentic } from "../marketing/sendgrid.js";
+import { recordClick } from "../outreach/store.js"; // KS_OPS_OUTREACH_v1
+import { publicSiteUrl } from "../config.js";
 
 function page(title: string, body: string, form?: { action: string }): string {
   return (
@@ -75,6 +77,18 @@ export function publicMarketingRouter(deps: Deps): Router {
     }
     const out = await processSendgridEvents(deps, events);
     res.json({ ok: true, ...out });
+  }));
+
+  // KS_OPS_OUTREACH_v1 - a tracked link (on a letter's QR code, an ad, a post, a video): count the click against its
+  // channel and brokerage, then send the visitor on. An unknown code goes to the website, never to an error page.
+  r.get("/l/:code", limiter, h(async (req, res) => {
+    const code = String(req.params.code ?? "").toLowerCase();
+    let target: string | null = null;
+    if (/^[a-z0-9]{4,16}$/.test(code)) {
+      try { target = await recordClick(deps.db, code, deps.now()); } catch (e) { console.error("[outreach] click not recorded", e instanceof Error ? e.message : String(e)); }
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.redirect(302, target ?? publicSiteUrl());
   }));
 
   return r;

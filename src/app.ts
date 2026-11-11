@@ -38,6 +38,7 @@ import { publicRoadmapRouter } from "./routes/publicRoadmap.js"; // KS_OPS_ROADM
 import { opsRoadmapRouter } from "./routes/opsRoadmap.js";
 import { roadmapPageRouter } from "./routes/opsRoadmapPage.js";
 import { opsMarketingRouter } from "./routes/opsMarketing.js"; // KS_OPS_PROSPECT_MARKETING_v1
+import { opsOutreachRouter } from "./routes/opsOutreach.js"; // KS_OPS_OUTREACH_v1
 import { publicMarketingRouter } from "./routes/publicMarketing.js";
 import { licenseePortingRouter } from "./routes/licenseePorting.js"; // KS_OPS_NUMBER_PORTING_v1
 import { opsPortingRouter } from "./routes/opsPorting.js";
@@ -123,6 +124,7 @@ export function createApp(deps: Deps) {
   app.use("/api/ops", requireStaff, opsRoadmapRouter(deps)); // KS_OPS_ROADMAP_v1
   app.use("/api/ops", requireStaff, opsOnboardingRouter(deps)); // KS_OPS_ONBOARDING_v1 - sign-up team and licence agreement
   app.use("/api/ops", requireStaff, opsMarketingRouter(deps)); // KS_OPS_PROSPECT_MARKETING_v1
+  app.use("/api/ops", requireStaff, opsOutreachRouter(deps)); // KS_OPS_OUTREACH_v1
   app.use("/api/ops", requireStaff, opsPortingRouter(deps)); // KS_OPS_NUMBER_PORTING_v1 - number transfers
   // The QuickBooks and free-trial ops pages (they hold no data; their calls need a staff token).
   app.use("/ops/quickbooks", qboPageRouter());
