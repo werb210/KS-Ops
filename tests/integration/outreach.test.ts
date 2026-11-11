@@ -153,3 +153,53 @@ describe("items, tracked links and referrals", () => {
     expect((await request(app()).get("/api/ops/outreach/referrals").set(staff())).body.owed_cents).toBe(0);
   });
 });
+
+// KS_OPS_OUTREACH_v2
+describe("mail, the LinkedIn company list and webinar sign-ups", () => {
+  it("makes a mail batch: one letter per firm with an address, its own tracked link, a PDF and a label file", async () => {
+    await request(app()).put("/api/ops/outreach/letter").set(staff()).send({ greeting: "Dear {{first_name}},", body: "A note for {{company}}.", closing: "Sincerely,", signature: "Pat Founder", ps: "P.S. Scan the code.", target_url: "https://www.keystone.example/tour" });
+    const ready = await request(app()).get("/api/ops/outreach/mail/ready").set(staff());
+    expect(ready.body).toMatchObject({ ready: 1, without_address: 1 });
+    expect(ready.body.first[0]).toMatchObject({ company: "Northfield Leasing Inc.", name: "Olive Owner" });
+    const made = await request(app()).post("/api/ops/outreach/mail/batches").set(staff()).send({ name: "Owner letter, wave 2", limit: 50, cost_per_letter_cents: 150 });
+    expect(made.status).toBe(201);
+    expect(made.body.count).toBe(1);
+    const pdf = await request(app()).get(`/api/ops/outreach/mail/batches/${made.body.item_id}/letters`).set(staff());
+    expect(pdf.body).toMatchObject({ filename: "Owner-letter-wave-2.pdf", letters: 1 });
+    expect(Buffer.from(pdf.body.data_base64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
+    const labels = await request(app()).get(`/api/ops/outreach/mail/batches/${made.body.item_id}/labels`).set(staff());
+    const line = labels.body.csv.split("\r\n")[1];
+    expect(line).toMatch(/^Olive Owner,President,Northfield Leasing Inc\.,1 Main St,,Calgary,AB,T2P 1A1,CA,https?:\/\/.+\/api\/public\/marketing\/l\/[a-z0-9]{7}$/);
+    const link = (await pool.query(`SELECT target_url FROM ks_mkt_links WHERE item_id = $1`, [made.body.item_id])).rows[0];
+    expect(link.target_url).toBe("https://www.keystone.example/tour");
+    // Written to once: the firm is not offered again, and a second batch has no one to write to.
+    expect((await request(app()).get("/api/ops/outreach/mail/ready").set(staff())).body.ready).toBe(0);
+    expect((await request(app()).post("/api/ops/outreach/mail/batches").set(staff()).send({ name: "Again", limit: 5 })).status).toBe(400);
+    const mail = (await request(app()).get("/api/ops/outreach/channels").set(staff())).body.channels.find((c: any) => c.key === "mail");
+    expect(mail.touches).toBe(1);
+    expect(mail.cost_cents).toBe(4500 + 150);
+  });
+
+  it("exports kept firms as a LinkedIn company list", async () => {
+    const res = await request(app()).get("/api/ops/outreach/ads/linkedin-audience?countries=CA").set(staff());
+    expect(res.body.count).toBe(1);
+    expect(res.body.csv.split("\r\n").slice(0, 2)).toEqual(["companyname,companywebsite,companyemaildomain,city,state,companycountry", "Northfield Leasing Inc.,https://northfield-leasing.example,northfield-leasing.example,Calgary,AB,CA"]);
+  });
+
+  it("a webinar sign-up becomes a prospect with express consent and is credited to the webinar", async () => {
+    const item = await request(app()).post("/api/ops/outreach/items").set(staff()).send({ channel_key: "podcasts_webinars", kind: "webinar", name: "How we cut file prep time", happens_on: "2026-12-10", notes: "30 minutes, live." });
+    const id = item.body.item.id;
+    const pageRes = await request(app()).get(`/api/public/marketing/webinar/${id}`);
+    expect(pageRes.status).toBe(200);
+    expect(pageRes.text).toContain("How we cut file prep time");
+    expect((await request(app()).get(`/api/public/marketing/webinar/${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}`)).status).toBe(404);
+    expect((await request(app()).post(`/api/public/marketing/webinar/${id}`).type("form").send({ name: "Wes Webinar", email: "wes@webinar.example", company: "Webinar Capital" })).status).toBe(400);
+    const ok = await request(app()).post(`/api/public/marketing/webinar/${id}`).type("form").send({ name: "Wes Webinar", email: "wes@webinar.example", company: "Webinar Capital", consent: "yes" });
+    expect(ok.status).toBe(200);
+    expect(ok.text).toContain("You are in");
+    await request(app()).post(`/api/public/marketing/webinar/${id}`).type("form").send({ name: "Wes Webinar", email: "wes@webinar.example", company: "Webinar Capital", consent: "yes" });
+    const p = (await pool.query(`SELECT consent_type, company FROM ks_prospects WHERE lower(email) = 'wes@webinar.example'`)).rows[0];
+    expect(p).toEqual({ consent_type: "express", company: "Webinar Capital" });
+    expect((await pool.query(`SELECT count(*)::int AS n FROM ks_mkt_touches WHERE item_id = $1`, [id])).rows[0].n).toBe(1);
+  });
+});
