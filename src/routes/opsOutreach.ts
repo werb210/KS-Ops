@@ -12,6 +12,11 @@
 //   POST  /outreach/links                      a tracked link for a channel / firm / item
 //   GET   /outreach/referrals                  POST /outreach/referrals   PATCH /outreach/referrals/:id
 //   GET   /outreach/fit-rules                  PUT /outreach/fit-rules (re-scores every firm)
+//   GET   /outreach/letter                     PUT /outreach/letter          the owner letter's wording
+//   GET   /outreach/mail/ready?countries=      how many firms can get a letter now
+//   POST  /outreach/mail/batches               { name, limit, countries?, cost_per_letter_cents? } -> a mail batch
+//   GET   /outreach/mail/batches/:id/letters   print-ready PDF (base64)      GET .../labels  address label CSV
+//   GET   /outreach/ads/linkedin-audience      company list CSV for LinkedIn matched audiences
 import { Router } from "express";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
@@ -20,7 +25,8 @@ import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { CONSENT_TYPES, defaultExpiry, type ConsentType } from "../marketing/consent.js";
 import { DEFAULT_FIT_RULES, FIRM_TYPES, FIRM_TYPE_LABELS, fitRules, QUALIFICATIONS, contactRank, isDecisionMaker } from "../outreach/rules.js";
 import { addTouch, brokerageDetail, importRows, listBrokerages, loadFitRules, newCode, rescore, scoreboard, TOUCH_OUTCOMES } from "../outreach/store.js";
-import { opsPublicUrl } from "../config.js";
+import { opsPublicUrl, publicSiteUrl } from "../config.js";
+import { createMailBatch, DEFAULT_LETTER, labelsCsv, letterFrom, lettersPdf, linkedInAudienceCsv, loadLetter, pickRecipients, type Recipient } from "../outreach/mail.js"; // KS_OPS_OUTREACH_v2
 
 const MAX_IMPORT = 1000;
 const opt = (max: number) => z.string().trim().max(max).nullable().optional();
@@ -293,6 +299,64 @@ export function opsOutreachRouter(deps: Deps): Router {
     if (ids.length > 2000) void run().catch((e) => console.error("[outreach] re-score failed", e instanceof Error ? e.message : String(e)));
     else await run();
     res.json({ rules, rescored: ids.length, in_background: ids.length > 2000 });
+  }));
+
+  // ---- KS_OPS_OUTREACH_v2: physical mail ----
+  const letterSchema = z.object({
+    greeting: z.string().trim().min(1).max(500), body: z.string().trim().min(1, "Write the letter.").max(4000), closing: z.string().trim().max(500),
+    signature: z.string().trim().max(500), ps: z.string().trim().max(500),
+    target_url: z.string().trim().max(500).refine((u) => u === "" || /^https:\/\//i.test(u), "The address must start with https://"),
+  });
+  r.get("/outreach/letter", h(async (_req, res) => res.json({ letter: await loadLetter(deps.db), defaults: DEFAULT_LETTER, merge_fields: ["first_name", "name", "company", "title"] })));
+  const saveLetter = h(async (req, res) => {
+    const parsed = parseBody(letterSchema, req.body);
+    if (!parsed.ok) return bad(res, parsed.errors);
+    await deps.db.query(`UPDATE ks_outreach_settings SET letter = $1::jsonb, updated_by = $2, updated_at = now() WHERE id = 1`, [JSON.stringify(parsed.data), actorOf(req)]);
+    res.json({ letter: letterFrom(parsed.data) });
+  });
+  r.put("/outreach/letter", saveLetter);
+  r.post("/outreach/letter", saveLetter); // the staff portal's client sends GET, POST and PATCH only
+  r.get("/outreach/mail/ready", h(async (req, res) => {
+    const list = await pickRecipients(deps.db, { limit: 2000, countries: split(req.query.countries) });
+    const noAddress = Number((await deps.db.query(`SELECT count(*)::int AS n FROM ks_brokerages WHERE qualification = 'keep' AND status = 'working' AND (address_line1 IS NULL OR city IS NULL)`)).rows[0]?.n ?? 0);
+    res.json({ ready: list.length, without_address: noAddress, first: list.slice(0, 10).map((x) => ({ company: x.company, name: x.name, city: x.city })) });
+  }));
+  const batchSchema = z.object({
+    name: z.string().trim().min(1, "Name the batch.").max(200), limit: z.number().int().min(1).max(500), countries: z.array(z.string().trim().min(2).max(3)).max(5).optional(),
+    brokerage_ids: z.array(z.string().regex(UUID_RE)).max(500).optional(), cost_per_letter_cents: cents.optional(),
+  });
+  r.post("/outreach/mail/batches", h(async (req, res) => {
+    const parsed = parseBody(batchSchema, req.body);
+    if (!parsed.ok) return bad(res, parsed.errors);
+    const made = await createMailBatch(deps.db, deps.now(), {
+      ...parsed.data, by: actorOf(req), base_url: opsPublicUrl(`${req.protocol}://${req.get("host") ?? ""}`), fallback_url: publicSiteUrl(),
+    });
+    if (!made) return bad(res, { limit: "No firm is ready for a letter: each needs a mailing address and a decision-maker, and must not have had a letter already." });
+    res.status(201).json(made);
+  }));
+  const batchOf = async (id: string): Promise<{ name: string; recipients: Recipient[]; letter: unknown } | null> => {
+    if (!UUID_RE.test(id)) return null;
+    const row = (await deps.db.query(`SELECT name, data FROM ks_mkt_channel_items WHERE id = $1 AND kind = 'mail_batch'`, [id])).rows[0];
+    return row && Array.isArray(row.data?.recipients) ? { name: row.name, recipients: row.data.recipients, letter: row.data.letter } : null;
+  };
+  const fileName = (name: string, ext: string) => `${name.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "letters"}.${ext}`;
+  r.get("/outreach/mail/batches/:id/letters", h(async (req, res) => {
+    const b = await batchOf(req.params.id);
+    if (!b) return notFound(res);
+    const pdf = await lettersPdf(b.recipients, letterFrom(b.letter), deps.now());
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ filename: fileName(b.name, "pdf"), content_type: "application/pdf", data_base64: pdf.toString("base64"), letters: b.recipients.length });
+  }));
+  r.get("/outreach/mail/batches/:id/labels", h(async (req, res) => {
+    const b = await batchOf(req.params.id);
+    if (!b) return notFound(res);
+    res.json({ filename: fileName(`${b.name}-labels`, "csv"), content_type: "text/csv", csv: labelsCsv(b.recipients) });
+  }));
+
+  // ---- KS_OPS_OUTREACH_v2: paid ads ----
+  r.get("/outreach/ads/linkedin-audience", h(async (req, res) => {
+    const out = await linkedInAudienceCsv(deps.db, split(req.query.countries));
+    res.json({ filename: "keystone-linkedin-company-list.csv", content_type: "text/csv", ...out });
   }));
 
   return r;
