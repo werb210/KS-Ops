@@ -247,9 +247,12 @@ function endUserAttributes(l: LicenseeRow, fields: string[]): { attributes: Reco
   return { attributes, unknown };
 }
 
+/** Countries where Twilio needs no regulatory bundle to buy a business number. */
+export const NO_BUNDLE_COUNTRIES = new Set(["CA", "US"]);
+
 /**
- * A regulatory bundle when Twilio's rules (Regulations API) ask for one for this country and number type; Canada and
- * the US need none today, which is recorded and the step is done. When one is needed: an end user from the sign-up,
+ * A regulatory bundle when Twilio's rules (Regulations API) ask for one for this country and number type. Canada and
+ * the US never need one (NO_BUNDLE_COUNTRIES): that is recorded and the step is done without asking Twilio. When one is needed: an end user from the sign-up,
  * the registered address as its supporting document, submitted for Twilio's review; the step then waits for approval
  * (checked hourly, up to 14 days). A requirement that needs an uploaded document fails with what to upload.
  */
@@ -258,8 +261,17 @@ export async function ensureBundle(deps: TwilioDeps, l: LicenseeRow, startedAt: 
   const row = await store.get(l.id);
   const sub = subCreds(row, env);
   if (!row || !sub) return { kind: "failed", message: "The licensee has no Twilio sub-account yet (run the sub-account step first)." };
-  const country = String(l.country ?? "CA").toUpperCase() === "US" ? "US" : "CA";
+  const iso = String(l.country ?? "CA").trim().toUpperCase() || "CA";
+  const country = iso;
   try {
+    // Canada and the US: Twilio does not use regulatory bundles for local or toll-free numbers. Its Regulations API can
+    // still list one, and a bundle made from it is REJECTED ("we do not offer this CA Local number type, so no bundles
+    // are needed") - which stopped the whole set-up of a new Canadian brokerage. So for these two countries the step is
+    // done without asking, and a bundle an earlier run submitted (and Twilio rejected) no longer blocks anything.
+    if (NO_BUNDLE_COUNTRIES.has(iso)) {
+      await store.update(l.id, { bundle_required: false, bundle_status: "not_required", bundle_failure: null });
+      return { kind: "done", message: `no regulatory bundle needed for ${iso} numbers`, output: { bundle_required: false } };
+    }
     if (row.bundle_sid) return await checkBundle(deps, l, row, sub, startedAt);
     const needed: Array<{ type: string; regulation: any }> = [];
     for (const type of numberTypes(l)) {
