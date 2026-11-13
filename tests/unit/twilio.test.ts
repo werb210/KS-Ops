@@ -141,13 +141,26 @@ describe("address and bundle", () => {
     await ensureSubaccount(t.deps, ready());
     const r = await ensureBundle(t.deps, ready(), null);
     expect(r).toMatchObject({ kind: "done", output: { bundle_required: false } });
-    expect(t.tw.calls.filter((c) => /Regulations/.test(c.path)).map((c) => c.params.NumberType)).toEqual(["local", "toll-free"]);
+    expect(t.tw.calls.filter((c) => /Regulations/.test(c.path))).toHaveLength(0); // not even asked
     expect(t.tw.bundles.size).toBe(0);
+  });
+
+  it("Canada: no bundle even when Twilio's rules list one, and an earlier rejected bundle no longer blocks set-up", async () => {
+    const t = setup(ready());
+    t.tw.regulations.set("CA local", { sid: "RN1", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [] } });
+    await ensureSubaccount(t.deps, ready());
+    t.store.rows.get(LICENSEE_ID)!.bundle_sid = "BU51d31e38"; // submitted by an earlier run, rejected by Twilio
+    t.store.rows.get(LICENSEE_ID)!.bundle_status = "twilio-rejected";
+    const r = await ensureBundle(t.deps, ready(), new Date());
+    expect(r).toMatchObject({ kind: "done", output: { bundle_required: false } });
+    expect((await t.store.get(LICENSEE_ID))!).toMatchObject({ bundle_required: false, bundle_status: "not_required", bundle_failure: null });
+    expect(t.tw.bundles.size).toBe(0);
+    expect(await ensureBundle(t.deps, ready({ country: "US" }), new Date())).toMatchObject({ kind: "done" });
   });
 
   it("when a bundle is required: made from the sign-up and the address, submitted, waited for, then approved", async () => {
     const t = setup(ready());
-    t.tw.regulations.set("CA local", {
+    t.tw.regulations.set("GB local", {
       sid: "RN1",
       requirements: {
         end_user: [{ type: "business", fields: ["business_name", "business_registration_number"] }],
@@ -156,7 +169,7 @@ describe("address and bundle", () => {
     });
     await ensureSubaccount(t.deps, ready());
     await ensureAddress(t.deps, ready());
-    const r = await ensureBundle(t.deps, ready(), new Date());
+    const r = await ensureBundle(t.deps, ready({ country: "GB" }), new Date());
     expect(r.kind).toBe("wait");
     const row = (await t.store.get(LICENSEE_ID))!;
     const b = t.tw.bundles.get(row.bundle_sid!)!;
@@ -165,39 +178,39 @@ describe("address and bundle", () => {
     expect([...t.tw.endUsers.values()][0].attributes).toEqual({ business_name: "Prairie Capital Ltd.", business_registration_number: "123456789" });
     expect([...t.tw.docs.values()][0].attributes).toEqual({ address_sids: [row.address_sid] });
     // Still in review: waits again, makes nothing new.
-    expect((await ensureBundle(t.deps, ready(), new Date())).kind).toBe("wait");
+    expect((await ensureBundle(t.deps, ready({ country: "GB" }), new Date())).kind).toBe("wait");
     expect(t.tw.bundles.size).toBe(1);
     b.status = "twilio-approved";
-    expect(await ensureBundle(t.deps, ready(), new Date())).toMatchObject({ kind: "done", output: { bundle_sid: row.bundle_sid } });
+    expect(await ensureBundle(t.deps, ready({ country: "GB" }), new Date())).toMatchObject({ kind: "done", output: { bundle_sid: row.bundle_sid } });
   });
 
   it("a rejected bundle fails with Twilio's reasons; a document upload is left to a person", async () => {
     const t = setup(ready());
-    t.tw.regulations.set("CA local", { sid: "RN1", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [[{ name: "Address proof", accepted_documents: [{ type: "d", fields: ["address_sids"] }] }]] } });
+    t.tw.regulations.set("GB local", { sid: "RN1", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [[{ name: "Address proof", accepted_documents: [{ type: "d", fields: ["address_sids"] }] }]] } });
     await ensureSubaccount(t.deps, ready());
     await ensureAddress(t.deps, ready());
-    await ensureBundle(t.deps, ready(), new Date());
+    await ensureBundle(t.deps, ready({ country: "GB" }), new Date());
     t.tw.bundles.get((await t.store.get(LICENSEE_ID))!.bundle_sid!)!.status = "twilio-rejected";
-    const r = await ensureBundle(t.deps, ready(), new Date());
+    const r = await ensureBundle(t.deps, ready({ country: "GB" }), new Date());
     expect(r).toMatchObject({ kind: "failed", message: expect.stringMatching(/rejected .*Business name does not match the document/) });
 
     const u = setup(ready());
-    u.tw.regulations.set("CA local", { sid: "RN2", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [[{ name: "Business registration", accepted_documents: [{ type: "reg", fields: ["document_number", "business_name"] }] }]] } });
+    u.tw.regulations.set("GB local", { sid: "RN2", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [[{ name: "Business registration", accepted_documents: [{ type: "reg", fields: ["document_number", "business_name"] }] }]] } });
     await ensureSubaccount(u.deps, ready());
     await ensureAddress(u.deps, ready());
-    const r2 = await ensureBundle(u.deps, ready(), new Date());
+    const r2 = await ensureBundle(u.deps, ready({ country: "GB" }), new Date());
     expect(r2).toMatchObject({ kind: "failed", message: expect.stringMatching(/an uploaded document \(Business registration\).*Mark done manually/) });
   });
 
   it("the bundle step gives up after 14 days in review", async () => {
     const t = setup(ready());
-    t.tw.regulations.set("CA local", { sid: "RN1", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [] } });
+    t.tw.regulations.set("GB local", { sid: "RN1", requirements: { end_user: [{ fields: ["business_name"] }], supporting_document: [] } });
     await ensureSubaccount(t.deps, ready());
     await ensureAddress(t.deps, ready());
     const start = new Date("2026-10-26T12:00:00Z");
-    await ensureBundle(t.deps, ready(), start);
+    await ensureBundle(t.deps, ready({ country: "GB" }), start);
     t.tick(15 * DAY);
-    expect(await ensureBundle(t.deps, ready(), start)).toMatchObject({ kind: "failed", message: expect.stringMatching(/after 14 days/) });
+    expect(await ensureBundle(t.deps, ready({ country: "GB" }), start)).toMatchObject({ kind: "failed", message: expect.stringMatching(/after 14 days/) });
   });
 
   it("points the dialler app at the server once it has an address", async () => {

@@ -496,7 +496,9 @@ describe("status pushes, cancellation and data purge", () => {
     });
     const mid = res.body.licensee.id;
     expect(res.body.licensee.cancelled_at).toBeTruthy();
-    await pool.query("UPDATE licensees SET cancelled_at = now() - interval '200 days' WHERE id = $1", [mid]);
+    // 200 days before the TEST's clock, not the database's: the purge date is compared with the test clock, so
+    // using the real date made this fail once the calendar passed the fixed clock (CI went red on Nov 12).
+    await pool.query("UPDATE licensees SET cancelled_at = $2::timestamptz - interval '200 days' WHERE id = $1", [mid, deps.now().toISOString()]);
     const done = await request(app()).post(`/api/ops/licensees/${mid}/purged`).set(staff());
     expect(done.status).toBe(200);
     expect(done.body.licensee.purged_at).toBeTruthy();
