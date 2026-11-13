@@ -13,11 +13,14 @@ export function originList(name: string, e: NodeJS.ProcessEnv = process.env): st
 }
 
 /** The public website's address (first entry of PUBLIC_SITE_URL), used for Stripe success and cancel pages. */
+/** Keystone's own website: where email links go when PUBLIC_SITE_URL only lists Azure host names. */
+export const KEYSTONE_SITE = "https://www.keystonecrm.online";
+
 export function publicSiteUrl(e: NodeJS.ProcessEnv = process.env): string {
   // Links in emails use Keystone's own address when the list has one: an Azure host name (…azurestaticapps.net) listed
   // first for the browser's sake put that address in the licence agreement email.
   const list = originList("PUBLIC_SITE_URL", e);
-  return list.find((u) => !/\.(azurestaticapps|azurewebsites)\.net$/i.test(u.replace(/^https?:\/\//i, "").replace(/[:/].*$/, ""))) ?? list[0] ?? "";
+  return list.find((u) => !/\.(azurestaticapps|azurewebsites)\.net$/i.test(u.replace(/^https?:\/\//i, "").replace(/[:/].*$/, ""))) ?? (list.length ? KEYSTONE_SITE : "");
 }
 
 export function salesEmail(e: NodeJS.ProcessEnv = process.env): string {
