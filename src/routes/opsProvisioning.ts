@@ -27,7 +27,7 @@ import { statusTokenFor } from "../provisioning/statusToken.js";
 import { publicSiteUrl } from "../config.js";
 import { twilioSummary } from "../twilio/view.js";
 import { linesFrom, pushTexting, submitTexting } from "../twilio/texting.js";
-import { twilioOf } from "../twilio/account.js";
+import { mayReleaseNumbers, releaseNumbers, twilioOf } from "../twilio/account.js";
 import { audit } from "../licensees/repo.js";
 import { identitySettings, twilioSettings, workspaceApps } from "../provisioning/sharedSteps.js";
 import { mergeTenantEnv } from "../tenants/repo.js";
@@ -108,6 +108,22 @@ export function opsProvisioningRouter(deps: Deps, md: MachineDeps = machineDeps(
       if (!UUID_RE.test(id) || !(await getLicensee(deps.db, id))) return res.status(404).json({ error: "not_found" });
       res.setHeader("Cache-Control", "no-store");
       return res.json(await twilioSummary(md, id));
+    }),
+  );
+
+  // Give up every number in a test, never-paid or cancelled brokerage's sub-account (stops the monthly charge).
+  router.post(
+    "/provisioning/twilio/:licenseeId/release-numbers",
+    h(async (req, res) => {
+      const id = String(req.params.licenseeId);
+      const l = UUID_RE.test(id) ? await getLicensee(deps.db, id) : null;
+      if (!l) return res.status(404).json({ error: "not_found" });
+      if (!mayReleaseNumbers(l)) {
+        return res.status(409).json({ error: "not_allowed", message: "Only a test, never-paid or cancelled brokerage's numbers can be released here." });
+      }
+      const r = await releaseNumbers(md, l);
+      await audit(deps.db, actorOf(req), "licensee.numbers_released_by_staff", l.id, { released: r.released.length, failed: r.failed.length });
+      return res.json({ ...r, message: r.released.length ? `Released ${r.released.length} number${r.released.length === 1 ? "" : "s"}.` : "This brokerage has no numbers." });
     }),
   );
 

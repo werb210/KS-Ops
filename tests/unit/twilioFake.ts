@@ -137,7 +137,12 @@ export class FakeTwilio {
           return this.ok(a, 201);
         }
         if (kind === "IncomingPhoneNumbers") {
-          return this.ok({ incoming_phone_numbers: [...this.numbers.values()].filter((n) => n.account === account && n.phone_number === q.PhoneNumber) });
+          if (id && method === "DELETE") {
+            if (this.numbers.get(id)?.account !== account) return this.nf();
+            this.numbers.delete(id);
+            return new Response(null, { status: 204 });
+          }
+          return this.ok({ incoming_phone_numbers: [...this.numbers.values()].filter((n) => n.account === account && (!q.PhoneNumber || n.phone_number === q.PhoneNumber)) });
         }
       }
     }
