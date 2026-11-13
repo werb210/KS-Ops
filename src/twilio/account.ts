@@ -399,3 +399,36 @@ export const SERVER_TWILIO_SETTINGS = [
   "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_API_KEY", "TWILIO_API_SECRET", "TWILIO_VOICE_APP_SID",
   "TWILIO_VERIFY_SERVICE_SID", "TWILIO_ADDRESS_SID", "TWILIO_BUNDLE_SID", "KS_SERVER_URL",
 ] as const;
+
+
+/** A brokerage whose numbers staff may give up at once: a test brokerage, or one that never paid or is cancelled. */
+export function mayReleaseNumbers(l: Pick<LicenseeRow, "status"> & { test_brokerage?: boolean | null }): boolean {
+  return l.test_brokerage === true || l.status === "pending_payment" || l.status === "cancelled";
+}
+
+/**
+ * Gives up every phone number in the brokerage's Twilio sub-account, so nothing is billed for it any more. For test,
+ * never-paid and cancelled brokerages only (mayReleaseNumbers) - a paying brokerage's lines are never touched here.
+ * Releasing a number cannot be undone. Returns the numbers released and any that Twilio refused.
+ */
+export async function releaseNumbers(deps: TwilioDeps, l: LicenseeRow): Promise<{ released: string[]; failed: Array<{ number: string; error: string }> }> {
+  if (!mayReleaseNumbers(l)) throw new Error("not_allowed");
+  const { store, http, env } = twilioOf(deps);
+  const row = await store.get(l.id);
+  const sub = subCreds(row, env);
+  if (!row || !sub) return { released: [], failed: [] };
+  const list = await http.get(sub, `${API}/Accounts/${sub.accountSid}/IncomingPhoneNumbers.json`, { PageSize: 100 }, "list the sub-account's numbers");
+  const released: string[] = [];
+  const failed: Array<{ number: string; error: string }> = [];
+  for (const n of ((list?.incoming_phone_numbers ?? []) as Array<{ sid: string; phone_number: string }>)) {
+    try {
+      await http.del(sub, `${API}/Accounts/${sub.accountSid}/IncomingPhoneNumbers/${n.sid}.json`, "release the number");
+      released.push(String(n.phone_number));
+    } catch (err) {
+      logTwilioError("release number", err, { licensee: l.id });
+      failed.push({ number: String(n.phone_number), error: plainTwilioError(err) });
+    }
+  }
+  if (released.length) await audit(deps.db, "ks-ops twilio", "licensee.twilio_numbers_released", l.id, { count: released.length, numbers: released });
+  return { released, failed };
+}

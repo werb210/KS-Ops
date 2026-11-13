@@ -38,11 +38,13 @@ export function formBody(params: Params): string {
 export type TwilioHttp = {
   get: (creds: TwilioCreds, url: string, query?: Params, op?: string) => Promise<any>;
   post: (creds: TwilioCreds, url: string, params?: Params, op?: string) => Promise<any>;
+  /** DELETE; Twilio answers 204 with no body. */
+  del: (creds: TwilioCreds, url: string, op?: string) => Promise<any>;
 };
 
 /** The real client over fetch. 30 seconds per call. */
 export function twilioHttp(fetchImpl: typeof fetch): TwilioHttp {
-  const call = async (creds: TwilioCreds, method: "GET" | "POST", url: string, params: Params, op: string) => {
+  const call = async (creds: TwilioCreds, method: "GET" | "POST" | "DELETE", url: string, params: Params, op: string) => {
     const auth = Buffer.from(`${creds.accountSid}:${creds.authToken}`).toString("base64");
     const qs = method === "GET" ? formBody(params) : "";
     let r: Response;
@@ -82,6 +84,7 @@ export function twilioHttp(fetchImpl: typeof fetch): TwilioHttp {
   return {
     get: (creds, url, query = {}, op = "read") => call(creds, "GET", url, query, op),
     post: (creds, url, params = {}, op = "write") => call(creds, "POST", url, params, op),
+    del: (creds, url, op = "delete") => call(creds, "DELETE", url, {}, op),
   };
 }
 

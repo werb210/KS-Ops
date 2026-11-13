@@ -2,7 +2,7 @@
 // to the workflow, address and bundle, toll-free verification and A2P 10DLC, status updates, retries, idempotency and
 // the sub-account lifecycle (suspend, reactivate, close after retention). Nothing leaves the process.
 import { describe, expect, it, vi } from "vitest";
-import { ensureAddress, ensureBundle, ensureSubaccount, MASTER_MISSING, pointVoiceApp, serverSettings, subCreds, type TwilioDeps } from "../../src/twilio/account.js";
+import { ensureAddress, ensureBundle, mayReleaseNumbers, releaseNumbers, ensureSubaccount, MASTER_MISSING, pointVoiceApp, serverSettings, subCreds, type TwilioDeps } from "../../src/twilio/account.js";
 import { desiredStatus, refreshTexting, syncAccountStatuses } from "../../src/twilio/lifecycle.js";
 import { isUsLocal, linesFrom, plainStatus, pushTexting, submitTexting } from "../../src/twilio/texting.js";
 import { plainTwilioError, TwilioError } from "../../src/twilio/http.js";
@@ -507,6 +507,33 @@ describe("provisioning steps around Twilio", () => {
   it("errors read as plain sentences", () => {
     expect(plainTwilioError(new TwilioError("x", 400, 21631, null, "buy a number"))).toBe("Twilio needs a registered business address for this number. (Twilio error 21631, while trying to buy a number)");
     expect(plainTwilioError(new TwilioError("Could not connect", 0, null, null, "create the sub-account"))).toBe("Could not connect (while trying to create the sub-account)");
+  });
+});
+
+describe("releasing a test brokerage's numbers", () => {
+  it("gives up every number in the sub-account, and only that sub-account's", async () => {
+    const l = ready({ status: "pending_payment", test_brokerage: true } as any);
+    const t = setup(l);
+    await ensureSubaccount(t.deps, l);
+    const sub = (await t.store.get(LICENSEE_ID))!.subaccount_sid!;
+    t.tw.addNumber(sub, "+14035550101");
+    t.tw.addNumber(sub, "+18885550102");
+    t.tw.addNumber("ACother", "+14035550199");
+    const r = await releaseNumbers(t.deps, l);
+    expect(r.released.sort()).toEqual(["+14035550101", "+18885550102"]);
+    expect(r.failed).toEqual([]);
+    expect([...t.tw.numbers.values()].map((n) => n.phone_number)).toEqual(["+14035550199"]);
+    expect(await releaseNumbers(t.deps, l)).toEqual({ released: [], failed: [] });
+  });
+
+  it("never for a paying brokerage", async () => {
+    expect(mayReleaseNumbers({ status: "active" })).toBe(false);
+    expect(mayReleaseNumbers({ status: "active", test_brokerage: true })).toBe(true);
+    expect(mayReleaseNumbers({ status: "pending_payment" })).toBe(true);
+    expect(mayReleaseNumbers({ status: "cancelled" })).toBe(true);
+    const l = ready({ status: "active" } as any);
+    const t = setup(l);
+    await expect(releaseNumbers(t.deps, l)).rejects.toThrow("not_allowed");
   });
 });
 
