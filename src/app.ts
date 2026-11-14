@@ -2,6 +2,7 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import { originList } from "./config.js";
+import { demoPortalOrigins } from "./demo/config.js";
 import type { Deps } from "./deps.js";
 import { requireStaff } from "./auth/staff.js";
 import { BillingNotConfigured } from "./billing/stripeClient.js";
@@ -54,6 +55,7 @@ function corsFor(...envNames: string[]) {
       if (!origin) return cb(null, true);
       const allowed = envNames.flatMap((n) => originList(n));
       if (envNames.includes("PUBLIC_SITE_URL")) allowed.push(...KEYSTONE_SITE_ORIGINS);
+      if (envNames.includes("KS_DEMO_PORTAL_URL")) allowed.push(...demoPortalOrigins()); // KS_DEMO_DOMAIN
       cb(null, allowed.includes(origin.replace(/\/+$/, "")));
     },
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],

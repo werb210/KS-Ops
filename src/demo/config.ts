@@ -18,7 +18,20 @@ const int = (name: string, dflt: number, min: number, max: number) => {
 
 export const demoServerUrl = () => env("KS_DEMO_SERVER_URL").replace(/\/+$/, "");
 export const demoOpsKey = () => env("KS_DEMO_OPS_KEY");
-export const demoPortalUrl = () => originList("KS_DEMO_PORTAL_URL")[0] ?? "";
+/** KS_DEMO_DOMAIN - the demo portal's own Keystone address (a custom domain on the portal web app that serves /demo). */
+export const DEMO_PORTAL_DOMAIN = "https://demo.keystonecrm.online";
+const isAzureHost = (u: string) => /\.(azurestaticapps|azurewebsites)\.net$/i.test(u.replace(/^https?:\/\//i, "").replace(/[:/].*$/, ""));
+/** Where demo links point: a Keystone address when the setting lists one, otherwise the demo domain. An Azure host
+ *  name in the setting keeps working in the browser (see demoPortalOrigins) but is never put in a link or an email. */
+export const demoPortalUrl = (): string => {
+  const list = originList("KS_DEMO_PORTAL_URL");
+  return list.find((u) => !isAzureHost(u)) ?? (list.length ? DEMO_PORTAL_DOMAIN : "");
+};
+/** Every address the demo portal may be opened from: the setting's list plus the demo domain. */
+export const demoPortalOrigins = (): string[] => {
+  const list = originList("KS_DEMO_PORTAL_URL");
+  return list.length ? [...new Set([...list, DEMO_PORTAL_DOMAIN])] : [];
+};
 export const demoSessionDays = () => int("DEMO_SESSION_DAYS", 7, 1, 30);
 export const demoIdleHours = () => int("DEMO_IDLE_HOURS", 24, 1, 24 * 14);
 export const demoMaxActive = () => int("DEMO_MAX_ACTIVE", 100, 1, 100_000);
