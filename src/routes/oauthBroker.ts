@@ -1,11 +1,12 @@
 // KS_OPS_WORKSPACE_APPS - GET /api/oauth/callback/:provider (public): Microsoft and Google send every brokerage's
 // browser here; it is forwarded to that brokerage's own KS-server. See src/workspace/broker.ts.
-import { Router } from "express";
+import express, { Router, type Request, type Response } from "express";
 import type { Deps } from "../deps.js";
 import { h } from "../lib/http.js";
 import { limiter } from "../lib/clientIp.js";
 import { getLicensee, opsKeyOf } from "../licensees/repo.js";
 import { brokerTarget, parseBrokerState, type BrokerProvider, type BrokerRefusal } from "../workspace/broker.js";
+import { exchangeCode, identityFromIdToken, isSocialProvider, prefillToken, readState, signupPage, socialConfig, STATE_PREFIX } from "../signup/social.js"; // KS_OPS_SOCIAL_SIGNUP_v1
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 
@@ -30,6 +31,29 @@ h1{font-size:1.3rem;margin:0 0 .5rem}p{margin:.4rem 0;color:#2b313a}</style></he
 
 export function oauthBrokerRouter(deps: Deps): Router {
   const router = Router();
+
+  // KS_OPS_SOCIAL_SIGNUP_v1 - "Continue with Google / Microsoft / Apple" on the sign-up page comes back here (the one
+  // return address each provider already knows). The person lands on the sign-up form with name and email filled in.
+  const finishSignup = async (provider: string, params: Record<string, unknown>, res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    const back = (hash: string) => res.redirect(302, `${signupPage()}#${hash}`);
+    const cfg = isSocialProvider(provider) ? socialConfig(provider) : null;
+    const st = cfg ? readState(params.state, cfg.provider, process.env, deps.now().getTime()) : null;
+    if (!cfg || !st) return res.status(400).type("html").send(brokerPage("Sign-up could not continue", "This link has expired or is not valid."));
+    if (typeof params.error === "string" && params.error) return back("social_error=cancelled");
+    try {
+      const idToken = await exchangeCode(cfg, String(params.code ?? ""), deps.fetch);
+      const who = identityFromIdToken(cfg, idToken, st.nonce, params.user, deps.now().getTime());
+      return back(`social=${encodeURIComponent(prefillToken(who, process.env, deps.now().getTime()))}`);
+    } catch (err) {
+      console.error(`[social-signup] ${provider} sign-up not completed`, err instanceof Error ? err.message : String(err));
+      return back("social_error=failed");
+    }
+  };
+  // Apple answers with a form post.
+  router.post("/apple", limiter(60, 60_000, { error: "rate_limited" }), express.urlencoded({ extended: false, limit: "20kb" }),
+    h(async (req: Request, res: Response) => { await finishSignup("apple", (req.body ?? {}) as Record<string, unknown>, res); }));
   router.get(
     "/:provider",
     limiter(120, 60_000, { error: "rate_limited" }),
@@ -38,6 +62,7 @@ export function oauthBrokerRouter(deps: Deps): Router {
       // The query holds a one-time code: it must not leak to the next site in a Referer header.
       res.setHeader("Referrer-Policy", "no-referrer");
       const provider = String(req.params.provider);
+      if (typeof req.query.state === "string" && req.query.state.startsWith(STATE_PREFIX)) return finishSignup(provider, req.query as Record<string, unknown>, res);
       if (provider !== "microsoft" && provider !== "google" && provider !== "meta" && provider !== "intuit" && provider !== "zoom") return res.status(404).type("html").send(brokerPage("Page not found", "There is nothing at this address."));
       const parsed = parseBrokerState(req.query.state);
       const l = parsed ? await getLicensee(deps.db, parsed.licenseeId) : null;
