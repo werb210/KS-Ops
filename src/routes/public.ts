@@ -1,5 +1,6 @@
 // The public website (KS-Website): plans, company-code check, sign-up and sign-up status.
 import { Router, type Request } from "express";
+import { authorizeUrl, isSocialProvider, newState, offeredProviders, readPrefill, signupPage, socialConfig } from "../signup/social.js"; // KS_OPS_SOCIAL_SIGNUP_v1
 import { isProduction, opsPublicUrl, salesEmail, signupTurnstileOptional } from "../config.js";
 import { checkLogo, logoByKey, logoPath, saveLogo, type CheckedLogo } from "../lib/logo.js";
 import { checkFavicon, faviconByKey, faviconPath, saveFavicon, type CheckedFavicon } from "../lib/logo.js"; // KS_OPS_SIGNUP_FAVICON_v1
@@ -64,6 +65,26 @@ export function publicRouter(deps: Deps): Router {
   router.get("/plans", (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=300");
     res.json(publicPlans());
+  });
+
+  // KS_OPS_SOCIAL_SIGNUP_v1 - "Continue with Google / Microsoft / Apple": which buttons to show, the way out to the
+  // provider, and reading back who the person is so the form opens filled in.
+  router.get("/signup/social", (_req, res) => {
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json({ providers: offeredProviders() });
+  });
+  router.get("/signup/social/:provider/start", limited(30, 60_000), (req, res) => {
+    const cfg = isSocialProvider(req.params.provider) ? socialConfig(req.params.provider) : null;
+    res.setHeader("Cache-Control", "no-store");
+    if (!cfg) return res.redirect(302, `${signupPage() || "/"}#social_error=unavailable`);
+    const { state, nonce } = newState(cfg.provider, process.env, deps.now().getTime());
+    return res.redirect(302, authorizeUrl(cfg, state, nonce));
+  });
+  router.post("/signup/social/prefill", limited(60, 60_000), (req, res) => {
+    const who = readPrefill((req.body ?? {}).token, process.env, deps.now().getTime());
+    res.setHeader("Cache-Control", "no-store");
+    if (!who) return res.status(400).json({ error: "expired", message: "That sign-in has expired. Please choose your account again, or fill in the form." });
+    return res.json({ provider: who.provider, name: who.name, email: who.email });
   });
 
   router.get(
