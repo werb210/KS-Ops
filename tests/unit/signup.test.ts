@@ -333,3 +333,49 @@ describe("POST /api/public/signup/:id/checkout (resume payment)", () => {
     expect(last).toBe(429);
   });
 });
+
+// KS_OPS_QUICK_SIGNUP_v1 - the short sign-up: no company code, legal name, address, business number or job title.
+describe("the short sign-up", () => {
+  const short = () => {
+    const { company_code: _c, legal_name: _l, mailing_address: _m, website: _w, ...rest } = validSignup() as Record<string, unknown>;
+    return { ...rest, accept_agreement: true };
+  };
+  it("is accepted without a company code, legal name or address", () => {
+    const r = signupSchema.safeParse(short());
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.company_code).toBeUndefined();
+      expect(r.data.legal_name).toBe("Northwind Capital");
+    }
+  });
+  it("makes the company code from the company name", async () => {
+    const { codeFromName } = await import("../../src/licensees/validation.js");
+    expect(codeFromName("Northwind Capital Ltd.")).toBe("northwind-capital-ltd");
+    expect(codeFromName("A & B")).toBe("a-and-b");
+    expect(codeFromName("Élan Financement")).toBe("elan-financement");
+    expect(codeFromName("!!")).toBe("brokerage");
+    expect(codeFromName("x".repeat(80)).length).toBeLessThanOrEqual(28);
+  });
+  it("creates the brokerage with a code of its own, adding a number when the name is taken", async () => {
+    const inserted: Record<string, unknown>[] = [];
+    const taken = ["northwind-capital"];
+    const db = fakeDb([
+      [/SELECT 1 FROM licensees WHERE company_code/, (p) => (taken.includes(String(p[0])) ? [{ "?column?": 1 }] : [])],
+      [/INSERT INTO licensees/, (p) => { const row = licenseeRow({ company_code: p.find((x) => typeof x === "string" && /^northwind-capital/.test(x)) }); inserted.push(row); return [row]; }],
+    ]);
+    const res = await request(createApp(makeDeps({ db }))).post("/api/public/signup").send(short());
+    expect(res.status).toBe(201);
+    expect(inserted[0]?.company_code).toBe("northwind-capital-2");
+  });
+});
+
+describe("the licence agreement can be read before signing up", () => {
+  it("is rendered for the plan and seats on the page, and nothing is saved", async () => {
+    const db = fakeDb();
+    const res = await request(createApp(makeDeps({ db }))).post("/api/public/licence-agreement/preview").send({ company_name: "Northwind Capital", plan: "starter", seats: 2, billing_interval: "monthly" });
+    expect(res.status).toBe(200);
+    expect(res.body.html).toContain("Northwind Capital");
+    expect(res.body.html).toContain("Starter");
+    expect(db.calls.some((c) => /INSERT|UPDATE/i.test(c.sql))).toBe(false);
+  });
+});

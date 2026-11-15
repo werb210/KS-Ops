@@ -23,6 +23,16 @@ export function normalizeCode(raw: unknown): string {
 
 export type CodeProblem = "invalid" | "reserved";
 
+/** KS_OPS_QUICK_SIGNUP_v1 - a company code made from the company name: lowercase letters, digits and hyphens, 3 to 28
+ *  characters (room for a "-2" style ending). "brokerage" when the name has nothing usable. */
+export function codeFromName(name: unknown): string {
+  const base = String(name ?? "")
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    .slice(0, 28).replace(/-+$/g, "");
+  return base.length >= 3 ? base : (base ? `${base}-brokerage` : "brokerage");
+}
+
 export function codeProblem(code: string): CodeProblem | null {
   if (!CODE_RE.test(code) || code.startsWith("-") || code.endsWith("-") || code.includes("--")) return "invalid";
   if (RESERVED_CODES.has(code)) return "reserved";
@@ -322,8 +332,10 @@ const region = z.preprocess(
 export const signupSchema = z
   .object({
     company_name: text("Company name", 2, 120),
-    legal_name: text("Legal name", 2, 160),
-    company_code: codeSchema,
+    // KS_OPS_QUICK_SIGNUP_v1 - the short sign-up asks for the least it can. Legal name is optional (blank = the company
+    // name), and the company code is made from the company name when the form does not send one.
+    legal_name: optionalText("Legal name", 160),
+    company_code: z.preprocess((v) => (v === null || v === undefined || String(v).trim() === "" ? undefined : v), codeSchema.optional()),
     country: z.enum(["CA", "US"], { error: "Choose Canada or the United States." }),
     province_state: region,
     // Either the address in parts (address_line1, city, postal_code required) or, from older clients, mailing_address.
@@ -373,16 +385,19 @@ export const signupSchema = z
     assistant_name: optionalText("Assistant name", 40),
     accept_terms: z.literal(true, { error: "Please accept the terms of service." }),
     accept_privacy: z.literal(true, { error: "Please accept the privacy policy." }),
+    // KS_OPS_QUICK_SIGNUP_v1 - true = the person ticked "I agree to the licence agreement" on the sign-up page; it is
+    // recorded as their acceptance (name, time, address, text fingerprint) and a copy is emailed, with no separate page.
+    accept_agreement: z.boolean().optional(),
     turnstile_token: z.string().optional(),
     website_url: z.any().optional(),
   })
   .superRefine((v, ctx) => {
     regionCheck(v.country, v.province_state, ctx);
     minSeatsCheck(v.plan, v.seats, ctx);
-    addressCheck(v, ctx, true);
+    addressCheck(v, ctx, false); // KS_OPS_QUICK_SIGNUP_v1 - the address is asked for in set-up (phone lines need it), not here
     businessNumberCheck(v, ctx);
   })
-  .transform((v) => withBusinessNumber(withAddress(v)));
+  .transform((v) => withBusinessNumber(withAddress({ ...v, legal_name: v.legal_name || v.company_name })));
 export type SignupInput = z.infer<typeof signupSchema>;
 
 /** Normalises the postal code and writes mailing_address from the parts when the parts were given. */

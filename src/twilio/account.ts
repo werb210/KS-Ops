@@ -164,7 +164,10 @@ export async function ensureAddress(deps: TwilioDeps, l: LicenseeRow, log: (m: s
   const sub = subCreds(row, env);
   if (!row || !sub) return { kind: "failed", message: "The licensee has no Twilio sub-account yet (run the sub-account step first)." };
   const missing = addressMissing(l);
-  if (missing) return { kind: "failed", message: `The licensee's business address is incomplete (${missing}). Add it on the licensee in KS-Ops, then press Retry step.` };
+  // KS_OPS_QUICK_SIGNUP_v1 - the short sign-up does not ask for the address: the owner adds it in set-up ("Get your
+  // phone number"). Until then this step is done with nothing registered, so the brokerage is not held up; the phone
+  // number step waits for the address instead.
+  if (missing) return { kind: "done", message: `no business address yet (${missing}); it is registered once the owner adds it in set-up`, output: { address_pending: true } };
   const country = String(l.country ?? "CA").toUpperCase() === "US" ? "US" : "CA";
   try {
     if (row.address_sid) {

@@ -116,11 +116,13 @@ describe("Twilio sub-account", () => {
 });
 
 describe("address and bundle", () => {
-  it("an incomplete address fails with what to add", async () => {
+  // KS_OPS_QUICK_SIGNUP_v1 - the short sign-up does not ask for the address; the brokerage is not held up for it.
+  it("an address that is not known yet does not hold the brokerage up", async () => {
     const t = setup(ready());
     await ensureSubaccount(t.deps, ready());
     const r = await ensureAddress(t.deps, ready({ address_line1: null, postal_code: null }));
-    expect(r).toEqual({ kind: "failed", message: expect.stringMatching(/incomplete \(street address, postal or ZIP code\)/) });
+    expect(r).toMatchObject({ kind: "done", output: { address_pending: true }, message: expect.stringMatching(/no business address yet \(street address, postal or ZIP code\)/) });
+    expect((await t.store.get(LICENSEE_ID))!.address_sid ?? null).toBeNull();
   });
 
   it("registers the address once in the sub-account", async () => {

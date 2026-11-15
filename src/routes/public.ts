@@ -15,7 +15,9 @@ import { turnstileEnabled, verifyTurnstile } from "../lib/turnstile.js";
 import {
   audit, codeTaken, getLicensee, insertLicensee, isUniqueViolation, signupTokenColumns, type LicenseeRow,
 } from "../licensees/repo.js";
-import { CODE_MESSAGES, codeProblem, crossFieldErrors, normalizeCode, signupSchema } from "../licensees/validation.js";
+import { CODE_MESSAGES, codeFromName, codeProblem, crossFieldErrors, normalizeCode, signupSchema } from "../licensees/validation.js";
+import { signAgreement } from "./publicOnboarding.js"; // KS_OPS_QUICK_SIGNUP_v1
+import { renderAgreement } from "../onboarding/agreement.js";
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
 import { BrandScanError, scanBrand } from "../lib/brandScan.js";
@@ -114,7 +116,17 @@ export function publicRouter(deps: Deps): Router {
         if (!checked.ok) return res.status(400).json({ errors: { favicon_file: checked.error } });
         favicon = checked.favicon;
       }
-      if (await codeTaken(deps.db, input.company_code)) {
+      // KS_OPS_QUICK_SIGNUP_v1 - no code from the form: make one from the company name, adding -2, -3... until free.
+      let companyCode = input.company_code ?? "";
+      if (!companyCode) {
+        const base = codeFromName(input.company_name);
+        const usable = (c: string) => !codeProblem(c);
+        for (let n = 1; n <= 200 && !companyCode; n++) {
+          const candidate = n === 1 ? base : `${base}-${n}`;
+          if (usable(candidate) && !(await codeTaken(deps.db, candidate))) companyCode = candidate;
+        }
+        if (!companyCode) companyCode = `${base.slice(0, 20)}-${newSecret(4).toLowerCase().replace(/[^a-z0-9]/g, "x")}`;
+      } else if (await codeTaken(deps.db, companyCode)) {
         return res.status(409).json({ errors: { company_code: "taken" } });
       }
       // Checked last, so a form error or a taken code does not use up the person's one-time token.
@@ -127,8 +139,8 @@ export function publicRouter(deps: Deps): Router {
       try {
         l = await insertLicensee(deps.db, {
           company_name: input.company_name,
-          legal_name: input.legal_name,
-          company_code: input.company_code,
+          legal_name: input.legal_name || input.company_name,
+          company_code: companyCode,
           contact_name: input.contact_name,
           contact_email: input.contact_email,
           contact_phone: input.contact_phone,
@@ -180,6 +192,17 @@ export function publicRouter(deps: Deps): Router {
         l = { ...l, favicon_url: url } as typeof l;
       }
       await replaceTeam(deps.db, l.id, team.members);
+      // KS_OPS_QUICK_SIGNUP_v1 - the licence agreement accepted with the tick box on the sign-up page.
+      if (input.accept_agreement === true) {
+        try {
+          await signAgreement(deps, l, {
+            signer_name: l.contact_name, signer_title: String(l.contact_title ?? "").trim() || "Authorized signatory",
+            ip: clientIp(req), user_agent: String(req.headers["user-agent"] ?? "").slice(0, 400),
+          }, "website");
+        } catch (err) {
+          console.error("[signup] agreement acceptance not recorded", { licensee: l.id, message: err instanceof Error ? err.message : String(err) });
+        }
+      }
       await audit(deps.db, "website", "signup", l.id, {
         plan: l.plan, seats: l.seats, support_level: l.support_level, extra_storage_blocks: l.extra_storage_blocks,
         payment_method: l.payment_method, marketing_addon: input.marketing_addon === true, logo_uploaded: Boolean(logo), ip: clientIp(req),
@@ -205,6 +228,31 @@ export function publicRouter(deps: Deps): Router {
         await sendQuietly(deps.mailer, salesSignupMail(l, "Online payment was not available: please send them a payment link."), "sales signup notice");
       }
       return res.status(201).json({ licensee_id: l.id, signup_token: token, checkout_url: checkoutUrl, ...(message ? { message } : {}) });
+    }),
+  );
+
+  // KS_OPS_QUICK_SIGNUP_v1 - the licence agreement as it will read for the choices on the sign-up page, so it can be
+  // read before the "I agree" box is ticked. Nothing is saved.
+  router.post(
+    "/licence-agreement/preview",
+    limited(60, 60_000),
+    h(async (req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const one = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+      const plan = (["starter", "growth", "pro"] as const).find((k) => k === b.plan) ?? "growth";
+      const seats = Math.min(1000, Math.max(1, Math.floor(Number(b.seats)) || 1));
+      const company = one(b.company_name, 120) || "your brokerage";
+      const row = {
+        id: "00000000-0000-4000-8000-000000000000", company_name: company, legal_name: one(b.legal_name, 160) || company, company_code: codeFromName(company),
+        plan, seats, billing_interval: b.billing_interval === "monthly" ? "monthly" : "annual",
+        support_level: ["email", "priority", "premium", "dedicated"].includes(String(b.support_level)) ? String(b.support_level) : "email",
+        extra_storage_blocks: Math.min(1000, Math.max(0, Math.floor(Number(b.extra_storage_blocks)) || 0)),
+        addons: b.marketing_addon === true ? { marketing: true } : {}, payment_method: b.payment_method === "card" ? "card" : "acss_debit",
+        country: b.country === "US" ? "US" : "CA",
+      } as unknown as LicenseeRow;
+      const doc = renderAgreement(row);
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ version: doc.version, title: doc.title, html: doc.html });
     }),
   );
 
