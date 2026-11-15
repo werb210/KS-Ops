@@ -17,6 +17,7 @@ import {
 } from "../licensees/repo.js";
 import { CODE_MESSAGES, codeFromName, codeProblem, crossFieldErrors, normalizeCode, signupSchema } from "../licensees/validation.js";
 import { signAgreement } from "./publicOnboarding.js"; // KS_OPS_QUICK_SIGNUP_v1
+import { renderAgreement } from "../onboarding/agreement.js";
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
 import { BrandScanError, scanBrand } from "../lib/brandScan.js";
@@ -227,6 +228,31 @@ export function publicRouter(deps: Deps): Router {
         await sendQuietly(deps.mailer, salesSignupMail(l, "Online payment was not available: please send them a payment link."), "sales signup notice");
       }
       return res.status(201).json({ licensee_id: l.id, signup_token: token, checkout_url: checkoutUrl, ...(message ? { message } : {}) });
+    }),
+  );
+
+  // KS_OPS_QUICK_SIGNUP_v1 - the licence agreement as it will read for the choices on the sign-up page, so it can be
+  // read before the "I agree" box is ticked. Nothing is saved.
+  router.post(
+    "/licence-agreement/preview",
+    limited(60, 60_000),
+    h(async (req, res) => {
+      const b = (req.body ?? {}) as Record<string, unknown>;
+      const one = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+      const plan = (["starter", "growth", "pro"] as const).find((k) => k === b.plan) ?? "growth";
+      const seats = Math.min(1000, Math.max(1, Math.floor(Number(b.seats)) || 1));
+      const company = one(b.company_name, 120) || "your brokerage";
+      const row = {
+        id: "00000000-0000-4000-8000-000000000000", company_name: company, legal_name: one(b.legal_name, 160) || company, company_code: codeFromName(company),
+        plan, seats, billing_interval: b.billing_interval === "monthly" ? "monthly" : "annual",
+        support_level: ["email", "priority", "premium", "dedicated"].includes(String(b.support_level)) ? String(b.support_level) : "email",
+        extra_storage_blocks: Math.min(1000, Math.max(0, Math.floor(Number(b.extra_storage_blocks)) || 0)),
+        addons: b.marketing_addon === true ? { marketing: true } : {}, payment_method: b.payment_method === "card" ? "card" : "acss_debit",
+        country: b.country === "US" ? "US" : "CA",
+      } as unknown as LicenseeRow;
+      const doc = renderAgreement(row);
+      res.setHeader("Cache-Control", "no-store");
+      return res.json({ version: doc.version, title: doc.title, html: doc.html });
     }),
   );
 

@@ -368,3 +368,14 @@ describe("the short sign-up", () => {
     expect(inserted[0]?.company_code).toBe("northwind-capital-2");
   });
 });
+
+describe("the licence agreement can be read before signing up", () => {
+  it("is rendered for the plan and seats on the page, and nothing is saved", async () => {
+    const db = fakeDb();
+    const res = await request(createApp(makeDeps({ db }))).post("/api/public/licence-agreement/preview").send({ company_name: "Northwind Capital", plan: "starter", seats: 2, billing_interval: "monthly" });
+    expect(res.status).toBe(200);
+    expect(res.body.html).toContain("Northwind Capital");
+    expect(res.body.html).toContain("Starter");
+    expect(db.calls.some((c) => /INSERT|UPDATE/i.test(c.sql))).toBe(false);
+  });
+});
