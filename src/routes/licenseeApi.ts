@@ -10,6 +10,7 @@ import { forwardTicketMessage } from "../crm/support.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { dataPurgeOn, markPurged } from "../licensees/repo.js";
+import { businessDetailsSchema, readBusinessDetails, saveBusinessDetails } from "../licensees/businessDetails.js"; // KS_OPS_SETUP_BUSINESS_DETAILS_v1
 import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
 import { machineDeps } from "../provisioning/index.js";
 import { futureGeneratedAt, storeUsageReport, usageReportSchema } from "../sync/usage.js";
@@ -102,6 +103,25 @@ export function licenseeApiRouter(deps: Deps): Router {
       if (r === "not_due") return res.status(409).json({ error: r, data_purge_on: dataPurgeOn(l) });
       if (r === "purged") await requestTeardownAfterPurge(machineDeps(deps), l.id, `ks-server:${l.company_code}`);
       return res.json({ ok: true, result: r });
+    }),
+  );
+
+  // KS_OPS_SETUP_BUSINESS_DETAILS_v1 - the owner's set-up form for what the short sign-up skipped (business address,
+  // business number, kind of business, job title). Read, then save; saving registers the address for the phone lines.
+  router.post(
+    "/:id/business-details",
+    auth,
+    h(async (req, res) => res.json({ ok: true, details: await readBusinessDetails(deps, req.licensee!) })),
+  );
+  router.post(
+    "/:id/business-details/save",
+    auth,
+    h(async (req, res) => {
+      const parsed = parseBody(businessDetailsSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ ok: false, error: "invalid_details", errors: parsed.errors });
+      const r = await saveBusinessDetails(deps, req.licensee!, parsed.data);
+      if (!r.ok) return res.status(400).json({ ok: false, error: "invalid_details", errors: r.errors });
+      return res.json({ ok: true, message: r.phone_message, details: await readBusinessDetails(deps, r.licensee) });
     }),
   );
 
