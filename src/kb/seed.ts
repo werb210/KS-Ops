@@ -4,7 +4,7 @@
 import type { Q } from "../db.js";
 import { STARTER_ARTICLES, type SeedArticle } from "./articles/index.js";
 
-export const SEED_VERSION = 6; // KS_OPS_MAYA_TRAINING_v1: v6 adds the sales articles (whyKeystone.ts). // KS_OPS_KB_v2 - v2 refreshes untouched articles' text (Broker role, shared hosting); v3 sign-up team and licence agreement (KS_OPS_ONBOARDING_v1); v4 keeping your existing number (KS_OPS_NUMBER_PORTING_v1); v5 one article per feature (KS_OPS_KB_v5)
+export const SEED_VERSION = 7; // v7: the Close tab and invoicing from a deal. // KS_OPS_MAYA_TRAINING_v1: v6 adds the sales articles (whyKeystone.ts). // KS_OPS_KB_v2 - v2 refreshes untouched articles' text (Broker role, shared hosting); v3 sign-up team and licence agreement (KS_OPS_ONBOARDING_v1); v4 keeping your existing number (KS_OPS_NUMBER_PORTING_v1); v5 one article per feature (KS_OPS_KB_v5)
 
 /**
  * Each seed version not yet run adds the articles that version introduced (an article's `since`, default 1). A copy
