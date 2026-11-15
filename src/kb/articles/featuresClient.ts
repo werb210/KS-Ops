@@ -183,7 +183,7 @@ Each plan includes a number of assistant chats a month. See [Allowances, usage a
     plans: [],
     summary: "A payment estimate with the full schedule, for clients and staff.",
     body: `
-Clients find the calculator on the **More** tab of the client app; staff have the same calculator in the portal.
+Clients find the calculator on the **More** tab of the client app; staff have the same calculator in the portal. In the portal, **Which calculator** switches between the loan calculator and a regular calculator for quick sums, and **Save to file** keeps a loan calculation with the deal.
 
 1. Enter the amount, the rate and the term.
 2. See the payment and the full schedule, payment by payment.

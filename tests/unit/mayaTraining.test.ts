@@ -153,7 +153,7 @@ describe("answering a broker (model mocked)", () => {
 
 describe("the sales articles (seed v6)", () => {
   it("are public, new in v6, and follow the starter rules", () => {
-    expect(SEED_VERSION).toBe(6);
+    expect(SEED_VERSION).toBeGreaterThanOrEqual(6);
     for (const a of WHY_KEYSTONE) {
       expect(a.audience, a.slug).toBe("public");
       expect(a.since, a.slug).toBe(6);
@@ -189,12 +189,34 @@ describe("the sales articles (seed v6)", () => {
       [/INSERT INTO kb_articles/, (p) => { inserted.push(String(p[0])); return [{ id: "x" }]; }],
       [/INSERT INTO kb_seed_runs/, (p) => { ran.add(Number(p[0])); return []; }],
     ]);
-    expect(await seedKnowledgeBase(db)).toBe(WHY_KEYSTONE.length);
-    expect(inserted.sort()).toEqual(WHY_KEYSTONE.map((a) => a.slug).sort());
+    const newer = STARTER_ARTICLES.filter((a) => (a.since ?? 1) >= 6).map((a) => a.slug).sort();
+    expect(await seedKnowledgeBase(db)).toBe(newer.length);
+    expect(inserted.sort()).toEqual(newer);
+    for (const a of WHY_KEYSTONE) expect(newer).toContain(a.slug);
     expect(await seedKnowledgeBase(db)).toBe(0);
 
     ran.clear();
     inserted.length = 0;
     expect(await seedKnowledgeBase(db)).toBe(STARTER_ARTICLES.length);
+  });
+});
+
+// KS_OPS_KB_v7
+describe("the Close tab articles (seed v7)", () => {
+  it("are new in v7, for staff, and linked from the offers article", async () => {
+    const { STARTER_ARTICLES } = await import("../../src/kb/articles/index.js");
+    expect(SEED_VERSION).toBe(7);
+    const by = (slug: string) => STARTER_ARTICLES.find((a) => a.slug === slug)!;
+    for (const slug of ["close-a-funded-deal", "invoice-a-client-from-a-deal"]) {
+      expect(by(slug), slug).toBeTruthy();
+      expect(by(slug).since, slug).toBe(7);
+      expect(by(slug).audience, slug).toBe("all_staff");
+    }
+    expect(by("offers-and-term-sheets").body).toContain("kb:close-a-funded-deal");
+    expect(by("funding-conditions").body).toContain("What the client sees");
+    // Every kb: link points at an article that exists.
+    const slugs = new Set(STARTER_ARTICLES.map((a) => a.slug));
+    for (const a of STARTER_ARTICLES) for (const m of a.body.matchAll(/\(kb:([a-z0-9-]+)\)/g)) expect(slugs.has(m[1]!), `${a.slug} -> ${m[1]}`).toBe(true);
+    expect(new Set(STARTER_ARTICLES.map((a) => a.slug)).size).toBe(STARTER_ARTICLES.length);
   });
 });

@@ -204,6 +204,10 @@ For a deal in US dollars, Keystone shows the Canadian-dollar equivalent using th
     summary: "Track what the lender needs before funding.",
     body: `
 After an offer is accepted, add the lender's conditions (insurance certificate, void cheque, signed guarantee, and so on) to the deal's funding checklist. Use a template for common conditions, or add them from the lender's offer. Tick each one off as it arrives; the deal shows what's left.
+
+**Who does each one.** Every condition belongs to the client, to you, or to the lender. The client's conditions show in the client's app; yours and the lender's do not.
+
+**What the client sees.** A lender's wording is written for brokers. For each condition the client has to meet, there is a **What the client sees** line under it. When a term sheet is read for you, plain wording is suggested there ("Send us a void cheque for the business account"). Change it to anything you like, or leave it blank to show the condition exactly as written. You always see the lender's own wording as the condition's title.
 `,
   },
   {
@@ -215,11 +219,12 @@ After an offer is accepted, add the lender's conditions (insurance certificate, 
     summary: "Upload each lender's term sheet or issue your own, set your fees, and see what each offer earns.",
     body: `
 1. On the deal, open **Lenders**. Beside each lender, upload the lender's term sheet. Its terms and conditions are read for you; approve the conditions you want the client to see.
-2. Open **Lenders > Offer**. Every offer is listed. Choose **Pricing** on an offer:
+2. Open the **Offer** tab. Every offer is listed. Choose **Pricing** on an offer:
    - **The lender's term sheet**: the client signs the lender's paper and sees the lender's name.
-   - **Our term sheet**: you buy the deal and sell it on. Set your rate to the client; the client never sees the lender's name. Choose **Make our term sheet** to fill in your own template (upload it in **Settings > Your documents**).
+   - **Our term sheet**: you buy the deal and sell it on. Set your rate to the client; the client never sees the lender's name. Choose **Make our term sheet** to fill in your own template (upload it in **Settings > Your documents**). You can keep a different template for each type of financing; the one that matches the deal is used. Leave a "Signature" and "Date" line at the foot of your template and the client's signature and the date land on them.
    - Add any broker fee, set-up fee, fee from the proceeds and the lender's commission. **Our revenue** adds them up with the rate difference over the term.
-3. Choose **Send to client for signature**. With two or more offers, the client sees them side by side in their portal and signs the one they want.
+3. Choose **Send to client for signature**. With two or more offers, the client sees them side by side in their portal and signs the one they want. The offer shows when it was sent.
+4. Once the client signs, the **Close** tab opens. See [Closing a funded deal](kb:close-a-funded-deal).
 `,
   },
   {
@@ -277,6 +282,54 @@ For lenders that offer an API, Keystone can send the deal directly instead of by
     summary: "Have the client sign your fee agreement inside the app.",
     body: `
 Set your fee agreement once during onboarding. When a deal needs it, the client signs it in the app, and the signed copy is kept on the deal. With QuickBooks connected, an invoice is created when it's signed and marked paid when the deal funds. See [Connect QuickBooks Online](kb:quickbooks-online).
+`,
+  },
+  // KS_OPS_KB_v7 - the Close tab and invoicing from a file (November 2026).
+  {
+    slug: "close-a-funded-deal",
+    title: "Closing a funded deal: what closed, what you earn, who gets paid",
+    category: "Pipeline",
+    audience: "all_staff",
+    plans: [],
+    since: 7,
+    summary: "Record what funded, how you are paid on it, and what has been received.",
+    body: `
+The **Close** tab on a deal opens once the client has signed a term sheet.
+
+**1. What closed.** The amount funded, close date, term, payments and lender are filled in from the signed offer. Check them and correct anything that changed at funding. Also set:
+- **Who found the deal**: a company lead, or the broker's own. This decides the broker's split.
+- **Clawback window (days)**, if the lender can take its commission back when a deal pays out early.
+- The **monthly share** fields, if the lender pays you a share of what it earns on the deal each month.
+
+**2. How we are paid on this deal.** Add a line for each way you earn on it, in any mix: broker fee (client), set-up fee, fee from proceeds, lender commission, rate difference, the monthly share from the lender, other revenue, or a referral fee you owe (money out). Each line is an amount or a percent. **Expected revenue** adds them up.
+
+**3. Mark as funded.** Choose **Mark as funded** when the money has moved. The file moves to Funded. The file must be at Accepted first.
+
+**4. Record what you receive.** Enter the amount and date beside each line as the money arrives. Brokers are paid on money received, not on money expected. If a referral partner is owed a fee, it comes off before the broker's split. If a lender claws back a commission, record it on the line.
+
+Choose **Save the close** after any change.
+
+To bill the client for a fee, see [Invoicing a client from a deal](kb:invoice-a-client-from-a-deal).
+`,
+  },
+  {
+    slug: "invoice-a-client-from-a-deal",
+    title: "Invoicing a client from a deal",
+    category: "Pipeline",
+    audience: "all_staff",
+    plans: [],
+    since: 7,
+    summary: "Make an invoice for your fee straight from the Close tab.",
+    body: `
+On a deal's **Close** tab, the **Invoice** panel makes an invoice for a fee the client owes you.
+
+1. **Amount before tax** is filled in from the client fee lines on the close. Change it if you need to.
+2. Enter **What it is for**, the **Tax (%)** and **Due in (days)**. The total due is worked out for you.
+3. Choose **Make the invoice**. It is made as a PDF on your own invoice template, takes the next invoice number, downloads, and is listed under **Invoices made for this file**.
+
+Your invoice template is uploaded once in **Settings > Your documents** (choose "Invoice"). Until one is uploaded, the panel links you there.
+
+If you use QuickBooks Online, see [QuickBooks Online](kb:quickbooks-online) for sending invoices to your books.
 `,
   },
 ];
