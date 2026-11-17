@@ -32,6 +32,8 @@ import { markReplied, recordEvent, suppressProspectEmail } from "../marketing/ev
 import { addProspectEvent, audienceSummary, eligibilityOf, findProspects, prospectWithSuppression, upsertProspect, type SegmentFilters } from "../marketing/prospects.js";
 import { renderEmail, templateFieldsSchema } from "../marketing/render.js";
 import { marketingStatus, sendingProblem } from "../marketing/settings.js";
+import { enrollInFlow, FLOW_KEYS, FLOW_LABELS } from "../marketing/flow.js"; // KS_OPS_MKT_FLOW_v1
+import { KEYSTONE_BROKER_FLOW } from "../marketing/flowPresets.js";
 
 const MAX_IMPORT = 2000;
 const strList = z.array(z.string().trim().min(1).max(60)).max(60).optional();
@@ -419,7 +421,9 @@ export function opsMarketingRouter(deps: Deps): Router {
   r.get("/marketing/sequences", h(async (_req, res) => {
     const s = await deps.db.query(
       `SELECT q.*, (SELECT count(*)::int FROM ks_mkt_enrollments e WHERE e.sequence_id = q.id AND e.status = 'active') AS active,
-              (SELECT count(*)::int FROM ks_mkt_enrollments e WHERE e.sequence_id = q.id) AS enrolled
+              (SELECT count(*)::int FROM ks_mkt_enrollments e WHERE e.sequence_id = q.id) AS enrolled,
+              (SELECT count(*)::int FROM ks_mkt_enrollments e WHERE e.sequence_id = q.id AND e.track = 'opened') AS opened,
+              (SELECT count(*)::int FROM ks_mkt_enrollments e WHERE e.sequence_id = q.id AND e.track = 'clicked') AS clicked
          FROM ks_mkt_sequences q ORDER BY q.updated_at DESC LIMIT 200`,
     );
     res.json({ sequences: s.rows });
@@ -433,6 +437,27 @@ export function opsMarketingRouter(deps: Deps): Router {
       [parsed.data.name, JSON.stringify(parsed.data.steps), parsed.data.status ?? "draft", actorOf(req)],
     );
     res.status(201).json({ sequence: s.rows[0] });
+  }));
+
+  // KS_OPS_MKT_FLOW_v1 - creates the Keystone broker email flow (draft) and its seven templates, once.
+  r.post("/marketing/flows/keystone-brokers", h(async (req, res) => {
+    const found = (await deps.db.query(`SELECT * FROM ks_mkt_sequences WHERE kind = 'flow' AND name = $1 LIMIT 1`, [KEYSTONE_BROKER_FLOW.name])).rows[0];
+    if (found) return res.json({ sequence: found, created: false });
+    const actor = actorOf(req);
+    const steps = [];
+    for (const key of FLOW_KEYS) {
+      const t = KEYSTONE_BROKER_FLOW.templates[key];
+      const row = (await deps.db.query(
+        `INSERT INTO ks_mkt_templates (name, subject, fields, created_by) VALUES ($1, $2, $3::jsonb, $4) RETURNING id`,
+        [`Keystone flow - ${FLOW_LABELS[key]}`, t.subject, JSON.stringify(templateFieldsSchema.parse(t.fields)), actor],
+      )).rows[0];
+      steps.push({ wait_days: 0, template_id: row.id, flow_key: key });
+    }
+    const seq = (await deps.db.query(
+      `INSERT INTO ks_mkt_sequences (name, steps, status, kind, from_name, daily_new, created_by) VALUES ($1, $2::jsonb, 'draft', 'flow', $3, 50, $4) RETURNING *`,
+      [KEYSTONE_BROKER_FLOW.name, JSON.stringify(steps), KEYSTONE_BROKER_FLOW.from_name, actor],
+    )).rows[0];
+    res.status(201).json({ sequence: seq, created: true });
   }));
 
   r.get("/marketing/sequences/:id", h(async (req, res) => {
@@ -452,6 +477,8 @@ export function opsMarketingRouter(deps: Deps): Router {
     const parsed = parseBody(sequenceSchema.partial(), req.body);
     if (!parsed.ok) return bad(res, parsed.errors);
     const v = parsed.data;
+    // KS_OPS_MKT_FLOW_v1 - .partial() keeps the steps default ([]), so a status-only change used to wipe the steps.
+    if (req.body?.steps === undefined) delete (v as { steps?: unknown }).steps;
     if (v.status === "active") {
       const cur = (await deps.db.query(`SELECT steps FROM ks_mkt_sequences WHERE id = $1`, [req.params.id])).rows[0];
       const steps = v.steps ?? cur?.steps ?? [];
@@ -473,6 +500,9 @@ export function opsMarketingRouter(deps: Deps): Router {
       req.body,
     );
     if (!parsed.ok) return bad(res, parsed.errors);
+    // KS_OPS_MKT_FLOW_v1 - a flow starts its people a set number a day.
+    const flowSeq = (await deps.db.query(`SELECT id, name, kind, daily_new FROM ks_mkt_sequences WHERE id = $1`, [req.params.id])).rows[0];
+    if (flowSeq?.kind === "flow") return res.json(await enrollInFlow(deps, flowSeq, parsed.data, actorOf(req)));
     const out = await enrollProspects(deps, req.params.id, parsed.data, actorOf(req));
     if (!out.ok) return res.status(out.status).json({ error: out.error, message: out.message });
     res.json(out);

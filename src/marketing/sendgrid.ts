@@ -17,6 +17,7 @@ export async function sendMarketingEmail(
   to: { email: string; name?: string | null },
   email: Rendered,
   customArgs: Record<string, string>,
+  fromName?: string | null,
 ): Promise<SendResult> {
   const key = sendgridKey();
   const s = sender();
@@ -32,7 +33,7 @@ export async function sendMarketingEmail(
             custom_args: { ks_mkt: "1", ...customArgs },
           },
         ],
-        from: { email: s.from, name: s.from_name },
+        from: { email: s.from, name: (fromName ?? "").trim() || s.from_name }, // KS_OPS_MKT_FLOW_v1 - a flow can sign as a person
         reply_to: { email: s.reply_to },
         subject: email.subject,
         content: [

@@ -34,7 +34,7 @@ export type DeliverOutcome = "sent" | "blocked" | "failed" | "retry";
 export async function deliver(
   deps: EngineDeps,
   send: { id: string | number; prospect_id: string; attempts: number },
-  content: { subject: string; fields: Partial<TemplateFields>; label: string },
+  content: { subject: string; fields: Partial<TemplateFields>; label: string; fromName?: string | null },
 ): Promise<{ outcome: DeliverOutcome; reason?: BlockReason | string }> {
   const now = deps.now();
   const p = await prospectWithSuppression(deps.db, send.prospect_id);
@@ -49,7 +49,7 @@ export async function deliver(
     return { outcome: "blocked", reason: ok.reason };
   }
   const email = renderEmail(content.subject, content.fields, p);
-  const r = await sendMarketingEmail(deps.fetch, { email: p.email, name: p.name }, email, { ks_mkt_send_id: String(send.id) });
+  const r = await sendMarketingEmail(deps.fetch, { email: p.email, name: p.name }, email, { ks_mkt_send_id: String(send.id) }, content.fromName);
   if (r.ok) {
     await deps.db.query(
       `UPDATE ks_mkt_sends SET status = 'sent', sent_at = $2, sg_message_id = $3, subject = $4, attempts = attempts + 1, error = NULL, lease_until = NULL WHERE id = $1`,
@@ -225,7 +225,7 @@ export async function runSequences(deps: EngineDeps): Promise<{ sent: number; st
   const leased = await deps.db.query(
     `UPDATE ks_mkt_enrollments SET next_send_at = $2, updated_at = now()
       WHERE id IN (SELECT e.id FROM ks_mkt_enrollments e JOIN ks_mkt_sequences q ON q.id = e.sequence_id
-                    WHERE e.status = 'active' AND q.status = 'active' AND e.next_send_at <= $1
+                    WHERE e.status = 'active' AND q.status = 'active' AND q.kind = 'steps' AND e.next_send_at <= $1
                     ORDER BY e.next_send_at LIMIT ${BATCH} FOR UPDATE OF e SKIP LOCKED)
       RETURNING id, sequence_id, prospect_id, next_step, enrolled_at`,
     [now, new Date(now.getTime() + LEASE_MS)],
