@@ -219,3 +219,20 @@ export async function runFlows(deps: FlowDeps): Promise<{ sent: number; stopped:
   }
   return out;
 }
+
+/** When a flow is turned on, the people still waiting for their first email are spread from today, daily_new a day. */
+export async function spreadFirstEmails(deps: Pick<Deps, "db" | "now">, sequenceId: string): Promise<number> {
+  const seq = (await deps.db.query(`SELECT daily_new FROM ks_mkt_sequences WHERE id = $1 AND kind = 'flow'`, [sequenceId])).rows[0];
+  if (!seq) return 0;
+  const perDay = Math.max(1, Math.min(1000, Number(seq.daily_new) || 50));
+  const waiting = (await deps.db.query(
+    `SELECT id FROM ks_mkt_enrollments WHERE sequence_id = $1 AND status = 'active' AND flow_next = 'e1' AND cardinality(flow_sent) = 0 ORDER BY enrolled_at, id`,
+    [sequenceId],
+  )).rows;
+  const now = deps.now();
+  for (let i = 0; i < waiting.length; i++) {
+    const at = inSendingHours(new Date(now.getTime() + Math.floor(i / perDay) * DAY));
+    await deps.db.query(`UPDATE ks_mkt_enrollments SET next_send_at = $2 WHERE id = $1`, [waiting[i].id, at]);
+  }
+  return waiting.length;
+}

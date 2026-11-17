@@ -80,6 +80,7 @@ describe("the Keystone broker email flow", () => {
     await pool.query(`UPDATE ks_mkt_sequences SET daily_new = 4 WHERE id = $1`, [flowId]);
     const en = await request(app()).post(`/api/ops/marketing/sequences/${flowId}/enroll`).set(staff()).send({ filters: {} });
     expect(en.body).toMatchObject({ ok: true, enrolled: 5 });
+    await pool.query(`UPDATE ks_mkt_enrollments SET next_send_at = $2 WHERE sequence_id = $1`, [flowId, new Date(now.getTime() - 5 * DAY)]); // enrolled long ago
     await request(app()).patch(`/api/ops/marketing/sequences/${flowId}`).set(staff()).send({ status: "active" });
     const firsts = (await pool.query(`SELECT next_send_at FROM ks_mkt_enrollments WHERE sequence_id = $1 ORDER BY next_send_at`, [flowId])).rows.map((x: any) => x.next_send_at.toISOString());
     expect(firsts.filter((d: string) => d === now.toISOString())).toHaveLength(4);

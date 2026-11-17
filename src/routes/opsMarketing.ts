@@ -32,7 +32,7 @@ import { markReplied, recordEvent, suppressProspectEmail } from "../marketing/ev
 import { addProspectEvent, audienceSummary, eligibilityOf, findProspects, prospectWithSuppression, upsertProspect, type SegmentFilters } from "../marketing/prospects.js";
 import { renderEmail, templateFieldsSchema } from "../marketing/render.js";
 import { marketingStatus, sendingProblem } from "../marketing/settings.js";
-import { enrollInFlow, FLOW_KEYS, FLOW_LABELS } from "../marketing/flow.js"; // KS_OPS_MKT_FLOW_v1
+import { enrollInFlow, FLOW_KEYS, FLOW_LABELS, spreadFirstEmails } from "../marketing/flow.js"; // KS_OPS_MKT_FLOW_v1
 import { KEYSTONE_BROKER_FLOW } from "../marketing/flowPresets.js";
 
 const MAX_IMPORT = 2000;
@@ -490,6 +490,9 @@ export function opsMarketingRouter(deps: Deps): Router {
       [req.params.id, v.name ?? null, v.steps ? JSON.stringify(v.steps) : null, v.status ?? null],
     );
     if (!s.rows.length) return res.status(404).json({ error: "not_found" });
+    // KS_OPS_MKT_FLOW_v1 - turning a flow on spreads the first emails from today, so a list enrolled days ago still
+    // starts at daily_new a day instead of all at once.
+    if (v.status === "active" && s.rows[0].kind === "flow") await spreadFirstEmails(deps, req.params.id);
     res.json({ sequence: s.rows[0] });
   }));
 
