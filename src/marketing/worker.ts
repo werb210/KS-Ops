@@ -7,6 +7,7 @@
 // Each part logs its own failure and never stops the others.
 import type { Deps } from "../deps.js";
 import { runCampaigns, runSequences } from "./engine.js";
+import { runFlows } from "./flow.js"; // KS_OPS_MKT_FLOW_v1
 import { flushTimelineOutbox, pollReplies } from "./events.js";
 import { pullCrmContacts, syncLocalSources } from "./prospects.js";
 
@@ -40,5 +41,6 @@ export async function runMarketingTick(deps: Deps, clock: MarketingClock): Promi
   }
   await part("campaigns", () => runCampaigns(deps));
   await part("sequences", () => runSequences(deps));
+  await part("flows", () => runFlows(deps));
   await part("crm timeline", () => flushTimelineOutbox(deps));
 }

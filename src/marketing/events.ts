@@ -138,6 +138,13 @@ export async function processSendgridEvents(deps: Pick<Deps, "db" | "now">, even
         case "click": {
           const first = !send.clicked_at;
           await deps.db.query(`UPDATE ks_mkt_sends SET clicked_at = coalesce(clicked_at, $2) WHERE id = $1`, [sendId, at]);
+          // KS_OPS_MKT_FLOW_v1 - a click a minute or more after sending, on anything but the unsubscribe link, is a person.
+          if (!/unsubscribe/i.test(String(raw.url ?? ""))) {
+            await deps.db.query(
+              `UPDATE ks_mkt_sends SET human_clicked_at = coalesce(human_clicked_at, $2) WHERE id = $1 AND (sent_at IS NULL OR $2::timestamptz >= sent_at + interval '60 seconds')`,
+              [sendId, at],
+            );
+          }
           const url = raw.url ? ` (${String(raw.url).slice(0, 200)})` : "";
           await recordEvent(deps.db, p, "email_clicked", `Clicked a link in${subj}${url}.`, at, { dedupeKey: key, sendId, crm: first });
           break;
