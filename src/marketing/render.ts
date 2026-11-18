@@ -31,6 +31,9 @@ export const templateFieldsSchema = z.object({
   cta_label: z.string().trim().max(60).default(""),
   cta_url: httpsUrl.default(""),
   body2: z.string().trim().max(5_000).default(""),
+  // KS_OPS_FLOW_PDF_LINK_v1 - an optional plain text link under the button (e.g. the one-page PDF overview)
+  link2_label: z.string().trim().max(80).default(""),
+  link2_url: httpsUrl.default(""),
   signature: z.string().trim().max(500).default(""),
 });
 export type TemplateFields = z.infer<typeof templateFieldsSchema>;
@@ -115,6 +118,11 @@ function htmlParagraphs(text: string): string {
     .join("");
 }
 
+function textLink(label: string, url: string): string {
+  if (!label || !url) return "";
+  return `<p style="margin:0 0 20px;font-size:15px;line-height:1.55"><a href="${esc(url)}" style="color:${KS_BRAND.accent};font-weight:700;text-decoration:underline">${esc(label)}</a></p>`;
+}
+
 function button(label: string, url: string): string {
   if (!label || !url) return "";
   return (
@@ -159,6 +167,7 @@ export function renderEmail(
     (f.headline ? `<h1 style="margin:0 0 16px;font-size:24px;line-height:1.3;color:${KS_BRAND.ink}">${esc(m(f.headline))}</h1>` : "") +
     htmlParagraphs(m(f.body)) +
     button(m(f.cta_label), f.cta_url) +
+    textLink(m(f.link2_label), f.link2_url) +
     htmlParagraphs(m(f.body2)) +
     (f.signature ? `<p style="margin:0;font-size:16px;line-height:1.55;color:${KS_BRAND.ink}">${esc(m(f.signature)).replace(/\n/g, "<br/>")}</p>` : "") +
     `</td></tr>` +
@@ -172,6 +181,7 @@ export function renderEmail(
     ...(f.headline ? [m(f.headline), ""] : []),
     ...paragraphs(m(f.body)).flatMap((p) => [p, ""]),
     ...(f.cta_label && f.cta_url ? [`${m(f.cta_label)}: ${f.cta_url}`, ""] : []),
+    ...(f.link2_label && f.link2_url ? [`${m(f.link2_label)}: ${f.link2_url}`, ""] : []),
     ...paragraphs(m(f.body2)).flatMap((p) => [p, ""]),
     ...(f.signature ? [m(f.signature), ""] : []),
     "--",
