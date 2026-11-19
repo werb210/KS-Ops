@@ -1,6 +1,7 @@
 // Staff API: licensees, their ops key, usage, invoices and billing. Mounted under /api/ops behind requireStaff.
 import { Router } from "express";
 import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
+import { closeTestSubaccount } from "../twilio/account.js"; // KS_OPS_DELETE_TEST_LICENSEE_v2
 import { machineDeps } from "../provisioning/index.js";
 import { z } from "zod";
 import type { Deps } from "../deps.js";
@@ -314,11 +315,16 @@ export function opsLicenseesRouter(deps: Deps): Router {
         return res.status(409).json({ error: "not_pending", message: "Only a test licensee that is still waiting for payment can be removed." });
       }
       if (l.stripe_subscription_id) return res.status(409).json({ error: "has_subscription", message: "This licensee has a Stripe subscription; cancel it first." });
-      const tw = await deps.db.query("SELECT 1 FROM licensee_twilio WHERE licensee_id = $1", [l.id]);
-      if (tw.rows.length) return res.status(409).json({ error: "has_twilio", message: "This licensee has a Twilio sub-account; close it first." });
+      // KS_OPS_DELETE_TEST_LICENSEE_v2 - a test licensee's Twilio sub-account is closed (numbers released) first.
+      let twilio: { released: string[]; closed: string | null } = { released: [], closed: null };
+      try {
+        twilio = await closeTestSubaccount(machineDeps(deps) as any, l);
+      } catch (err) {
+        return res.status(502).json({ error: "twilio_close_failed", message: `Could not close the Twilio sub-account: ${(err as Error).message}` });
+      }
       await deps.db.query("DELETE FROM licensees WHERE id = $1", [l.id]);
-      await audit(deps.db, actorOf(req), "licensee.delete_test", null, { id: l.id, company_name: l.company_name, company_code: l.company_code });
-      return res.json({ deleted: true, id: l.id });
+      await audit(deps.db, actorOf(req), "licensee.delete_test", null, { id: l.id, company_name: l.company_name, company_code: l.company_code, twilio });
+      return res.json({ deleted: true, id: l.id, twilio });
     }),
   );
 

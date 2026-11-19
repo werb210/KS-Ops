@@ -435,3 +435,29 @@ export async function releaseNumbers(deps: TwilioDeps, l: LicenseeRow): Promise<
   if (released.length) await audit(deps.db, "ks-ops twilio", "licensee.twilio_numbers_released", l.id, { count: released.length, numbers: released });
   return { released, failed };
 }
+
+/**
+ * KS_OPS_DELETE_TEST_LICENSEE_v2 - before a never-paid TEST licensee is removed: give up its numbers and close its Twilio
+ * sub-account, then forget the sub-account row (so the RESTRICT foreign key lets the licensee go). Throws if Twilio
+ * refuses, so nothing is lost track of.
+ */
+export async function closeTestSubaccount(deps: TwilioDeps, l: LicenseeRow): Promise<{ released: string[]; closed: string | null }> {
+  if (!mayReleaseNumbers(l)) throw new Error("not_allowed");
+  const { store, http, env } = twilioOf(deps);
+  const row = await store.get(l.id);
+  if (!row) return { released: [], closed: null };
+  if (row.account_status === "closed") {
+    await deps.db.query("DELETE FROM licensee_twilio WHERE licensee_id = $1", [l.id]);
+    return { released: [], closed: row.subaccount_sid };
+  }
+  const rel = await releaseNumbers(deps, l);
+  if (rel.failed.length) throw new Error(`could not release ${rel.failed.map((f) => f.number).join(", ")}`);
+  {
+    const master = masterCreds(env);
+    if (!master) throw new Error("twilio_not_configured");
+    await http.post(master, `${API}/Accounts/${row.subaccount_sid}.json`, { Status: "closed" }, "close the sub-account");
+  }
+  await audit(deps.db, "ks-ops twilio", "licensee.twilio_subaccount_closed", l.id, { subaccount_sid: row.subaccount_sid, reason: "test licensee removed" });
+  await deps.db.query("DELETE FROM licensee_twilio WHERE licensee_id = $1", [l.id]);
+  return { released: rel.released, closed: row.subaccount_sid };
+}
