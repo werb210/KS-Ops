@@ -70,4 +70,20 @@ describe("DELETE /api/ops/licensees/:id", () => {
     const res = await request(app()).delete(`/api/ops/licensees/${id}`);
     expect(res.status).toBe(401);
   });
+
+  it("MRR counts only paying, non-test licensees (KS_OPS_MRR_PAYING_ONLY_v1)", async () => {
+    await pool.query("DELETE FROM licensee_twilio");
+    await pool.query("DELETE FROM licensees");
+    const demo = await make("mrrdemo", "Big Brokerage", "active");
+    const paying = await make("mrrpay", "Paying Co", "active");
+    await pool.query("UPDATE licensees SET stripe_subscription_id = 'sub_1' WHERE id = $1", [paying]);
+    const testPaid = await make("mrrtest", "Paid Test", "active");
+    await pool.query("UPDATE licensees SET stripe_subscription_id = 'sub_2', test_brokerage = true WHERE id = $1", [testPaid]);
+    const dash = await request(app()).get("/api/ops/dashboard").set(staff());
+    expect(dash.status).toBe(200);
+    const one = await request(app()).get(`/api/ops/licensees/${paying}`).set(staff());
+    expect(dash.body.mrr).toBe(one.body.pricing.mrr);
+    expect(dash.body.mrr).toBeGreaterThan(0);
+    expect(demo).toBeTruthy();
+  });
 });

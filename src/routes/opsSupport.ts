@@ -193,7 +193,7 @@ export function opsSupportRouter(deps: Deps): Router {
       const [ls, overdue, tickets, requests] = await Promise.all([
         deps.db.query(
           `SELECT id, company_name, company_code, plan, billing_interval, seats, support_level, extra_storage_blocks, status,
-                  cancelled_at, purged_at
+                  cancelled_at, purged_at, stripe_subscription_id, test_brokerage
              FROM licensees`,
         ),
         deps.db.query(
@@ -217,7 +217,10 @@ export function opsSupportRouter(deps: Deps): Router {
         }
         byStatus[l.status] = (byStatus[l.status] ?? 0) + 1;
         if (live.has(l.status)) seats += l.seats;
-        if (l.status === "active" || l.status === "past_due") mrr += mrrOf(l);
+        // KS_OPS_MRR_PAYING_ONLY_v1 (Todd, 2026-11-19: "we have no live KS clients yet") - MRR is what real customers pay:
+        // active or past-due, with a Stripe subscription, and not a test brokerage. Staff-created demo licensees
+        // (no subscription) showed $1,194 with no paying client.
+        if ((l.status === "active" || l.status === "past_due") && l.stripe_subscription_id && !(l as { test_brokerage?: boolean }).test_brokerage) mrr += mrrOf(l);
         if (l.status === "trial") trials += 1;
       }
       res.json({
