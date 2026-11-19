@@ -37,6 +37,20 @@ describe("DELETE /api/ops/licensees/:id", () => {
     expect(left.rows).toHaveLength(0);
   });
 
+  it("closes a test licensee's Twilio sub-account first, then removes it", async () => {
+    const id = await make("deltest4", "KS Test Twilio", "pending_payment");
+    await pool.query(
+      `INSERT INTO licensee_twilio (licensee_id, subaccount_sid, auth_token_encrypted, friendly_name, account_status)
+       VALUES ($1, 'AC_test', 'x', 'KS Test Twilio', 'closed')`,
+      [id],
+    );
+    const res = await request(app()).delete(`/api/ops/licensees/${id}`).set(staff());
+    expect(res.body).toMatchObject({ deleted: true });
+    expect(res.body.twilio.closed).toBe("AC_test");
+    expect((await pool.query("SELECT 1 FROM licensee_twilio WHERE licensee_id = $1", [id])).rows).toHaveLength(0);
+    expect((await pool.query("SELECT 1 FROM licensees WHERE id = $1", [id])).rows).toHaveLength(0);
+  });
+
   it("refuses a real licensee", async () => {
     const id = await make("realco1", "Real Brokerage", "pending_payment");
     const res = await request(app()).delete(`/api/ops/licensees/${id}`).set(staff());
