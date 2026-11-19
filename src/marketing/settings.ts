@@ -142,7 +142,9 @@ export async function marketingStatus(fetchImpl: typeof fetch, now: Date, force 
   } else if (domain.authenticated === null && domain.error) {
     warnings.push(`Could not confirm the sending domain is authenticated: ${domain.error}`);
   }
-  if (s.address_is_default) warnings.push(`The footer uses the default mailing address (${s.address}). Set KS_MARKETING_ADDRESS when Keystone has its own.`);
+  // KS_OPS_ADDRESS_CONFIRMED_v1 (Todd, 2026-11-05: Keystone uses 2630108 Alberta Ltd. as its legal company for now) -
+  // 450 Sparling Crt SW is Keystone's real mailing address today, so it is not a set-up warning. KS_MARKETING_ADDRESS
+  // still overrides it when Keystone moves.
   if (!webhookConfigured()) warnings.push("Open, click, bounce and spam tracking is off: set up the SendGrid Event Webhook for KS-Ops (KS_MARKETING_WEBHOOK_PUBLIC_KEY).");
   if (!replyMailbox()) warnings.push("Replies are not detected automatically (Microsoft 365 mailbox not set up); use \"Mark replied\" on the prospect to stop their sequences.");
   return {

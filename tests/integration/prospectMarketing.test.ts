@@ -285,6 +285,8 @@ describe("the Keystone CRM", () => {
     const r = await request(app()).get("/api/ops/marketing/status?refresh=1").set(staff());
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ can_send: true, domain: { domain: "keystone.example", authenticated: true } });
-    expect(r.body.warnings.join(" ")).toMatch(/default mailing address/);
+    // KS_OPS_ADDRESS_CONFIRMED_v1 - the 2630108 Alberta Ltd. address is Keystone's real address, not a warning.
+    expect(r.body.warnings.join(" ")).not.toMatch(/mailing address/);
+    expect(r.body.sender.address).toBe("450 Sparling Crt SW, Edmonton, AB T6X 1G9, Canada");
   });
 });
