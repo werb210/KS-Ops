@@ -300,6 +300,28 @@ export function opsLicenseesRouter(deps: Deps): Router {
     }),
   );
 
+  // KS_OPS_DELETE_TEST_LICENSEE_v1 (Todd, 2026-11-19: "remove all tests") - remove a TEST licensee that never went live:
+  // marked as a test brokerage or named "test", still waiting for payment, no Stripe subscription and no Twilio
+  // sub-account. Anything else is a real (or once-live) licensee and goes through cancel -> purge instead.
+  router.delete(
+    "/licensees/:id",
+    h(async (req, res) => {
+      const l = await load(String(req.params.id));
+      if (!l) return res.status(404).json(notFound);
+      const isTest = Boolean((l as { test_brokerage?: boolean }).test_brokerage) || /\btest\b/i.test(`${l.company_name} ${l.company_code}`);
+      if (!isTest) return res.status(409).json({ error: "not_a_test", message: "Only a test licensee can be removed. Cancel a real licensee instead." });
+      if (l.status !== "pending_payment") {
+        return res.status(409).json({ error: "not_pending", message: "Only a test licensee that is still waiting for payment can be removed." });
+      }
+      if (l.stripe_subscription_id) return res.status(409).json({ error: "has_subscription", message: "This licensee has a Stripe subscription; cancel it first." });
+      const tw = await deps.db.query("SELECT 1 FROM licensee_twilio WHERE licensee_id = $1", [l.id]);
+      if (tw.rows.length) return res.status(409).json({ error: "has_twilio", message: "This licensee has a Twilio sub-account; close it first." });
+      await deps.db.query("DELETE FROM licensees WHERE id = $1", [l.id]);
+      await audit(deps.db, actorOf(req), "licensee.delete_test", null, { id: l.id, company_name: l.company_name, company_code: l.company_code });
+      return res.json({ deleted: true, id: l.id });
+    }),
+  );
+
   // Staff confirm a cancelled licensee's data was purged (on or after its purge date). Status stays cancelled.
   router.post(
     "/licensees/:id/purged",
