@@ -4,6 +4,7 @@ import { decryptSecret, encryptSecret, encryptionKey, newSecret, sha256Hex } fro
 import { monthlyCharge, type BillingInterval, type Plan, type SupportLevel } from "../pricing.js";
 
 export type LicenseeRow = {
+  team_invites?: "auto" | "owner"; // KS_OPS_TEAM_INVITE_TIMING_v1
   id: string;
   company_name: string;
   legal_name: string;

@@ -137,6 +137,12 @@ export const teamUsers: Executor = async (ctx) => {
     }
   }
 
+  // KS_OPS_TEAM_INVITE_TIMING_v1 - the owner chose to set up first: the team is on the server, and the owner invites
+  // them from the portal (Settings > Users > Invite), which comes back through POST /api/licensees/:id/team/invite.
+  if (l.team_invites === "owner") {
+    return { kind: "done", output: { created, existing, invited: 0, held: others.length }, message: `team created (${others.length}); invites held until the owner sends them from the portal` };
+  }
+
   const invited: string[] = [];
   const failed: string[] = [];
   for (const t of others.filter((x: TeamRow) => x.provisioned_at && !x.invite_sent_at)) {

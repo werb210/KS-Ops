@@ -10,6 +10,7 @@ import { forwardTicketMessage } from "../crm/support.js";
 import { bodies, sendQuietly } from "../lib/email.js";
 import { h, parseBody, UUID_RE } from "../lib/http.js";
 import { dataPurgeOn, markPurged } from "../licensees/repo.js";
+import { brokerInviteMail } from "../onboarding/emails.js"; // KS_OPS_TEAM_INVITE_TIMING_v1
 import { businessDetailsSchema, readBusinessDetails, saveBusinessDetails } from "../licensees/businessDetails.js"; // KS_OPS_SETUP_BUSINESS_DETAILS_v1
 import { requestTeardownAfterPurge } from "../provisioning/machine.js"; // KS_OPS_AUTO_PROVISION_v1
 import { machineDeps } from "../provisioning/index.js";
@@ -55,9 +56,45 @@ const followUpSchema = z
   })
   .refine((v) => Boolean(v.body || v.message), { message: "body is required", path: ["body"] });
 
+// KS_OPS_TEAM_INVITE_TIMING_v1 - people the owner invites from the portal (an imported list, or the sign-up team held
+// back until setup was done). KS-Ops sends the same invite and quick guide as at sign-up.
+const teamInviteSchema = z.object({
+  people: z.array(z.object({
+    full_name: z.string().trim().min(1).max(200),
+    email: z.string().trim().toLowerCase().email().max(254),
+    role: z.enum(["Broker", "Marketing", "Admin"]),
+  })).min(1).max(500),
+});
+
 export function licenseeApiRouter(deps: Deps): Router {
   const router = Router();
   const auth = requireLicenseeKey(deps.db);
+
+  router.post(
+    "/:id/team/invite",
+    auth,
+    h(async (req, res) => {
+      const parsed = parseBody(teamInviteSchema, req.body);
+      if (!parsed.ok) return res.status(400).json({ error: "invalid_people", errors: parsed.errors });
+      const l = req.licensee!;
+      if (!l.portal_url) return res.status(409).json({ error: "not_ready", message: "This brokerage has no portal address yet." });
+      const results: Array<{ email: string; sent: boolean; error?: string }> = [];
+      for (const p of parsed.data.people) {
+        const sent = await deps.mailer(brokerInviteMail(l, { full_name: p.full_name, email: p.email, phone_e164: "", role: p.role, is_owner: false }));
+        if (sent.ok) {
+          await deps.db.query(
+            "UPDATE licensee_team SET invite_sent_at = $3, updated_at = now() WHERE licensee_id = $1 AND lower(email) = $2 AND invite_sent_at IS NULL",
+            [l.id, p.email, deps.now()],
+          );
+          results.push({ email: p.email, sent: true });
+        } else {
+          console.error("[team-invite] invite email failed", { licensee: l.id, email: p.email });
+          results.push({ email: p.email, sent: false, error: "email_failed" });
+        }
+      }
+      return res.json({ ok: true, results });
+    }),
+  );
 
   router.post(
     "/:id/usage-reports",

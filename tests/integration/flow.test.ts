@@ -126,6 +126,22 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     expect(remote.puts.at(-1)).toMatchObject({ url: "https://ks-demo.azurewebsites.net/api/plan", key: opsKey, body: { plan: "starter", extra_storage_blocks: 0, status: "trial" } });
   });
 
+  // KS_OPS_TEAM_INVITE_TIMING_v1
+  it("sends the invites the owner asks for from the portal", async () => {
+    const send = (body: object, key = opsKey) => request(app()).post(`/api/licensees/${id}/team/invite`).set("X-KS-Ops-Key", key).send(body);
+    const people = [{ full_name: "Bea Broker", email: "Bea@Demo.example", role: "Broker" }];
+    expect((await send({ people }, "wrong")).status).toBe(401);
+    expect((await send({ people: [] })).status).toBe(400);
+    expect((await send({ people })).status).toBe(409); // no portal address yet
+    await pool.query("UPDATE licensees SET portal_url = 'https://keystone-demo.portal.example' WHERE id = $1", [id]);
+    mail.sent.length = 0;
+    const ok = await send({ people });
+    expect(ok.status).toBe(200);
+    expect(ok.body.results).toEqual([{ email: "bea@demo.example", sent: true }]);
+    expect(mail.sent.map((m) => m.to[0])).toEqual(["bea@demo.example"]);
+    expect(mail.sent[0].subject).toBe("Keystone Demo invited you to Keystone");
+  });
+
   it("stores usage reports idempotently, latest wins", async () => {
     const send = (body: object, key = opsKey) =>
       request(app()).post(`/api/licensees/${id}/usage-reports`).set("X-KS-Ops-Key", key).send(body);
