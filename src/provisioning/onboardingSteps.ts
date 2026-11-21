@@ -100,7 +100,7 @@ export const teamUsers: Executor = async (ctx) => {
       r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning", "X-KS-Tenant": l.company_code },
-        body: JSON.stringify({ users: todo.map((t) => ({ name: t.full_name, email: t.email, phone: t.phone_e164, role: t.role })) }),
+        body: JSON.stringify({ users: todo.map((t) => ({ name: t.full_name, email: t.email, phone: t.phone_e164, role: t.role })), ...(l.team_invites === "owner" ? { invites_held: true } : {}) }),
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {

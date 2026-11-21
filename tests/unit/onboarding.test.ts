@@ -383,6 +383,7 @@ describe("provisioning: team users and invites", () => {
     const out = await teamUsers(s.ctx());
     expect(out).toMatchObject({ kind: "done", output: { created: 1, existing: 1, invited: 0, held: 2 } });
     expect(s.posts).toHaveLength(1);
+    expect(s.posts[0].body.invites_held).toBe(true);
     expect(s.sent).toHaveLength(0);
   });
 
