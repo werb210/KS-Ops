@@ -378,6 +378,15 @@ describe("provisioning: team users and invites", () => {
     expect(s.sent).toHaveLength(2);
   });
 
+  it("creates the team but holds the invites when the owner chose to set up first", async () => {
+    const s = stepCtx({ ...live(), team_invites: "owner" }, { team: roster(), fetchImpl: serverOk });
+    const out = await teamUsers(s.ctx());
+    expect(out).toMatchObject({ kind: "done", output: { created: 1, existing: 1, invited: 0, held: 2 } });
+    expect(s.posts).toHaveLength(1);
+    expect(s.posts[0].body.invites_held).toBe(true);
+    expect(s.sent).toHaveLength(0);
+  });
+
   it("is done straight away when the owner is alone", async () => {
     const s = stepCtx(live(), { team: roster().slice(0, 1) });
     expect((await teamUsers(s.ctx())).kind).toBe("done");

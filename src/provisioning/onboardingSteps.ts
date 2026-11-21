@@ -100,7 +100,7 @@ export const teamUsers: Executor = async (ctx) => {
       r = await ctx.deps.fetch(`${trim(l.server_url)}/api/provision/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-KS-Ops-Key": key, "X-KS-Ops-User": "ks-ops provisioning", "X-KS-Tenant": l.company_code },
-        body: JSON.stringify({ users: todo.map((t) => ({ name: t.full_name, email: t.email, phone: t.phone_e164, role: t.role })) }),
+        body: JSON.stringify({ users: todo.map((t) => ({ name: t.full_name, email: t.email, phone: t.phone_e164, role: t.role })), ...(l.team_invites === "owner" ? { invites_held: true } : {}) }),
         signal: AbortSignal.timeout(30_000),
       });
     } catch (err) {
@@ -135,6 +135,12 @@ export const teamUsers: Executor = async (ctx) => {
       console.error("[provisioning] team members refused by KS-server", { licensee: l.id, refused });
       return { kind: "failed", error: `KS-server refused ${refused.length} team member(s): ${refused.join("; ")}. Fix them on /ops/provisioning (Team), then press Retry step.` };
     }
+  }
+
+  // KS_OPS_TEAM_INVITE_TIMING_v1 - the owner chose to set up first: the team is on the server, and the owner invites
+  // them from the portal (Settings > Users > Invite), which comes back through POST /api/licensees/:id/team/invite.
+  if (l.team_invites === "owner") {
+    return { kind: "done", output: { created, existing, invited: 0, held: others.length }, message: `team created (${others.length}); invites held until the owner sends them from the portal` };
   }
 
   const invited: string[] = [];

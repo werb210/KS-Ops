@@ -155,3 +155,11 @@ export function teamView(m: TeamMember | TeamRow) {
     ...(row.provisioned_at !== undefined ? { provisioned_at: row.provisioned_at, invite_sent_at: row.invite_sent_at ?? null } : {}),
   };
 }
+
+// KS_OPS_TEAM_INVITE_TIMING_v1 - "owner": the owner sets up first and invites the team from the portal.
+export type TeamInvites = "auto" | "owner";
+export const teamInvitesOf = (raw: unknown): TeamInvites | null => (raw === "auto" || raw === "owner" ? raw : null);
+export async function saveTeamInvites(db: { query: (sql: string, params?: unknown[]) => Promise<unknown> }, licenseeId: string, raw: unknown): Promise<void> {
+  const v = teamInvitesOf(raw);
+  if (v) await db.query("UPDATE licensees SET team_invites = $2, updated_at = now() WHERE id = $1", [licenseeId, v]);
+}

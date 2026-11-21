@@ -22,7 +22,7 @@ import { renderAgreement } from "../onboarding/agreement.js";
 import { PLAN_NAMES, publicPlans } from "../pricing.js";
 import { crmLicenseeCreated } from "../crm/triggers.js";
 import { BrandScanError, scanBrand } from "../lib/brandScan.js";
-import { parseTeam, replaceTeam } from "../onboarding/team.js"; // KS_OPS_ONBOARDING_v1
+import { parseTeam, replaceTeam, saveTeamInvites } from "../onboarding/team.js"; // KS_OPS_ONBOARDING_v1
 
 const limited = (limit: number, windowMs: number) => limiter(limit, windowMs);
 
@@ -213,6 +213,7 @@ export function publicRouter(deps: Deps): Router {
         l = { ...l, favicon_url: url } as typeof l;
       }
       await replaceTeam(deps.db, l.id, team.members);
+      await saveTeamInvites(deps.db, l.id, body.team_invites); // KS_OPS_TEAM_INVITE_TIMING_v1
       // KS_OPS_QUICK_SIGNUP_v1 - the licence agreement accepted with the tick box on the sign-up page.
       if (input.accept_agreement === true) {
         try {

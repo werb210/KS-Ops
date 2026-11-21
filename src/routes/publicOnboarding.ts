@@ -13,6 +13,7 @@ import { clientIp, h, parseBody, UUID_RE } from "../lib/http.js";
 import { audit, getLicensee, type LicenseeRow } from "../licensees/repo.js";
 import { recordSignature, renderAgreement, signedAgreement, signedCopyMail, type AgreementRow } from "../onboarding/agreement.js";
 import { getTeam, parseTeam, replaceTeam, teamLocked, teamOrOwner, teamView } from "../onboarding/team.js";
+import { saveTeamInvites } from "../onboarding/team.js"; // KS_OPS_TEAM_INVITE_TIMING_v1
 import { machineDeps } from "../provisioning/index.js";
 import type { ProvisioningStore } from "../provisioning/store.js";
 
@@ -122,7 +123,7 @@ export function publicOnboardingRouter(deps: Deps): Router {
       if (!l) return res.status(404).json(notFound);
       const rows = await getTeam(deps.db, l.id);
       const team = rows.length ? rows.map(teamView) : (await teamOrOwner(deps.db, l)).map(teamView);
-      return res.json({ company_name: l.company_name, seats: l.seats, locked: await teamLocked(store(), l.id), team });
+      return res.json({ company_name: l.company_name, seats: l.seats, locked: await teamLocked(store(), l.id), team, team_invites: l.team_invites ?? "auto" });
     }),
   );
 
@@ -139,9 +140,11 @@ export function publicOnboardingRouter(deps: Deps): Router {
       const parsed = parseTeam(req.body?.team, l, l.seats);
       if (!parsed.ok) return res.status(400).json({ errors: parsed.errors });
       await replaceTeam(deps.db, l.id, parsed.members);
+      await saveTeamInvites(deps.db, l.id, req.body?.team_invites); // KS_OPS_TEAM_INVITE_TIMING_v1
       await audit(deps.db, "website", "licensee.team_updated", l.id, { people: parsed.members.length, ip: clientIp(req) });
       await nudgeRun(store(), l.id, deps.now());
-      return res.json({ ok: true, seats: l.seats, locked: false, team: (await getTeam(deps.db, l.id)).map(teamView) });
+      const invites = (await deps.db.query("SELECT team_invites FROM licensees WHERE id = $1", [l.id])).rows[0]?.team_invites ?? "auto";
+      return res.json({ ok: true, seats: l.seats, locked: false, team: (await getTeam(deps.db, l.id)).map(teamView), team_invites: invites });
     }),
   );
 
