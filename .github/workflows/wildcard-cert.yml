@@ -43,7 +43,7 @@ jobs:
       - name: Is a new certificate needed?
         id: need
         run: |
-          exp=$(az webapp config ssl list -g "$RG" --query "[?contains(join(',', hostNames), '*.api.$DOMAIN')].expirationDate | sort(@) | [-1]" -o tsv)
+          exp=$(az webapp config ssl list -g "$RG" --query "[?contains(join(',', hostNames || `[]`), '*.api.$DOMAIN')].expirationDate | sort(@) | [-1]" -o tsv)
           echo "current certificate expires: ${exp:-none}"
           need=true
           if [ -n "$exp" ] && [ "${{ inputs.force }}" != "true" ]; then
