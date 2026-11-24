@@ -103,7 +103,9 @@ export function opsLicenseesRouter(deps: Deps): Router {
             test_brokerage: Boolean((v as any).test_brokerage), // KS_OPS_TEST_BROKERAGE_v1
             // A cancelled licensee earns nothing; its plan price stays as plan_mrr. The list showed $357 MRR for a
             // cancelled licensee.
-            mrr: v.status === "cancelled" ? 0 : v.mrr,
+            // KS_OPS_MRR_PAYING_ONLY_v2 (2026-11-24) - same rule as the dashboard: only a paying subscription counts as MRR
+            // (the list showed Big Brokerage at $1,194 while the dashboard said $0). The plan price stays as plan_mrr.
+            mrr: (v.status === "active" || v.status === "past_due") && (v as any).stripe_subscription_id && !(v as any).test_brokerage ? v.mrr : 0,
             plan_mrr: v.mrr,
             trial: row.last_report_trial ?? null,
             plan_sync_status: v.plan_sync_status,
