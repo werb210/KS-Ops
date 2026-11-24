@@ -12,6 +12,7 @@
 //   staff: added by hand or imported (with the consent they record), and edited on the prospect screen.
 // Merging: blanks are filled but staff values are kept; the status only moves forward (consent.ts nextStatus); the
 // stronger consent wins (express is never replaced by implied); booking, sign-up and reply times keep the latest.
+import { countryCode } from "../outreach/rules.js"; // KS_OPS_COUNTRY_CODE_v1 - "Canada" and "CANADA" from the CRM are stored as CA, so country filters match.
 import type { Q } from "../db.js";
 import type { Deps } from "../deps.js";
 import { bfCrmConfigured, bfCrmKey, bfCrmUrl } from "../lib/bfCrm.js";
@@ -129,7 +130,7 @@ export async function upsertProspect(db: Q, now: Date, input: ProspectInput): Pr
       [
         cur.id, cur.ver,
         cur.name ?? clean(input.name), cur.company ?? clean(input.company), cur.phone ?? clean(input.phone, 40), cur.title ?? clean(input.title),
-        cur.country ?? upper(input.country), cur.province_state ?? upper(input.province_state),
+        cur.country ?? countryCode(input.country), cur.province_state ?? upper(input.province_state),
         status, sources,
         input.source === "licensee" || input.source === "website_signup" ? clean(input.plan_interest, 40) ?? cur.plan_interest : cur.plan_interest ?? clean(input.plan_interest, 40),
         consent.consent_type, consent.consent_source ?? null, consent.consent_text ?? null, iso(consent.consent_at), iso(consent.consent_expires_at),
