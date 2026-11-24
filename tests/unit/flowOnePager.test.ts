@@ -47,3 +47,12 @@ describe("Keystone flow one-pager link", () => {
     expect(KEYSTONE_BROKER_FLOWS.CA.name).not.toBe(KEYSTONE_BROKER_FLOWS.US.name);
   });
 });
+
+// KS_OPS_COUNTRY_CODE_v1
+import { countryCode } from "../../src/outreach/rules.js";
+describe("prospect country codes", () => {
+  it("stores Canada and the United States as two-letter codes", () => {
+    expect(["Canada", "CANADA", "ca"].map(countryCode)).toEqual(["CA", "CA", "CA"]);
+    expect(["USA", "United States", "us"].map(countryCode)).toEqual(["US", "US", "US"]);
+  });
+});
