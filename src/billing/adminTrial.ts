@@ -1,3 +1,4 @@
+import { currencyForCountry } from "../pricing.js"; // KS_OPS_USD_BILLING_v1
 // KS_OPS_v13_ADMIN_TRIAL - the free trial only Keystone staff can start (Todd, Oct 24). No payment details up front.
 //
 //   Days 1-14   free, with every Pro feature
@@ -133,7 +134,7 @@ export async function startAdminTrial(
   const dates = adminTrialDates(now);
   const billed: LicenseeRow = { ...l, ...choice };
   const items = subscriptionItems(billed);
-  const ids = await priceIds(deps.db, items.map((i) => i.price_key));
+  const ids = await priceIds(deps.db, items.map((i) => i.price_key), currencyForCountry(l.country)); // KS_OPS_USD_BILLING_v1
   const metadata = { licensee_id: l.id, company_code: l.company_code, ks_admin_trial: "1" };
 
   let customer = l.stripe_customer_id;

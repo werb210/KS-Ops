@@ -9,6 +9,12 @@ export const SUPPORT_LEVELS = ["email", "priority", "premium", "dedicated"] as c
 export type SupportLevel = (typeof SUPPORT_LEVELS)[number];
 
 export const CURRENCY = "CAD";
+// KS_OPS_USD_BILLING_v1 (Todd, 2026-11-24) - US licensees pay the same numbers in US dollars (CAD $129 = USD $129).
+// CAD prices keep their original keys; each has a USD twin keyed "<key>:usd".
+export type Currency = "CAD" | "USD";
+export const CURRENCIES: readonly Currency[] = ["CAD", "USD"];
+export const currencyForCountry = (country: unknown): Currency => (String(country ?? "").toUpperCase() === "US" ? "USD" : "CAD");
+export const priceKeyIn = (key: string, currency: Currency): string => (currency === "USD" ? `${key}:usd` : key);
 
 export const isPlan = (v: unknown): v is Plan => typeof v === "string" && (PLANS as readonly string[]).includes(v);
 export const isInterval = (v: unknown): v is BillingInterval =>
@@ -427,6 +433,8 @@ export function publicPlans() {
  */
 export type PriceSpec = {
   key: string;
+  /** KS_OPS_USD_BILLING_v1 */
+  currency: Currency;
   product_key: string;
   product_name: string;
   nickname: string;
@@ -447,7 +455,7 @@ export function priceKey(kind: string, a: string, b?: string): string {
 }
 
 export function stripePriceSpecs(): PriceSpec[] {
-  const specs: PriceSpec[] = [];
+  const specs: Array<Omit<PriceSpec, "currency">> = [];
   for (const b of BILLING_INTERVALS) {
     for (const plan of PLANS) {
       specs.push({
@@ -512,7 +520,8 @@ export function stripePriceSpecs(): PriceSpec[] {
       });
     }
   }
-  return specs;
+  // KS_OPS_USD_BILLING_v1 - every price in CAD, and the same amount in USD under "<key>:usd".
+  return CURRENCIES.flatMap((c) => specs.map((sp) => ({ ...sp, key: priceKeyIn(sp.key, c), currency: c })));
 }
 
 export type LineItem = { price_key: string; quantity: number };

@@ -18,11 +18,15 @@ export async function signupSetupMissing(db: Q, e: NodeJS.ProcessEnv = process.e
     out.push({ key: "STRIPE_SECRET_KEY", label: "KS-Ops app setting STRIPE_SECRET_KEY: without it sign-ups cannot pay by card and sales is emailed to send a payment link" });
   } else {
     try {
-      const keys = stripePriceSpecs().map((p) => p.key);
-      const r = await db.query("SELECT key FROM stripe_prices WHERE key = ANY($1::text[])", [keys]);
+      // KS_OPS_USD_BILLING_v1 - CAD prices are required; missing USD prices are reported on their own line.
+      const all = stripePriceSpecs();
+      const keys = all.filter((p) => p.currency === "CAD").map((p) => p.key);
+      const usdKeys = all.filter((p) => p.currency === "USD").map((p) => p.key);
+      const r = await db.query("SELECT key FROM stripe_prices WHERE key = ANY($1::text[])", [[...keys, ...usdKeys]]);
       const found = new Set(r.rows.map((x) => String(x.key)));
       const missing = keys.filter((k) => !found.has(k));
       if (missing.length) out.push({ key: "stripe_prices", label: `Stripe prices: ${missing.length} of ${keys.length} missing. Run scripts/stripe-setup.ts once against the live Stripe account` });
+      else if (usdKeys.some((k) => !found.has(k))) out.push({ key: "stripe_prices_usd", label: "Stripe USD prices are missing, so US sign-ups cannot pay yet. Run scripts/stripe-setup.ts again" });
     } catch (err) {
       console.error("[readiness] could not read stripe_prices", err instanceof Error ? err.message : String(err));
       out.push({ key: "stripe_prices", label: "Stripe prices could not be checked (the stripe_prices table did not answer). Run scripts/stripe-setup.ts" });
