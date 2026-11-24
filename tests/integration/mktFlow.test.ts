@@ -76,6 +76,7 @@ describe("the Keystone broker email flow", () => {
     flowId = r.body.sequence.id;
     expect(r.body.sequence).toMatchObject({ kind: "flow", status: "draft", from_name: "Todd at Keystone" });
     expect(r.body.sequence.steps).toHaveLength(7);
+    expect(r.body.sequences.US).toMatchObject({ kind: "flow", status: "draft", name: "Keystone brokers - United States" });
     expect((await request(app()).post("/api/ops/marketing/flows/keystone-brokers").set(staff())).body.created).toBe(false);
     await pool.query(`UPDATE ks_mkt_sequences SET daily_new = 4 WHERE id = $1`, [flowId]);
     const en = await request(app()).post(`/api/ops/marketing/sequences/${flowId}/enroll`).set(staff()).send({ filters: {} });
@@ -91,7 +92,7 @@ describe("the Keystone broker email flow", () => {
     await runFlows(deps);
     expect(sent).toHaveLength(4);
     expect(new Set(sent.map((s) => s.from))).toEqual(new Set(["Todd at Keystone"]));
-    expect(sent[0]!.subject).toBe("Software built by commercial brokers, for commercial brokers");
+    expect(sent[0]!.subject).toBe("What if your CRM was built by a commercial broker?");
     now = at(1); await runFlows(deps);
     expect(sent).toHaveLength(5);
   });
@@ -103,7 +104,7 @@ describe("the Keystone broker email flow", () => {
     await event("scanner", "click", new Date(at(0).getTime() + 20_000)); // 20 seconds after it was sent
     sent.length = 0;
     now = at(1, 3); await runFlows(deps);
-    expect(keysSent()).toEqual(["clicker:Want a 20-mi"]);
+    expect(keysSent()).toEqual(["clicker:Want me to w"]);
     expect((await enrolment("clicker")).status).toBe("completed");
     expect((await enrolment("opener")).flow_next).toBe("o1");
     expect((await enrolment("scanner")).track).toBe("none");
@@ -120,7 +121,7 @@ describe("the Keystone broker email flow", () => {
     await pool.query(`UPDATE ks_prospects SET last_replied_at = $2 WHERE email = $1`, ["replier@brokers.example", at(2)]);
     sent.length = 0;
     now = at(8, 1); await runFlows(deps);
-    expect(keysSent().sort()).toEqual(["quiet:One login in", "scanner:One login in"]);
+    expect(keysSent().sort()).toEqual(["quiet:Six logins, ", "scanner:Six logins, "]);
     expect((await enrolment("replier")).status).toBe("stopped");
     const list = await request(app()).get("/api/ops/marketing/sequences").set(staff());
     expect(list.body.sequences.find((s: any) => s.id === flowId)).toMatchObject({ opened: 1, clicked: 1 });
