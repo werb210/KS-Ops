@@ -83,6 +83,14 @@ function setClause(data: Record<string, unknown>, first = 2): { sql: string; par
   return { sql: keys.map((k, i) => `${k} = $${i + first}`).join(", "), params: keys.map((k) => data[k]) };
 }
 
+export const DIRECTORY_EXPORT_SQL = `
+  SELECT p.id, p.name, p.email, p.phone, p.title, p.company, p.country, p.province_state, p.status, p.consent_type,
+         EXISTS (SELECT 1 FROM ks_mkt_suppressions s WHERE lower(s.email) = lower(p.email)) AS opted_out, p.updated_at
+    FROM ks_prospects p
+   WHERE ($1::uuid IS NULL OR p.id > $1::uuid)
+   ORDER BY p.id
+   LIMIT $2`;
+
 export function opsOutreachRouter(deps: Deps): Router {
   const r = Router();
   const bad = (res: any, errors: Record<string, string>) => res.status(400).json({ error: "validation_error", errors });
@@ -100,6 +108,15 @@ export function opsOutreachRouter(deps: Deps): Router {
       qualification: split(req.query.qualification), status: split(req.query.status), countries: split(req.query.countries),
       q: String(req.query.q ?? "").slice(0, 200), min_score: Number(req.query.min_score) || 0, has: String(req.query.has ?? ""),
     }, { limit: Number(req.query.limit) || 100, offset: Number(req.query.offset) || 0 }));
+  }));
+
+  // BF_SHARED_CONTACTS_STAGE2_v1 (2026-11-24) - BF-Server's shared contact list reads every Keystone prospect (brokers)
+  // with its marketing state, so lists loaded here before the shared list existed are in it too. Read only, staff only.
+  r.get("/outreach/directory-export", h(async (req, res) => {
+    const after = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(req.query.after ?? "")) ? String(req.query.after) : null;
+    const limit = Math.max(1, Math.min(2000, Math.trunc(Number(req.query.limit) || 1000)));
+    const r2 = await deps.db.query(DIRECTORY_EXPORT_SQL, [after, limit]);
+    res.json({ ok: true, items: r2.rows, next: r2.rows.length === limit ? r2.rows[r2.rows.length - 1].id : null });
   }));
 
   r.post("/outreach/import", h(async (req, res) => {

@@ -203,3 +203,23 @@ describe("mail, the LinkedIn company list and webinar sign-ups", () => {
     expect((await pool.query(`SELECT count(*)::int AS n FROM ks_mkt_touches WHERE item_id = $1`, [id])).rows[0].n).toBe(1);
   });
 });
+
+// BF_SHARED_CONTACTS_STAGE2_v1
+describe("directory export for BF's shared contact list", () => {
+  it("needs a staff sign-in", async () => {
+    expect((await request(app()).get("/api/ops/outreach/directory-export")).status).toBe(401);
+  });
+  it("lists the prospects with their marketing state, paged by id", async () => {
+    await pool.query(`INSERT INTO ks_mkt_suppressions (email, reason) VALUES ('sam@solocapital.example', 'unsubscribed') ON CONFLICT DO NOTHING`);
+    const res = await request(app()).get("/api/ops/outreach/directory-export?limit=1000").set(staff());
+    expect(res.status).toBe(200);
+    const sam = res.body.items.find((x: any) => x.email === "sam@solocapital.example");
+    expect(sam).toMatchObject({ name: "Sam Solo", opted_out: true });
+    const olive = res.body.items.find((x: any) => x.email === "olive@northfield-leasing.example");
+    expect(olive).toMatchObject({ opted_out: false });
+    const one = await request(app()).get("/api/ops/outreach/directory-export?limit=1").set(staff());
+    expect(one.body.items).toHaveLength(1);
+    expect(one.body.next).toBe(one.body.items[0].id);
+  });
+});
+
