@@ -104,7 +104,7 @@ describe("the Keystone broker email flow", () => {
     await event("scanner", "click", new Date(at(0).getTime() + 20_000)); // 20 seconds after it was sent
     sent.length = 0;
     now = at(1, 3); await runFlows(deps);
-    expect(keysSent()).toEqual(["clicker:Want a 20-mi"]);
+    expect(keysSent()).toEqual(["clicker:Want me to w"]);
     expect((await enrolment("clicker")).status).toBe("completed");
     expect((await enrolment("opener")).flow_next).toBe("o1");
     expect((await enrolment("scanner")).track).toBe("none");
@@ -121,7 +121,7 @@ describe("the Keystone broker email flow", () => {
     await pool.query(`UPDATE ks_prospects SET last_replied_at = $2 WHERE email = $1`, ["replier@brokers.example", at(2)]);
     sent.length = 0;
     now = at(8, 1); await runFlows(deps);
-    expect(keysSent().sort()).toEqual(["quiet:One login in", "scanner:One login in"]);
+    expect(keysSent().sort()).toEqual(["quiet:Six logins, ", "scanner:Six logins, "]);
     expect((await enrolment("replier")).status).toBe("stopped");
     const list = await request(app()).get("/api/ops/marketing/sequences").set(staff());
     expect(list.body.sequences.find((s: any) => s.id === flowId)).toMatchObject({ opened: 1, clicked: 1 });
