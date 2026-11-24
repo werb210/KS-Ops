@@ -36,7 +36,7 @@ describe("Marketing add-on pricing", () => {
       .toContainEqual({ price_key: "marketing_addon:monthly", quantity: 1 });
     expect(subscriptionItems({ plan: "growth", billing_interval: "monthly", seats: 2, support_level: "email" })
       .some((i) => i.price_key.startsWith("marketing_addon"))).toBe(false);
-    const specs = stripePriceSpecs().filter((s) => s.product_key === "marketing_addon");
+    const specs = stripePriceSpecs().filter((s) => s.product_key === "marketing_addon" && s.currency === "CAD");
     expect(specs.map((s) => [s.key, s.unit_amount, s.recurring])).toEqual([
       ["marketing_addon:annual", 4900 * 12, "year"],
       ["marketing_addon:monthly", 4900, "month"],

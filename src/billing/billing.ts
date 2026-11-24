@@ -7,7 +7,7 @@ import type { Deps } from "../deps.js";
 import { periodOf } from "../lib/http.js";
 import { newSignupToken, type LicenseeRow } from "../licensees/repo.js";
 import {
-  CURRENCY, MARKETING_ADDON, OVERAGE_CENTS, PLAN_NAMES, SUPPORT, computeOverage, dollars, hasMarketingAddon, monthlyCharge,
+  CURRENCY, currencyForCountry, priceKeyIn, type Currency, MARKETING_ADDON, OVERAGE_CENTS, PLAN_NAMES, SUPPORT, computeOverage, dollars, hasMarketingAddon, monthlyCharge,
   onboardingFeeCents, priceKey, subscriptionItems, trialOverlapsPeriod, type Plan, type TrialInfo,
 } from "../pricing.js";
 import { isFinal } from "../sync/usage.js";
@@ -23,10 +23,13 @@ export function requireStripe(deps: Pick<Deps, "stripe">): StripeLike {
 }
 
 /** Stripe price ids for the given keys, from the stripe_prices table (written by scripts/stripe-setup.ts). */
-export async function priceIds(db: Q, keys: string[]): Promise<Record<string, string>> {
-  const r = await db.query("SELECT key, stripe_price_id FROM stripe_prices WHERE key = ANY($1::text[])", [keys]);
-  const map: Record<string, string> = Object.fromEntries(r.rows.map((x) => [x.key as string, x.stripe_price_id as string]));
-  const missing = keys.filter((k) => !map[k]);
+export async function priceIds(db: Q, keys: string[], currency: Currency = "CAD"): Promise<Record<string, string>> {
+  // KS_OPS_USD_BILLING_v1 - the licensee's currency picks the price; the map stays keyed by the plain key.
+  const want = keys.map((k) => priceKeyIn(k, currency));
+  const r = await db.query("SELECT key, stripe_price_id FROM stripe_prices WHERE key = ANY($1::text[])", [want]);
+  const byKey: Record<string, string> = Object.fromEntries(r.rows.map((x) => [x.key as string, x.stripe_price_id as string]));
+  const map: Record<string, string> = Object.fromEntries(keys.filter((k) => byKey[priceKeyIn(k, currency)]).map((k) => [k, byKey[priceKeyIn(k, currency)]]));
+  const missing = keys.filter((k) => !map[k]).map((k) => priceKeyIn(k, currency));
   if (missing.length) {
     console.error(`[billing] Stripe prices missing (run scripts/stripe-setup.ts): ${missing.join(", ")}`);
     throw new BillingNotConfigured("stripe_prices_missing");
@@ -82,7 +85,8 @@ export async function createCheckout(
   const items = subscriptionItems(l);
   const fee = l.onboarding_fee_paid ? 0 : onboardingFeeCents(l.plan);
   const keys = [...items.map((i) => i.price_key), ...(fee > 0 ? [priceKey("onboarding", l.plan)] : [])];
-  const ids = await priceIds(deps.db, keys);
+  const currency = currencyForCountry(l.country); // KS_OPS_USD_BILLING_v1
+  const ids = await priceIds(deps.db, keys, currency);
   const urls = checkoutUrls(l.id, token ?? (await newSignupToken(deps.db, l.id)));
   const lineItems = items.map((i) => ({ price: ids[i.price_key], quantity: i.quantity }));
   if (fee > 0) lineItems.push({ price: ids[priceKey("onboarding", l.plan)], quantity: 1 });
@@ -94,7 +98,8 @@ export async function createCheckout(
     metadata: { licensee_id: l.id, company_code: l.company_code },
     subscription_data: { metadata: { licensee_id: l.id, company_code: l.company_code } },
     // Bank debit (Canadian PAD, with its mandate) by default; card when the licensee chose it.
-    ...checkoutPaymentParams(l.payment_method),
+    // KS_OPS_USD_BILLING_v1 - Canadian bank debit is CAD only; US licensees pay by card.
+    ...checkoutPaymentParams(currency === "USD" ? "card" : l.payment_method),
     ...urls,
   });
   if (!session.url) throw new Error("stripe_checkout_without_url");
@@ -111,7 +116,7 @@ export async function syncSubscription(deps: Pick<Deps, "db" | "stripe">, l: Lic
   const stripe = deps.stripe();
   if (!stripe || !l.stripe_subscription_id) return "skipped";
   const wanted = subscriptionItems(l);
-  const ids = await priceIds(deps.db, wanted.map((w) => w.price_key));
+  const ids = await priceIds(deps.db, wanted.map((w) => w.price_key), currencyForCountry(l.country));
   const sub = await stripe.subscriptions.retrieve(l.stripe_subscription_id);
   const existing: Array<{ id: string; price: { id: string }; quantity?: number }> = sub?.items?.data ?? [];
   const items: Array<Record<string, unknown>> = [];
@@ -187,7 +192,7 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
   add("Extra campaign emails (per 10,000)", overage?.campaign_email_blocks ?? 0, OVERAGE_CENTS.campaign_email_block);
   return {
     period,
-    currency: CURRENCY,
+    currency: currencyForCountry(l.country),
     billing_interval: l.billing_interval,
     lines,
     recurring: dollars(c.recurring_cents),
@@ -214,6 +219,8 @@ export async function invoicePreview(db: Q, l: LicenseeRow, period: string) {
 
 type OverageRow = {
   id: string;
+  /** KS_OPS_USD_BILLING_v1 - the licensee's country picks the invoice currency. */
+  country?: string | null;
   licensee_id: string;
   period: string;
   generated_at: Date;
@@ -355,7 +362,7 @@ async function billOverageFor(deps: Pick<Deps, "db">, stripe: StripeLike, row: O
         await stripe.invoiceItems.create(
           {
             customer,
-            currency: CURRENCY.toLowerCase(),
+            currency: currencyForCountry(row.country).toLowerCase(),
             amount,
             description: `${def.label} for ${row.period}: ${qty} at $${dollars(def.unit).toFixed(2)}`,
             metadata: { ...metadata, overage: kind },
@@ -425,7 +432,7 @@ export async function billOverage(deps: Pick<Deps, "db" | "stripe" | "now">): Pr
   const r = await deps.db.query(
     `SELECT ur.id, ur.licensee_id, ur.period, ur.generated_at, ur.minutes, ur.texts, ur.trial,
             ur.campaign_emails, ur.marketing_texts, ur.signings, ur.id_checks,
-            l.plan, l.seats, l.status, l.stripe_customer_id, l.company_name, l.addons, l.billing_interval, l.stripe_subscription_id
+            l.plan, l.seats, l.status, l.stripe_customer_id, l.company_name, l.addons, l.billing_interval, l.stripe_subscription_id, l.country
        FROM usage_reports ur JOIN licensees l ON l.id = ur.licensee_id
       WHERE ur.overage_billed_at IS NULL AND ur.period < $1
       ORDER BY ur.period LIMIT 200`,

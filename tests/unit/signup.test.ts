@@ -128,6 +128,23 @@ describe("POST /api/public/signup", () => {
     expect(params.metadata.licensee_id).toBe("44444444-4444-4444-8444-444444444444");
   });
 
+  // KS_OPS_USD_BILLING_v1 - a US brokerage pays the same prices in US dollars, by card.
+  it("charges a US brokerage in USD, by card", async () => {
+    const { db } = signupDb();
+    const stripe = fakeStripe();
+    const res = await request(createApp(makeDeps({ db, stripe: () => stripe })))
+      .post("/api/public/signup")
+      .send({ ...validSignup(), country: "US", province_state: "TX", mailing_address: "100 Main Street, Austin TX 78701", contact_phone: "(512) 555-0199" });
+    expect(res.status).toBe(201);
+    const params = (stripe.checkout.sessions.create as any).mock.calls[0][0];
+    expect(params.line_items).toEqual([
+      { price: "price_seat:growth:annual:usd", quantity: 3 },
+      { price: "price_support:priority:annual:usd", quantity: 1 },
+      { price: "price_onboarding:growth:usd", quantity: 1 },
+    ]);
+    expect(params.allowed_payment_method_types).toEqual(["card"]);
+  });
+
   it("takes extra storage blocks at sign-up, saves them and bills them in Checkout", async () => {
     const { db, inserted } = signupDb();
     const stripe = fakeStripe();

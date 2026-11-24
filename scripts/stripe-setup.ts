@@ -5,7 +5,7 @@
 import { closePool, getPool } from "../src/db.js";
 import { runMigrations } from "../src/migrate.js";
 import { realStripe } from "../src/billing/stripeClient.js";
-import { CURRENCY, stripePriceSpecs } from "../src/pricing.js";
+import { stripePriceSpecs } from "../src/pricing.js";
 
 const stripe = realStripe();
 if (!stripe) {
@@ -14,7 +14,6 @@ if (!stripe) {
 }
 const pool = getPool();
 await runMigrations(pool);
-const currency = CURRENCY.toLowerCase();
 const livemode = String(process.env.STRIPE_SECRET_KEY).startsWith("sk_live_");
 
 const existing = new Map(
@@ -32,6 +31,7 @@ for (const spec of specs) {
 let created = 0;
 let reused = 0;
 for (const spec of specs) {
+  const currency = spec.currency.toLowerCase(); // KS_OPS_USD_BILLING_v1
   const row = existing.get(spec.key);
   if (row && row.unit_amount === spec.unit_amount && (row.recurring_interval ?? null) === spec.recurring) {
     reused += 1;
