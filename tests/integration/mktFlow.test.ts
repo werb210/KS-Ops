@@ -76,6 +76,7 @@ describe("the Keystone broker email flow", () => {
     flowId = r.body.sequence.id;
     expect(r.body.sequence).toMatchObject({ kind: "flow", status: "draft", from_name: "Todd at Keystone" });
     expect(r.body.sequence.steps).toHaveLength(7);
+    expect(r.body.sequences.US).toMatchObject({ kind: "flow", status: "draft", name: "Keystone brokers - United States" });
     expect((await request(app()).post("/api/ops/marketing/flows/keystone-brokers").set(staff())).body.created).toBe(false);
     await pool.query(`UPDATE ks_mkt_sequences SET daily_new = 4 WHERE id = $1`, [flowId]);
     const en = await request(app()).post(`/api/ops/marketing/sequences/${flowId}/enroll`).set(staff()).send({ filters: {} });
@@ -91,7 +92,7 @@ describe("the Keystone broker email flow", () => {
     await runFlows(deps);
     expect(sent).toHaveLength(4);
     expect(new Set(sent.map((s) => s.from))).toEqual(new Set(["Todd at Keystone"]));
-    expect(sent[0]!.subject).toBe("Software built by commercial brokers, for commercial brokers");
+    expect(sent[0]!.subject).toBe("What if your CRM was built by a commercial broker?");
     now = at(1); await runFlows(deps);
     expect(sent).toHaveLength(5);
   });

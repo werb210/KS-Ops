@@ -33,7 +33,7 @@ import { addProspectEvent, audienceSummary, eligibilityOf, findProspects, prospe
 import { renderEmail, templateFieldsSchema } from "../marketing/render.js";
 import { marketingStatus, sendingProblem } from "../marketing/settings.js";
 import { enrollInFlow, FLOW_KEYS, FLOW_LABELS, spreadFirstEmails } from "../marketing/flow.js"; // KS_OPS_MKT_FLOW_v1
-import { KEYSTONE_BROKER_FLOW } from "../marketing/flowPresets.js";
+import { KEYSTONE_BROKER_FLOWS } from "../marketing/flowPresets.js";
 
 const MAX_IMPORT = 2000;
 const strList = z.array(z.string().trim().min(1).max(60)).max(60).optional();
@@ -440,24 +440,31 @@ export function opsMarketingRouter(deps: Deps): Router {
   }));
 
   // KS_OPS_MKT_FLOW_v1 - creates the Keystone broker email flow (draft) and its seven templates, once.
+  // KS_OPS_FLOW_US_CA_v1 - creates the Canadian and the US flow (once each, found by name) as drafts. Enrol each with
+  // POST /marketing/sequences/:id/enroll and filters { countries: ["CA"] } or { countries: ["US"] }.
   r.post("/marketing/flows/keystone-brokers", h(async (req, res) => {
-    const found = (await deps.db.query(`SELECT * FROM ks_mkt_sequences WHERE kind = 'flow' AND name = $1 LIMIT 1`, [KEYSTONE_BROKER_FLOW.name])).rows[0];
-    if (found) return res.json({ sequence: found, created: false });
     const actor = actorOf(req);
-    const steps = [];
-    for (const key of FLOW_KEYS) {
-      const t = KEYSTONE_BROKER_FLOW.templates[key];
-      const row = (await deps.db.query(
-        `INSERT INTO ks_mkt_templates (name, subject, fields, created_by) VALUES ($1, $2, $3::jsonb, $4) RETURNING id`,
-        [`Keystone flow - ${FLOW_LABELS[key]}`, t.subject, JSON.stringify(templateFieldsSchema.parse(t.fields)), actor],
+    const out: Record<string, unknown> = {};
+    let created = false;
+    for (const flow of [KEYSTONE_BROKER_FLOWS.CA, KEYSTONE_BROKER_FLOWS.US]) {
+      const found = (await deps.db.query(`SELECT * FROM ks_mkt_sequences WHERE kind = 'flow' AND name = $1 LIMIT 1`, [flow.name])).rows[0];
+      if (found) { out[flow.market] = found; continue; }
+      const steps = [];
+      for (const key of FLOW_KEYS) {
+        const t = flow.templates[key];
+        const row = (await deps.db.query(
+          `INSERT INTO ks_mkt_templates (name, subject, fields, created_by) VALUES ($1, $2, $3::jsonb, $4) RETURNING id`,
+          [`Keystone ${flow.market} flow - ${FLOW_LABELS[key]}`, t.subject, JSON.stringify(templateFieldsSchema.parse(t.fields)), actor],
+        )).rows[0];
+        steps.push({ wait_days: 0, template_id: row.id, flow_key: key });
+      }
+      out[flow.market] = (await deps.db.query(
+        `INSERT INTO ks_mkt_sequences (name, steps, status, kind, from_name, daily_new, created_by) VALUES ($1, $2::jsonb, 'draft', 'flow', $3, 50, $4) RETURNING *`,
+        [flow.name, JSON.stringify(steps), flow.from_name, actor],
       )).rows[0];
-      steps.push({ wait_days: 0, template_id: row.id, flow_key: key });
+      created = true;
     }
-    const seq = (await deps.db.query(
-      `INSERT INTO ks_mkt_sequences (name, steps, status, kind, from_name, daily_new, created_by) VALUES ($1, $2::jsonb, 'draft', 'flow', $3, 50, $4) RETURNING *`,
-      [KEYSTONE_BROKER_FLOW.name, JSON.stringify(steps), KEYSTONE_BROKER_FLOW.from_name, actor],
-    )).rows[0];
-    res.status(201).json({ sequence: seq, created: true });
+    res.status(created ? 201 : 200).json({ sequences: out, sequence: out.CA, created });
   }));
 
   r.get("/marketing/sequences/:id", h(async (req, res) => {
