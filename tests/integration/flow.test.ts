@@ -250,7 +250,7 @@ describe("staff-created licensee, ops key, usage and plan pushes", () => {
     expect(detail.body.pricing).toMatchObject({ billable_seats: 2, mrr: 468 });
     const list = await request(app()).get("/api/ops/licensees").set(staff());
     const row = list.body.licensees.find((l: any) => l.id === id);
-    expect(row).toMatchObject({ company_code: "keystone-demo", plan: "pro", status: "trial", mrr: 468 });
+    expect(row).toMatchObject({ company_code: "keystone-demo", plan: "pro", status: "trial", mrr: 0, plan_mrr: 468 }); // KS_OPS_MRR_PAYING_ONLY_v2 - a trial is not paying
     expect(row.last_report.period).toBe("2026-10");
     const dash = await request(app()).get("/api/ops/dashboard").set(staff());
     expect(dash.body).toMatchObject({ licensees: 2, trials_active: 1, open_requests: 0 });
