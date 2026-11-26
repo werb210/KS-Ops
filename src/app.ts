@@ -44,6 +44,7 @@ import { publicMarketingRouter } from "./routes/publicMarketing.js";
 import { licenseePortingRouter } from "./routes/licenseePorting.js"; // KS_OPS_NUMBER_PORTING_v1
 import { opsPortingRouter } from "./routes/opsPorting.js";
 import { portingPageRouter } from "./routes/opsPortingPage.js";
+import { licenseeTvRouter, tvPairingRouter } from "./routes/tvPairing.js"; // KS_OPS_TV_PAIRING_v1
 
 /** KS_OPS_KEYSTONE_DOMAIN - Keystone's own website (keystonecrm.online) is always allowed on the website routes. */
 export const KEYSTONE_SITE_ORIGINS = ["https://www.keystonecrm.online", "https://keystonecrm.online"];
@@ -113,6 +114,8 @@ export function createApp(deps: Deps) {
   // KS_STAFF_DIRECTORY_v1 - the apps find a staff member's brokerage from their email or mobile number.
   app.use("/api/staff-directory", cors({ origin: "*", methods: ["POST"], allowedHeaders: ["Content-Type"] }), staffDirectoryRouter(deps));
   app.use("/api/licensees", licenseeApiRouter(deps), licenseeBetaRouter(deps));
+  app.use("/api/licensees", licenseeTvRouter(deps)); // KS_OPS_TV_PAIRING_v1
+  app.use("/api/tv", tvPairingRouter(deps));
   app.use("/api/licensees", licenseeKbRouter(deps)); // KS_OPS_KB_v1 - the portal's Help Center and Ask Maya
   app.use("/api/licensees", licenseePortingRouter(deps)); // KS_OPS_NUMBER_PORTING_v1 - "Keep your existing phone number"
   app.use("/api/ops", corsFor("OPS_ALLOWED_ORIGINS"));
